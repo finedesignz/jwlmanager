@@ -111,4 +111,50 @@
 
 | REQ-ID | Phase |
 |--------|-------|
-| (pending roadmap) | |
+| ARCH-01 | Phase 1 |
+| ARCH-02 | Phase 1 |
+| ARCH-03 | Phase 1 |
+| ARCH-04 | Phase 2 |
+| ARCH-05 | Phase 1 |
+| ARCH-06 | Phase 1 |
+| ARCH-07 | Phase 1 |
+| SCHEMA-01 | Phase 3 |
+| SCHEMA-02 | Phase 3 |
+| SCHEMA-03 | Phase 4 |
+| SCHEMA-04 | Phase 4 |
+| SCHEMA-05 | Phase 4 |
+| MERGE-01 | Phase 5 |
+| MERGE-02 | Phase 5 |
+| MERGE-03 | Phase 10 |
+| MERGE-04 | Phase 5 |
+| DATA-01 | Phase 1 |
+| DATA-02 | Phase 6 |
+| DATA-03 | Phase 6 |
+| DATA-04 | Phase 6 |
+| DATA-05 | Phase 6 |
+| DATA-06 | Phase 6 |
+| DATA-07 | Phase 6 |
+| DATA-08 | Phase 1 |
+| EDIT-01 | Phase 2 |
+| EDIT-02 | Phase 7 |
+| EDIT-03 | Phase 7 |
+| EDIT-04 | Phase 7 |
+| EDIT-05 | Phase 7 |
+| EDIT-06 | Phase 7 |
+| EDIT-07 | Phase 7 |
+| IO-01 | Phase 8 |
+| IO-02 | Phase 8 |
+| IO-03 | Phase 8 |
+| IO-04 | Phase 9 |
+| SAFE-01 | Phase 2 |
+| SAFE-02 | Phase 2 |
+| SAFE-03 | Phase 2 |
+| SAFE-04 | Phase 2 |
+| SAFE-05 | Phase 1 |
+| QA-01 | Phase 1 |
+| QA-02 | Phase 2 |
+| QA-03 | Phase 1 |
+| PLAT-01 | Phase 1 |
+| PLAT-02 | Phase 11 |
+| PLAT-03 | Phase 11 |
+| PLAT-04 | Phase 11 |
