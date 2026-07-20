@@ -80,6 +80,11 @@ body {
   outline-offset: 2px;
 }
 
+.toolbar-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .empty-state {
   flex: 1;
   display: flex;
@@ -114,6 +119,39 @@ body {
   background: var(--destructive);
   color: var(--text-primary);
   font-size: 14px;
+}
+
+.error-banner-security {
+  border-left: 4px solid var(--destructive);
+}
+
+.jwlcore-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-lg);
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  font-size: 12px;
+  border-bottom: 1px solid var(--border-hairline);
+}
+
+.jwlcore-notice-dismiss {
+  flex-shrink: 0;
+  min-height: 24px;
+  min-width: 24px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.jwlcore-notice-dismiss:hover,
+.jwlcore-notice-dismiss:focus-visible {
+  color: var(--text-primary);
 }
 
 .notes-main {
