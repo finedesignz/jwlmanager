@@ -28,6 +28,9 @@ thiserror = "2"
 sha2 = "0.11"
 ts-rs = "12"
 tempfile = "3"
+# process_code/process_yr regex ports (JWLManager.py:930-931) — used only
+# against internally-sourced KeySymbol strings, never raw user input.
+regex = "1"
 
 [profile.release]
 panic = "abort"

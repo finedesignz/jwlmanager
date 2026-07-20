@@ -33,6 +33,10 @@ pub enum ArchiveError {
     ZipSlipRejected,
     #[error("session state lock was poisoned")]
     StatePoisoned,
+    #[error("bundled resources.db is missing the UI language row")]
+    MissingResourcesLanguage,
+    #[error("could not resolve a path for the bundled resources.db")]
+    MissingResourcesDb,
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
@@ -92,6 +96,13 @@ impl ArchiveError {
                 ("zip_slip_rejected", "error.archive.zip_slip_rejected")
             }
             ArchiveError::StatePoisoned => ("state_poisoned", "error.internal.state_poisoned"),
+            ArchiveError::MissingResourcesLanguage => (
+                "missing_resources_language",
+                "error.archive.missing_resources_language",
+            ),
+            ArchiveError::MissingResourcesDb => {
+                ("missing_resources_db", "error.archive.missing_resources_db")
+            }
             ArchiveError::Io(_) => ("io_error", "error.archive.io_error"),
             ArchiveError::Sqlite(_) => ("sqlite_error", "error.archive.sqlite_error"),
             ArchiveError::Zip(_) => ("zip_error", "error.archive.zip_error"),
