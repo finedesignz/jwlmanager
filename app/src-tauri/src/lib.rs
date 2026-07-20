@@ -7,6 +7,7 @@ pub mod archive;
 pub mod category;
 pub mod db;
 pub mod error;
+pub mod jwlcore;
 pub mod session;
 
 use db::notes::NotesRow;
@@ -39,16 +40,21 @@ fn open_archive(
 
 /// Tauri builder wiring for the Walking Skeleton.
 ///
-/// `open_archive` is registered here (01-07). Remaining commands are
-/// registered by later plans:
-///   - 01-03 registers `check_jwlcore`
+/// `open_archive` (01-07) and `check_jwlcore` (01-03) are registered here.
+/// `check_jwlcore` is invoked lazily by the frontend after mount, NOT from
+/// `setup()` — a missing/wrong-arch jwlCore binary must render a status,
+/// never crash launch (Pitfall 4). Remaining commands are registered by
+/// later plans:
 ///   - 01-05 registers `save_archive` / `new_archive` / `save_archive_as`
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     if let Err(err) = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(Mutex::new(None::<ArchiveSession>))
-        .invoke_handler(tauri::generate_handler![open_archive])
+        .invoke_handler(tauri::generate_handler![
+            open_archive,
+            jwlcore::loader::check_jwlcore
+        ])
         .run(tauri::generate_context!())
     {
         eprintln!("error while running tauri application: {err}");
