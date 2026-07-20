@@ -73,7 +73,7 @@
 
 ### Quality (QA)
 
-- [ ] **QA-01**: Fixture `.jwlibrary` archives exist covering each accepted schema version and are used by automated tests
+- [x] **QA-01**: Fixture `.jwlibrary` archives exist covering each accepted schema version and are used by automated tests
 - [ ] **QA-02**: Every archive-mutating operation has a round-trip test asserting semantic (normalized-table) equivalence — never byte equality
 - [ ] **QA-03**: Tests run in CI on every push
 
