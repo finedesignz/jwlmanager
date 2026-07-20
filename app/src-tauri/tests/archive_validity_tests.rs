@@ -7,6 +7,7 @@
 mod common;
 
 use jwlmanager_lib::archive::open_and_validate;
+use jwlmanager_lib::db::resources::dev_resources_db_path;
 use jwlmanager_lib::error::ArchiveError;
 use std::io::Write;
 use zip::write::SimpleFileOptions;
@@ -46,7 +47,7 @@ fn generate_v14_fixture() -> (tempfile::TempDir, std::path::PathBuf) {
 #[test]
 fn schema_v16_only() {
     let (_dir16, archive_path16) = common::generate_v16_fixture();
-    let accepted = open_and_validate(&archive_path16);
+    let accepted = open_and_validate(&archive_path16, &dev_resources_db_path());
     assert!(
         accepted.is_ok(),
         "a v16 fixture must be accepted: {:?}",
@@ -54,7 +55,7 @@ fn schema_v16_only() {
     );
 
     let (_dir14, archive_path14) = generate_v14_fixture();
-    let rejected = open_and_validate(&archive_path14);
+    let rejected = open_and_validate(&archive_path14, &dev_resources_db_path());
     match rejected {
         Err(ArchiveError::UnsupportedSchema { version }) => {
             assert_eq!(

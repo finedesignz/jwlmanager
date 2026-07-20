@@ -8,6 +8,7 @@
 mod common;
 
 use jwlmanager_lib::archive::open_and_validate;
+use jwlmanager_lib::db::resources::dev_resources_db_path;
 use jwlmanager_lib::error::ArchiveError;
 
 #[test]
@@ -47,7 +48,7 @@ fn opening_a_non_archive_file_returns_a_typed_error_not_a_panic() {
     let not_a_zip = dir.path().join("not-an-archive.jwlibrary");
     std::fs::write(&not_a_zip, b"this is definitely not a zip file").expect("write bogus file");
 
-    let result = open_and_validate(&not_a_zip);
+    let result = open_and_validate(&not_a_zip, &dev_resources_db_path());
     let err = result.expect_err("a non-zip file must be rejected, not silently accepted");
     assert!(matches!(err, ArchiveError::NotAZip));
 

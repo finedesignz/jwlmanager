@@ -24,10 +24,13 @@ use std::sync::Mutex;
 #[tauri::command]
 fn open_archive(
     path: String,
+    app: tauri::AppHandle,
     state: tauri::State<SessionState>,
 ) -> Result<Vec<NotesRow>, ErrorDto> {
     let path_buf = PathBuf::from(&path);
-    let (session, notes) = archive::open_and_validate(&path_buf)
+    let resources_db_path = db::resources::resolve_resources_db_path(&app)
+        .map_err(|err| err.to_dto("open_archive", Some(path_buf.as_path())))?;
+    let (session, notes) = archive::open_and_validate(&path_buf, &resources_db_path)
         .map_err(|err| err.to_dto("open_archive", Some(path_buf.as_path())))?;
 
     let mut guard = state.lock().map_err(|_| {

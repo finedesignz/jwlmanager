@@ -15,10 +15,15 @@ pub mod extract;
 pub mod manifest;
 
 use crate::db::notes::{query_notes, NotesRow};
+use crate::db::resources::ResourceCatalog;
 use crate::error::ArchiveError;
 use crate::session::{ArchiveSession, ManifestMeta};
 use serde::Deserialize;
 use std::path::Path;
+
+/// Fixed UI language for label synthesis (`resources.db` Languages.Code).
+/// Phase 1 has no locale switcher (UI-SPEC defers that to Phase 11).
+const UI_LANG_CODE: &str = "en";
 
 /// The only schema version Phase 1 accepts. See module docs.
 const SUPPORTED_SCHEMA_VERSION: i64 = 16;
@@ -38,8 +43,13 @@ struct UserDataBackup {
 
 /// Extracts, validates (v16-only gate), and queries `path`, returning both
 /// the populated `ArchiveSession` (managed state, later consumed by save)
-/// and the raw Notes rows for the frontend's first render.
-pub fn open_and_validate(path: &Path) -> Result<(ArchiveSession, Vec<NotesRow>), ArchiveError> {
+/// and the fully labeled Notes rows (located + independent) for the
+/// frontend's first render. `resources_db_path` is the bundled resources.db
+/// used to synthesize human-readable labels (`db::resources`).
+pub fn open_and_validate(
+    path: &Path,
+    resources_db_path: &Path,
+) -> Result<(ArchiveSession, Vec<NotesRow>), ArchiveError> {
     let temp_dir = tempfile::TempDir::new()?;
     let entries = extract::extract_zip_slip_safe(path, temp_dir.path())?;
 
@@ -70,7 +80,8 @@ pub fn open_and_validate(path: &Path) -> Result<(ArchiveSession, Vec<NotesRow>),
         });
     }
 
-    let notes = query_notes(&conn)?;
+    let catalog = ResourceCatalog::load(resources_db_path, UI_LANG_CODE)?;
+    let notes = query_notes(&conn, &catalog)?;
 
     let session = ArchiveSession {
         source_path: path.to_path_buf(),

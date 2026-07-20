@@ -10,6 +10,7 @@
 mod common;
 
 use jwlmanager_lib::archive::open_and_validate;
+use jwlmanager_lib::db::resources::dev_resources_db_path;
 
 /// The res/blank-seeded synthetic fixture, once opened through the real
 /// `open_and_validate` primitive, yields a Notes list with at least one row
@@ -18,8 +19,8 @@ use jwlmanager_lib::archive::open_and_validate;
 fn test_open_archive_lists_at_least_one_note() {
     let (_dir, archive_path) = common::generate_v16_fixture();
 
-    let (session, notes) =
-        open_and_validate(&archive_path).expect("open_and_validate must succeed for a v16 fixture");
+    let (session, notes) = open_and_validate(&archive_path, &dev_resources_db_path())
+        .expect("open_and_validate must succeed for a v16 fixture");
 
     assert!(
         !notes.is_empty(),
