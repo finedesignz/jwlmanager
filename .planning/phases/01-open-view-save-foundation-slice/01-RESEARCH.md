@@ -376,27 +376,26 @@ fn safe_extract(archive_path: &Path, dest: &Path) -> Result<(), ArchiveError> {
 
 **If this table is empty:** N/A — table populated above.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Does JW Library (the vendor app) verify the manifest `hash` on open, or is it purely advisory?**
    - What we know: the Python app computes and writes it; FUNCTIONALITY-SPEC documents the write-side contract exhaustively.
    - What's unclear: whether an incorrect hash causes JW Library to reject the archive outright, versus being ignored.
-   - Recommendation: treat as verified-on-open (safest assumption) until the env-var-gated real-archive smoke test (D-07) proves otherwise; don't relax hash-timing discipline based on an assumption it's unchecked.
+   - **RESOLVED (accepted assumption):** Treat as verified-on-open (safest assumption). Hash-last timing discipline is enforced regardless (Plan 01-05, hash computed as last step before zip). The env-var-gated real-archive smoke test (D-07) will confirm or refute against a real JW Library open; no plan relaxes hash discipline on the basis that it might be unchecked. No further action needed to plan Phase 1.
 
 2. **Is `libs/libjwlCore.dylib` single-arch or universal?**
    - What we know: one `.dylib` file covers "macOS" in the existing bridge with no OS-version/arch branching beyond `sysname == "darwin"`.
-   - What's unclear: whether it's a fat/universal binary (works on both Intel and Apple Silicon Macs) or was only ever built for one.
-   - Recommendation: run `lipo -info` or `file` on it as an early Phase 1 task; if single-arch, macOS needs the same arch-table treatment as Windows, and the `macos-latest` GH runner's current arch (Apple Silicon as of recent images) needs to be cross-checked against it.
+   - What's unclear: whether it's a fat/universal binary or single-arch.
+   - **RESOLVED (deferred to task spike):** Plan 01-03 Task 1 runs `lipo -info`/`file` on the dylib as an early acceptance step and branches the macOS arch table accordingly. Resolution is owned by that task, not left open.
 
 3. **Where is the real jwlCore source/build repo, and can a Windows arm64 build be requested or obtained?**
-   - What we know: `.github/workflows/jwlCore.config` configures *bundling* of prebuilt binaries into the PyInstaller output; it is not a build script. STACK.md confirms "Source not in this repo."
-   - What's unclear: whether upstream (`erykjj`, the original author) has a Windows arm64 build available or buildable, closing the Critical Gap above.
-   - Recommendation: this is a user/upstream-contact question, not something resolvable by more repo research — surface it directly rather than guessing.
+   - What we know: `.github/workflows/jwlCore.config` bundles prebuilt binaries; it is not a build script. Source is not in this repo.
+   - **RESOLVED (accepted per D-13a, owner decision 2026-07-19):** No Windows arm64 jwlCore binary exists and one cannot be built from this repo. Owner decided to ship BOTH Windows x64 and native arm64 builds, accepting that jwlCore-dependent features are unavailable on the native arm64 build (merge is Phase 5; Phase 1 only load+resolves, and the arm64 leg asserts a typed "no binary" error). Obtaining an upstream arm64 build is an outward-facing ask deferred to a future milestone — explicitly NOT a Phase 1 blocker. This standing external unknown is worked around by design, not silently.
 
 4. **What do `process_code`/`process_detail` actually compute?**
-   - What we know: they take `KeySymbol`, `Issue`, `Book`, `Chapter` and produce a `(code, year)` / `(detail1, year, detail2)` tuple used in the Notes list.
-   - What's unclear: exact branching logic (e.g., how Bible book+chapter references differ in display from publication symbol+issue references).
-   - Recommendation: planner should schedule a direct read of these two functions in `JWLManager.py` (not yet done in this pass — budget was prioritized to the 8 named research questions) as an early Phase 1 task, likely a spike/read task before the Notes-query implementation task.
+   - What we know: they take `KeySymbol`, `Issue`, `Book`, `Chapter` and produce tuples used in the Notes list.
+   - What's unclear: exact branching logic.
+   - **RESOLVED (deferred to task read):** Plan 01-04 Task 2 schedules a direct read of these two functions in `JWLManager.py` (cited in that task's `<read_first>`) before the Notes-query implementation. Resolution is owned by that task.
 
 ## Environment Availability
 

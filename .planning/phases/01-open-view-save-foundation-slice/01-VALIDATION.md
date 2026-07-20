@@ -1,10 +1,11 @@
 ---
 phase: 1
 slug: open-view-save-foundation-slice
-status: draft
-nyquist_compliant: false
+status: approved
+nyquist_compliant: true
 wave_0_complete: false
 created: 2026-07-19
+approved: 2026-07-19
 ---
 
 # Phase 1 — Validation Strategy
@@ -81,11 +82,13 @@ created: 2026-07-19
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references (fixtures, harness, CI, lint)
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 120s
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references (fixtures, harness, CI, lint)
+- [x] No watch-mode flags
+- [x] Feedback latency < 120s (per-task = `cargo test`; full Tauri bundle build moved to CI/manual, not a per-commit sample)
+- [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending
+**Approval:** approved 2026-07-19 (strategy sign-off — authorizes execution).
+
+**Note on `wave_0_complete`:** stays `false` until Wave 0 (fixtures + harness + CI + clippy lint) actually lands in code during execution; the executor/verifier flips it to `true` when the Wave 0 tasks are green. Signing off the *strategy* before execution is correct; claiming Wave 0 *complete* before anything is built would be false.
