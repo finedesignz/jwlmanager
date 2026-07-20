@@ -34,7 +34,7 @@
 **Plans**: 7 plans (5 waves)
 - [x] 01-01-PLAN.md — Walking Skeleton scaffold + Wave-0 harness: Tauri/React shell, full deps/tauri.conf, synthetic v16 fixture, RED e2e test (Wave 1)
 - [x] 01-07-PLAN.md — Core primitives: typed errors, category enum (ts-rs), zip-slip-safe extract, raw Notes query, open_archive + thin render (Wave 2)
-- [ ] 01-02-PLAN.md — Byte-compatible manifest, zip-slip rejection, four-leg CI matrix + clippy unwrap ban (Wave 3)
+- [x] 01-02-PLAN.md — Byte-compatible manifest, zip-slip rejection, four-leg CI matrix + clippy unwrap ban (Wave 3)
 - [ ] 01-03-PLAN.md — Arch-aware jwlCore load+resolve only; arm64-windows typed no-binary error (Wave 3)
 - [ ] 01-04-PLAN.md — Real Notes: resources.db labels, independent-notes union, TanStack Virtual at 9k rows (Wave 4)
 - [ ] 01-05-PLAN.md — Save/Save-As/New: atomic rename, hash-last, Python-app differential oracle (Wave 4)
@@ -162,7 +162,7 @@
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Open, View, Save | 2/7 | In Progress|  |
+| 1. Open, View, Save | 3/7 | In Progress|  |
 | 2. Safe Delete | 0/TBD | Not started | - |
 | 3. Schema Upgrade | 0/TBD | Not started | - |
 | 4. Schema Downgrade | 0/TBD | Not started | - |

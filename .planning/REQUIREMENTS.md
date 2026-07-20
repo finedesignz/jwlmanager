@@ -14,7 +14,7 @@
 
 - [x] **ARCH-01**: App can open a `.jwlibrary` archive and list its contents (zip envelope: `manifest.json` + `userData.db` + loose media)
 - [ ] **ARCH-02**: App can save an archive that JW Library and the existing Python app both open without error
-- [ ] **ARCH-03**: App writes `manifest.json` byte-compatibly (compact `separators=(',',':')`, `hash` = sha256 of final DB bytes, `schemaVersion` read from `PRAGMA user_version`, `creationDate` refreshed on save)
+- [x] **ARCH-03**: App writes `manifest.json` byte-compatibly (compact `separators=(',',':')`, `hash` = sha256 of final DB bytes, `schemaVersion` read from `PRAGMA user_version`, `creationDate` refreshed on save)
 - [ ] **ARCH-04**: App runs `trim_db` on save (orphan sweep, tag position re-densify via ROW_NUMBER, `Location.Title=""` where NULL, VACUUM)
 - [x] **ARCH-05**: App rejects archive paths that escape the extraction root (zip-slip protection)
 - [ ] **ARCH-06**: App can create a new empty archive
@@ -75,11 +75,11 @@
 
 - [x] **QA-01**: Fixture `.jwlibrary` archives exist covering each accepted schema version and are used by automated tests
 - [ ] **QA-02**: Every archive-mutating operation has a round-trip test asserting semantic (normalized-table) equivalence — never byte equality
-- [ ] **QA-03**: Tests run in CI on every push
+- [x] **QA-03**: Tests run in CI on every push
 
 ### Platform (PLAT)
 
-- [ ] **PLAT-01**: App builds and runs on Windows (x64 + arm64), macOS, and Linux
+- [x] **PLAT-01**: App builds and runs on Windows (x64 + arm64), macOS, and Linux
 - [ ] **PLAT-02**: Windows binaries are Authenticode-signed via Azure Trusted Signing during bundling
 - [ ] **PLAT-03**: User can switch UI language; all user-facing strings are localized
 - [ ] **PLAT-04**: User can switch theme
