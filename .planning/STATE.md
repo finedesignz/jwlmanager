@@ -3,12 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-last_updated: "2026-07-20T04:31:47.124Z"
+stopped_at: Completed 01-04-PLAN.md (resources.db label synthesis, independent-notes UNION, virtualized 9k-row Notes list)
+last_updated: "2026-07-20T05:01:30.432Z"
 progress:
   total_phases: 11
   completed_phases: 0
   total_plans: 7
-  completed_plans: 4
+  completed_plans: 5
   percent: 0
 ---
 
@@ -22,9 +23,9 @@ progress:
 ## Current Position
 
 **Phase:** 1 of 11 — Open, View, Save (Foundation Slice)
-**Plan:** 5 of 7
+**Plan:** 6 of 7
 **Status:** Ready to execute
-**Progress:** [█████░░░░░] 57%
+**Progress:** [███████░░░] 71%
 
 ## Performance Metrics
 
@@ -45,6 +46,8 @@ progress:
 - [Phase ?]: Schema gate checks manifest schemaVersion before opening extracted userData.db as SQLite (v16-only gate, 01-07)
 - [Phase 01]: 01-02: serde_json preserve_order added for manifest flatten catch-all unknown-key ordering; zip-slip test corrected to match zip 8.6.0's real enclosed_name() containment behavior (only traversal variants literally error; absolute/duplicate/symlink variants are safely contained, asserted via extraction-root escape check)
 - [Phase 01]: 01-03: jwlCore selection made arch-aware via (OS,ARCH) match, fixing jwlcore.py's OS-only selection bug; arm64-windows (no shipped binary) returns a non-loaded JwlCoreStatus (Ok), never an Err; libs/libjwlCore.dylib confirmed universal (fat) Mach-O covering x86_64+arm64; Windows dependent-DLL load required a temporary PATH prepend (LOAD_WITH_ALTERED_SEARCH_PATH alone hard-crashed the process on sqlite3_64.dll resolution)
+- [Phase 01]: 01-04: UI language hardcoded to 'en' for resources.db label synthesis; Phase 1 has no locale switcher (deferred to Phase 11)
+- [Phase 01]: 01-04: open_and_validate gained resources_db_path param, open_archive gained AppHandle param to resolve bundled resources.db (dev/prod fallback mirrors jwlcore loader)
 
 ### Todos
 
@@ -56,6 +59,6 @@ progress:
 
 ## Session Continuity
 
-**Last session:** 2026-07-20T04:27:17.802Z
-**Stopped at:** Completed 01-03-PLAN.md (arch-aware jwlCore load + check_jwlcore command)
+**Last session:** 2026-07-20T05:01:30.424Z
+**Stopped at:** Completed 01-04-PLAN.md (resources.db label synthesis, independent-notes UNION, virtualized 9k-row Notes list)
 **Next action:** Execute 01-04-PLAN.md.
