@@ -77,9 +77,15 @@ All decisions below were auto-selected in `--auto` mode using the recommended de
   `[auto] jwlCore depth — Q: "How far do we exercise jwlCore in Phase 1?" → Selected: "Load + resolve symbols only" (recommended default)`
   **Rationale:** The phase goal names jwlCore loading as one of the three riskiest integrations to prove early. Loading is the part that fails on a platform/arch mismatch; the merge call is a separate risk that belongs with the merge phase.
 
-- **D-13:** Library selection is by OS **and CPU architecture**, fixing the arm64 bug found in research. Selection logic must be unit-tested against all four binaries by name.
+- **D-13:** Library selection is by OS **and CPU architecture**, fixing the arch-blind bug found in research. Selection logic is unit-tested against the binaries that exist by name, and returns a typed "no binary for this OS+arch" error for combinations that have none (see D-13a).
   `[auto] jwlCore depth — Q: "Fix the arch-blind loading bug now or in Phase 5?" → Selected: "Now, in Phase 1" (recommended default)`
-  **Rationale:** `jwlcore.py:_platform_lib_name` selects on `sys.platform` alone, so `sys.platform` returns "linux" on aarch64 and `libjwlCore-arm64.so` never loads. PLAT-01 puts Windows arm64 in scope for this phase, and the owner's own daily build is arm64 — arch-aware selection is load-bearing here, not a Phase 5 nicety.
+  **Rationale:** `jwlcore.py:_platform_lib_name` selects on `sys.platform` alone, so `sys.platform` returns "linux" on aarch64 and `libjwlCore-arm64.so` never loads. The fix is real and valuable for the Linux x86_64-vs-aarch64 split that genuinely ships two binaries. On targets with no binary it converts a silent failure into a clear, tested error — strictly better, even where it cannot make a missing binary appear.
+
+- **D-13a (AMENDED 2026-07-19, owner decision — "ship both arm and x"):** **Windows ships BOTH a native x64 build and a native arm64 build.** Facts established during research: there is no native Windows arm64 `jwlCore` binary — `libs/` contains only `jwlCore-amd64.dll` (x64), `.github/workflows/jwlCore.config`'s `win32` rule has no arm64 entry, and the source is not in this repo, so one cannot be built here. A native arm64 process cannot load an x64 DLL (hard OS boundary). The owner's own `JWLManager_v12.1.0-arm64` build is, by PE-header inspection, **entirely x64** (`JWLManager.exe`, `jwlCore-amd64.dll`, `python313.dll` all AMD64), running on arm64 hardware under Windows 11 x64 emulation (Prism).
+
+  **Consequence, accepted knowingly:** the native arm64 build delivers the full open/view/save/browse surface, but `jwlCore` **cannot load on it**, so merge (Phase 5) and native schema-upgrade-via-jwlCore are **unavailable on the native arm64 build**. For those operations the owner uses the x64 build (natively on x64 machines, or under emulation on arm64). The x64 build remains the full-capability build; the native arm64 build is a faster/smaller open-view-save build that trades away jwlCore-dependent features until an upstream Windows arm64 jwlCore binary exists.
+
+  **Phase 1 impact:** D-12 already scopes jwlCore to load+resolve only (no merge call), so this is testable now. The `windows-11-arm` CI job's jwlCore acceptance criterion is **"`check_jwlcore()` returns a first-class, typed `no binary for aarch64-windows` error"** — NOT "jwlCore loads." Every other Phase 1 criterion (open, view, save, save-as, new, zip-slip reject, virtualized Notes) must pass on the arm64 job identically to x64. This makes D-13 (arch-aware selection) genuinely load-bearing on Windows, not just Linux. Supersedes the prior same-numbered "x64 only" draft of this decision.
 
 ### Error Surfacing (SAFE-05)
 
@@ -92,9 +98,9 @@ All decisions below were auto-selected in `--auto` mode using the recommended de
 
 ### CI Scope (QA-03)
 
-- **D-16:** GitHub Actions matrix from day one: `windows-latest` (x64), `windows-11-arm` (arm64), `ubuntu-latest`, `macos-latest`. Build + test on every push.
+- **D-16:** GitHub Actions matrix from day one: `windows-latest` (x64), `windows-11-arm` (arm64), `ubuntu-latest`, `macos-latest`. Build + test on every push. Per D-13a, the `windows-11-arm` job asserts the typed "no jwlCore binary for aarch64-windows" error rather than a successful jwlCore load; all non-jwlCore criteria pass identically to x64.
   `[auto] CI scope — Q: "Full platform matrix now, or Windows-only and expand later?" → Selected: "Full matrix now" (recommended default)`
-  **Rationale:** PLAT-01 is a Phase 1 requirement, and the arch-aware loading fix (D-13) is untestable without arm64 in the matrix. Cross-platform problems found in Phase 1 are cheap; found in Phase 11 they are a re-architecture.
+  **Rationale:** PLAT-01 is a Phase 1 requirement, and the arch-aware loading fix (D-13) is untestable without arm64 in the matrix. Since the owner ships a native arm64 build (D-13a), the `windows-11-arm` runner is mandatory, not optional. Research confirmed `windows-11-arm` is GA for public repos (GitHub, 2025-08-07) — verify this repo's visibility supports the free-tier arm64 runner.
 
 - **D-17:** Phase 1 CI runs build + test + clippy + fmt. Code signing is **not** wired up here — that is PLAT-02 in Phase 11.
   `[auto] CI scope — Q: "Add signing to CI now?" → Selected: "No — Phase 11" (recommended default)`
