@@ -43,6 +43,22 @@ pub enum ArchiveError {
     Json(#[from] serde_json::Error),
 }
 
+/// Internal jwlCore load-path error (01-03, D-12/D-13). Reserved for
+/// genuinely unexpected load faults — the arm64-windows "no binary" and
+/// other unsupported-platform cases are NOT represented here; they surface
+/// as a non-loaded `JwlCoreStatus` (Ok, not Err) at the command boundary
+/// per finding 12.
+#[derive(Debug, Error, Serialize, Clone, TS)]
+#[ts(export, export_to = "../../src/bindings/JwlCoreError.ts")]
+pub enum JwlCoreError {
+    #[error("failed to load jwlCore library: {reason}")]
+    LoadFailed { reason: String },
+    #[error("jwlCore library is missing an expected symbol: {symbol}")]
+    MissingSymbol { symbol: String },
+    #[error("could not resolve a path for the jwlCore library")]
+    PathResolutionFailed,
+}
+
 /// Sanitized, `Serialize`-able error that crosses the Tauri IPC boundary.
 /// Never includes a raw absolute path or the wrapped source error's Display.
 #[derive(Debug, Clone, Serialize, TS)]
