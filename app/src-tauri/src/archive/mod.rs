@@ -12,6 +12,7 @@
 //! SCHEMA-01/02 in Phase 3 — this deliberately narrows ARCH-01 for Phase 1.
 
 pub mod extract;
+pub mod manifest;
 
 use crate::db::notes::{query_notes, NotesRow};
 use crate::error::ArchiveError;

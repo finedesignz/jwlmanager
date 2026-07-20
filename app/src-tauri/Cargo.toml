@@ -16,7 +16,9 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# preserve_order: unknown-key round-trip preservation in Manifest's #[serde(flatten)]
+# catch-all must read back in source order, not re-sorted alphabetically (01-02).
+serde_json = { version = "1", features = ["preserve_order"] }
 rusqlite = { version = "0.40", features = ["bundled"] }
 # Pinned EXACT >=2.3 to close CVE-2025-29787 (symlink zip-slip variant); no open
 # lower bound / no caret-to-next-major admitted (finding 13, 01-01-PLAN.md).
