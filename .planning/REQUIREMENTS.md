@@ -12,11 +12,11 @@
 
 ### Archive Core (ARCH)
 
-- [ ] **ARCH-01**: App can open a `.jwlibrary` archive and list its contents (zip envelope: `manifest.json` + `userData.db` + loose media)
+- [x] **ARCH-01**: App can open a `.jwlibrary` archive and list its contents (zip envelope: `manifest.json` + `userData.db` + loose media)
 - [ ] **ARCH-02**: App can save an archive that JW Library and the existing Python app both open without error
 - [ ] **ARCH-03**: App writes `manifest.json` byte-compatibly (compact `separators=(',',':')`, `hash` = sha256 of final DB bytes, `schemaVersion` read from `PRAGMA user_version`, `creationDate` refreshed on save)
 - [ ] **ARCH-04**: App runs `trim_db` on save (orphan sweep, tag position re-densify via ROW_NUMBER, `Location.Title=""` where NULL, VACUUM)
-- [ ] **ARCH-05**: App rejects archive paths that escape the extraction root (zip-slip protection)
+- [x] **ARCH-05**: App rejects archive paths that escape the extraction root (zip-slip protection)
 - [ ] **ARCH-06**: App can create a new empty archive
 - [ ] **ARCH-07**: App can save-as to a user-chosen path without mutating the working copy
 
@@ -37,14 +37,14 @@
 
 ### Data Views (DATA)
 
-- [ ] **DATA-01**: User can view and browse Notes, with the list staying responsive at 9,000+ rows (virtualized)
+- [x] **DATA-01**: User can view and browse Notes, with the list staying responsive at 9,000+ rows (virtualized)
 - [ ] **DATA-02**: User can view and browse Highlights
 - [ ] **DATA-03**: User can view and browse Bookmarks
 - [ ] **DATA-04**: User can view and browse Annotations
 - [ ] **DATA-05**: User can view and browse Favorites
 - [ ] **DATA-06**: User can view and browse Playlists
 - [ ] **DATA-07**: User can select items (individually and in bulk) and see the valid operations for that selection
-- [ ] **DATA-08**: App identifies categories by stable enums, never by translated display strings
+- [x] **DATA-08**: App identifies categories by stable enums, never by translated display strings
 
 ### Editing (EDIT)
 
@@ -69,7 +69,7 @@
 - [ ] **SAFE-02**: All SQL is parameterized — no string-interpolated values, including IN-clauses
 - [ ] **SAFE-03**: Empty-selection operations are impossible by construction, not merely guarded by button state
 - [ ] **SAFE-04**: Every archive-mutating operation runs in a transaction that rolls back cleanly on failure
-- [ ] **SAFE-05**: Errors surface to the user with actionable context — no silently swallowed exceptions
+- [x] **SAFE-05**: Errors surface to the user with actionable context — no silently swallowed exceptions
 
 ### Quality (QA)
 
