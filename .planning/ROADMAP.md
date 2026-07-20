@@ -31,7 +31,13 @@
   3. User can create a new empty archive and save-as to a chosen path without altering the original working copy
   4. Opening a path-traversal-crafted (zip-slip) archive is rejected, not silently extracted
   5. Fixture archives + a CI pipeline exist and run on every push; errors surface to the user with actionable messages, never silently
-**Plans**: TBD
+**Plans**: 6 plans (5 waves)
+- [ ] 01-01-PLAN.md — Walking Skeleton: scaffold app/, synthetic fixture, thin open→query→render end-to-end, core primitives (Wave 1)
+- [ ] 01-02-PLAN.md — Byte-compatible manifest, zip-slip rejection, four-leg CI matrix + clippy unwrap ban (Wave 2)
+- [ ] 01-03-PLAN.md — Arch-aware jwlCore load+resolve only; arm64-windows typed no-binary error (Wave 2)
+- [ ] 01-04-PLAN.md — Real Notes: resources.db labels, independent-notes union, TanStack Virtual at 9k rows (Wave 3)
+- [ ] 01-05-PLAN.md — Save/Save-As/New: atomic rename, hash-last, Python-app differential oracle (Wave 4)
+- [ ] 01-06-PLAN.md — Command bar + typed-error surface + arm64 jwlCore capability notice (Wave 5)
 
 ### Phase 2: Safe Delete (Dry-Run + Trim + Transactions)
 **Goal**: The first destructive operation ships with the safety net the whole app depends on — dry-run preview, transactional rollback, and correct trim behavior on save.
@@ -155,7 +161,7 @@
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Open, View, Save | 0/TBD | Not started | - |
+| 1. Open, View, Save | 0/6 | Not started | - |
 | 2. Safe Delete | 0/TBD | Not started | - |
 | 3. Schema Upgrade | 0/TBD | Not started | - |
 | 4. Schema Downgrade | 0/TBD | Not started | - |
