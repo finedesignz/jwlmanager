@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
+status: verifying
 stopped_at: Completed 01-05-PLAN.md (atomic save, save-as, new_archive, ARCH-02 differential oracle)
-last_updated: "2026-07-20T05:33:18.849Z"
+last_updated: "2026-07-20T05:41:33.985Z"
 progress:
   total_phases: 11
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 7
-  completed_plans: 6
-  percent: 0
+  completed_plans: 7
+  percent: 9
 ---
 
 # Project State — JWL Manager (Tauri)
@@ -24,8 +24,8 @@ progress:
 
 **Phase:** 1 of 11 — Open, View, Save (Foundation Slice)
 **Plan:** 7 of 7
-**Status:** Ready to execute
-**Progress:** [█████████░] 86%
+**Status:** Phase complete — ready for verification
+**Progress:** [██████████] 100%
 
 ## Performance Metrics
 
@@ -52,10 +52,16 @@ progress:
 - [Phase 01]: 01-05: sync_all must be called on the write-capable ZipWriter::finish() handle, never a fresh read-only File::open (ERROR_ACCESS_DENIED on Windows)
 - [Phase 01]: 01-05: new_archive seeds from the real res/blank v16 archive, never a hand-built schema, keeping the ARCH-02 oracle non-circular
 - [Phase 01]: 01-05: ARCH-02 Python oracle is #ignore'd with an explicit reason (PySide6 not installed); recorded manual gate required before Phase 1 completion
+- [Phase 01]: 01-06: double-click guard implemented via a synchronous ref (not React state) so a second click dispatched before React re-renders the disabled button is still caught
+- [Phase 01]: 01-06: shadcn deferred; CommandBar/ErrorBanner/JwlCoreNotice use plain HTML + the existing hand-authored CSS-token stylesheet (01-01's substitute pattern), not a new component registry
+- [Phase 01]: 01-06: cancel affordance for Open/New/Save-As is the native dialog dismissal (open()/save() resolving null), not a separate abort button, per the plan's own action text
+- [Phase 01]: 01-06: lib/errors.ts keys off ArchiveError::to_dto's real snake_case code strings (not_a_zip, zip_slip_rejected, ...) read directly from error.rs, not the plan's illustrative PascalCase variant names
 
 ### Todos
 
-- None yet — Phase 1 planning not started.
+- Manual gate: `npm run tauri dev` visual boot + interaction check (01-06) — exercise all four command-bar actions, double-click Open, cancel a dialog, confirm jwlCore notice on arm64.
+- Manual gate: Linux WebKitGTK 9,000-row scroll smoothness check (01-04).
+- Manual gate: ARCH-02 Python differential oracle with PySide6 installed + real JW Library open (01-05).
 
 ### Blockers
 
@@ -63,6 +69,6 @@ progress:
 
 ## Session Continuity
 
-**Last session:** 2026-07-20T05:33:18.839Z
-**Stopped at:** Completed 01-05-PLAN.md (atomic save, save-as, new_archive, ARCH-02 differential oracle)
-**Next action:** Execute 01-04-PLAN.md.
+**Last session:** 2026-07-19T22:45:00.000Z
+**Stopped at:** Completed 01-06-PLAN.md (command bar + typed error surface + jwlCore capability notice) — Phase 1 all 7 plans complete
+**Next action:** Run gsd-verifier / gsd-validate-phase for Phase 1, then close the three recorded manual gates before Phase 2.

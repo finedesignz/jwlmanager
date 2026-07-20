@@ -6,7 +6,7 @@
 
 ## Phases
 
-- [ ] **Phase 1: Open, View, Save (Foundation Slice)** - Open a real archive, browse Notes, save back a file JW Library still opens; jwlCore loads; CI + fixtures exist from day one.
+- [x] **Phase 1: Open, View, Save (Foundation Slice)** - Open a real archive, browse Notes, save back a file JW Library still opens; jwlCore loads; CI + fixtures exist from day one. (completed 2026-07-20)
 - [ ] **Phase 2: Safe Delete (Dry-Run + Trim + Transactions)** - User can delete Notes with a dry-run preview, transactional safety, and correct post-save trim/VACUUM.
 - [ ] **Phase 3: Schema Upgrade** - Any accepted archive (v12–16) opens correctly, auto-upgraded to v16 in memory.
 - [ ] **Phase 4: Schema Downgrade** - User can explicitly save a v14-compatible archive with the LocationId remap closure, previewed via dry-run, and the working copy stays v16.
@@ -38,7 +38,7 @@
 - [x] 01-03-PLAN.md — Arch-aware jwlCore load+resolve only; arm64-windows typed no-binary error (Wave 3)
 - [x] 01-04-PLAN.md — Real Notes: resources.db labels, independent-notes union, TanStack Virtual at 9k rows (Wave 4)
 - [x] 01-05-PLAN.md — Save/Save-As/New: atomic rename, hash-last, Python-app differential oracle (Wave 4)
-- [ ] 01-06-PLAN.md — Command bar + typed-error surface + arm64 jwlCore capability notice (Wave 5)
+- [x] 01-06-PLAN.md — Command bar + typed-error surface + arm64 jwlCore capability notice (Wave 5)
 
 ### Phase 2: Safe Delete (Dry-Run + Trim + Transactions)
 **Goal**: The first destructive operation ships with the safety net the whole app depends on — dry-run preview, transactional rollback, and correct trim behavior on save.
@@ -162,7 +162,7 @@
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Open, View, Save | 6/7 | In Progress|  |
+| 1. Open, View, Save | 7/7 | Complete   | 2026-07-20 |
 | 2. Safe Delete | 0/TBD | Not started | - |
 | 3. Schema Upgrade | 0/TBD | Not started | - |
 | 4. Schema Downgrade | 0/TBD | Not started | - |
