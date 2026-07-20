@@ -1,0 +1,103 @@
+name: 'App CI'
+
+# Four-platform matrix (QA-03, PLAT-01, D-16): every push/PR touching the
+# Tauri app builds + fmt/clippy-checks + tests the Rust core AND the
+# frontend on all four target platforms. No code signing here (PLAT-02 is
+# Phase 11, D-17).
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'app/**'
+      - '.github/workflows/app-ci.yml'
+  pull_request:
+    paths:
+      - 'app/**'
+      - '.github/workflows/app-ci.yml'
+
+# Every step in every job runs under bash (git-bash on Windows runners,
+# native bash on macOS/Linux) so `grep`/`test`/shell conditionals behave
+# identically across all four legs (finding 8, 01-02-PLAN.md) instead of
+# defaulting to PowerShell on windows-latest/windows-11-arm.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  app-matrix:
+    name: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, windows-11-arm, ubuntu-latest, macos-latest]
+    # windows-11-arm (GA 2025-08-07) is a free-tier runner available on
+    # PUBLIC repositories only. If this repo is ever made private, that leg
+    # will need a self-hosted arm64 Windows runner or a paid-tier runner
+    # group instead (recorded as a SUMMARY caveat, not auto-fixed here).
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Linux Tauri system dependencies (webkit2gtk)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            build-essential \
+            libssl-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry + build artifacts
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            app/src-tauri/target
+          key: ${{ matrix.os }}-cargo-${{ hashFiles('app/src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ matrix.os }}-cargo-
+
+      - name: cargo fmt --check
+        working-directory: app/src-tauri
+        run: cargo fmt --check
+
+      - name: cargo clippy -D warnings
+        working-directory: app/src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: cargo build
+        working-directory: app/src-tauri
+        run: cargo build
+
+      - name: cargo test
+        working-directory: app/src-tauri
+        run: cargo test
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: app/package-lock.json
+
+      - name: npm ci
+        working-directory: app
+        run: npm ci
+
+      - name: npm run build
+        working-directory: app
+        run: npm run build
+
+      - name: npm test
+        working-directory: app
+        run: npm test

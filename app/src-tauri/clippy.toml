@@ -1,0 +1,9 @@
+# clippy.toml — supports the crate-level `#![deny(clippy::unwrap_used,
+# clippy::expect_used)]` gate in `src/lib.rs` (D-15). Kept minimal: the ban
+# itself lives as a crate attribute (enforced on every build, not just CI
+# invocations that remember `-D warnings`); this file exists so a future
+# clippy.toml-driven lint (e.g. `disallowed-methods`) has a natural home
+# without re-litigating where crate-wide lint config belongs.
+
+# Keep MSRV in sync with `Cargo.toml`'s `rust-version`.
+msrv = "1.88"
