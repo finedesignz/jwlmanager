@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Base capability set for the Walking Skeleton: native file-open/save dialogs only. No raw filesystem/shell scope is granted to the webview.",
+  "windows": ["main"],
+  "permissions": ["core:default", "dialog:default"]
+}

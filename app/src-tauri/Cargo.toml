@@ -1,0 +1,36 @@
+[package]
+name = "jwlmanager"
+version = "0.1.0"
+description = "JWL Manager - .jwlibrary archive manager"
+edition = "2021"
+rust-version = "1.88"
+
+[lib]
+name = "jwlmanager_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.40", features = ["bundled"] }
+# Pinned EXACT >=2.3 to close CVE-2025-29787 (symlink zip-slip variant); no open
+# lower bound / no caret-to-next-major admitted (finding 13, 01-01-PLAN.md).
+zip = "=8.6.0"
+libloading = "0.9"
+thiserror = "2"
+sha2 = "0.11"
+ts-rs = "12"
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
