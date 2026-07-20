@@ -8,7 +8,7 @@ progress:
   total_phases: 11
   completed_phases: 0
   total_plans: 7
-  completed_plans: 3
+  completed_plans: 4
   percent: 0
 ---
 
@@ -22,9 +22,9 @@ progress:
 ## Current Position
 
 **Phase:** 1 of 11 — Open, View, Save (Foundation Slice)
-**Plan:** 4 of 7
+**Plan:** 5 of 7
 **Status:** Ready to execute
-**Progress:** [████░░░░░░] 43%
+**Progress:** [█████░░░░░] 57%
 
 ## Performance Metrics
 
@@ -44,6 +44,7 @@ progress:
 - [Phase ?]: tempfile moved dev-dependency to regular dependency (ArchiveSession owns TempDir in production code, 01-07)
 - [Phase ?]: Schema gate checks manifest schemaVersion before opening extracted userData.db as SQLite (v16-only gate, 01-07)
 - [Phase 01]: 01-02: serde_json preserve_order added for manifest flatten catch-all unknown-key ordering; zip-slip test corrected to match zip 8.6.0's real enclosed_name() containment behavior (only traversal variants literally error; absolute/duplicate/symlink variants are safely contained, asserted via extraction-root escape check)
+- [Phase 01]: 01-03: jwlCore selection made arch-aware via (OS,ARCH) match, fixing jwlcore.py's OS-only selection bug; arm64-windows (no shipped binary) returns a non-loaded JwlCoreStatus (Ok), never an Err; libs/libjwlCore.dylib confirmed universal (fat) Mach-O covering x86_64+arm64; Windows dependent-DLL load required a temporary PATH prepend (LOAD_WITH_ALTERED_SEARCH_PATH alone hard-crashed the process on sqlite3_64.dll resolution)
 
 ### Todos
 
@@ -56,4 +57,5 @@ progress:
 ## Session Continuity
 
 **Last session:** 2026-07-20T04:27:17.802Z
-**Next action:** Run `/gsd-plan-phase 1` to decompose Phase 1 into executable plans.
+**Stopped at:** Completed 01-03-PLAN.md (arch-aware jwlCore load + check_jwlcore command)
+**Next action:** Execute 01-04-PLAN.md.
