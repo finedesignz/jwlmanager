@@ -13,6 +13,8 @@
 
 pub mod extract;
 pub mod manifest;
+pub mod new;
+pub mod save;
 
 use crate::db::notes::{query_notes, NotesRow};
 use crate::db::resources::ResourceCatalog;
