@@ -22,6 +22,12 @@ export function describeError(err: ErrorDto): string {
       return "Couldn't open this archive — it's missing the user_data backup every .jwlibrary backup must contain. Choose a different file or check that it hasn't been moved.";
     case "unsupported_schema":
       return "Couldn't open this archive — it was created with a schema version this app doesn't support yet (only schema v16 is supported today; broader version support is planned for a future release). Choose a different file.";
+    case "schema_too_old":
+      return "Couldn't open this archive — it was created with a schema version too old for this app to open (the oldest supported version is 12). Choose a different file or use an older version of the app.";
+    case "schema_too_new":
+      return "Couldn't open this archive — it was created by a newer version of JW Library than this app supports. Update this app to the latest version, or choose a different file.";
+    case "schema_upgrade_failed":
+      return "Couldn't open this archive — upgrading its internal database format failed. The original file is unchanged. Choose a different file or try again.";
     case "zip_slip_rejected":
       return "This archive can't be opened — it contains files that try to write outside the extraction folder, which isn't safe. This file may be corrupted or tampered with.";
     case "state_poisoned":

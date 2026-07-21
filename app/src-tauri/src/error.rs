@@ -29,6 +29,12 @@ pub enum ArchiveError {
     MissingUserDataBackup,
     #[error("unsupported schema version {version}")]
     UnsupportedSchema { version: i64 },
+    #[error("schema version {version} is too old to open (minimum supported: 12)")]
+    SchemaTooOld { version: i64 },
+    #[error("schema version {version} is newer than this app supports")]
+    SchemaTooNew { version: i64 },
+    #[error("schema upgrade failed: {reason}")]
+    SchemaUpgradeFailed { reason: String },
     #[error("archive entry rejected: possible path traversal (zip-slip)")]
     ZipSlipRejected,
     #[error("session state lock was poisoned")]
@@ -91,6 +97,15 @@ impl ArchiveError {
             ArchiveError::UnsupportedSchema { .. } => (
                 "unsupported_schema",
                 "error.archive.unsupported_schema_phase3",
+            ),
+            ArchiveError::SchemaTooOld { .. } => ("schema_too_old", "error.archive.schema_too_old"),
+            ArchiveError::SchemaTooNew { .. } => ("schema_too_new", "error.archive.schema_too_new"),
+            // `reason` is an internal detail and MUST NOT leak into the DTO
+            // (module docs above) — only the stable code + message_key cross
+            // IPC; the frontend copy is generic ("could not be completed").
+            ArchiveError::SchemaUpgradeFailed { .. } => (
+                "schema_upgrade_failed",
+                "error.archive.schema_upgrade_failed",
             ),
             ArchiveError::ZipSlipRejected => {
                 ("zip_slip_rejected", "error.archive.zip_slip_rejected")
