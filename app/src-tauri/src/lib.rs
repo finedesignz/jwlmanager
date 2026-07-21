@@ -11,9 +11,11 @@ pub mod jwlcore;
 pub mod session;
 pub mod time;
 
+use db::delete::{DryRunReport, NonEmptyNoteIds};
 use db::notes::NotesRow;
 use error::ErrorDto;
 use session::{ArchiveSession, SessionState};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -113,6 +115,99 @@ fn new_archive(path: String, state: tauri::State<SessionState>) -> Result<(), Er
     Ok(())
 }
 
+/// Previews the effect of deleting the given `Note` selection WITHOUT
+/// mutating the working copy (SAFE-01): opens the session's `db_path`,
+/// runs the real delete + trim inside a rolled-back transaction, and
+/// returns the resulting semantic [`DryRunReport`]. `ids` cannot be empty —
+/// an empty array fails IPC deserialization before this command body ever
+/// runs (SAFE-03, D2-06), because [`NonEmptyNoteIds`] is the parameter type.
+#[tauri::command]
+fn delete_notes_dry_run(
+    ids: NonEmptyNoteIds,
+    state: tauri::State<SessionState>,
+) -> Result<DryRunReport, ErrorDto> {
+    let guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("delete_notes_dry_run", None))?;
+    let session = guard.as_ref().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("delete_notes_dry_run", None)
+    })?;
+
+    let mut conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("delete_notes_dry_run", Some(session.target_path.as_path()))
+    })?;
+
+    db::delete::dry_run_delete_notes(&mut conn, &ids)
+        .map_err(|err| err.to_dto("delete_notes_dry_run", Some(session.target_path.as_path())))
+}
+
+/// Applies the delete of the given `Note` selection — a single
+/// `DELETE FROM Note` committed inside its own transaction (SAFE-02,
+/// SAFE-04). Returns a report reflecting the DIRECT Note delete only; the
+/// orphan sweep (UserMark/BlockRange/TagMap/Tag/Location) happens later, on
+/// save, via `trim_db` — the caller already saw the FULL effect via
+/// `delete_notes_dry_run` before confirming. Marks the session dirty on
+/// success.
+#[tauri::command]
+fn delete_notes_apply(
+    ids: NonEmptyNoteIds,
+    state: tauri::State<SessionState>,
+) -> Result<DryRunReport, ErrorDto> {
+    let mut guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("delete_notes_apply", None))?;
+    let session = guard.as_mut().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("delete_notes_apply", None)
+    })?;
+
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("delete_notes_apply", Some(session.target_path.as_path()))
+    })?;
+
+    // Mirrors `JWLManager.py:3681`/`trim_db`: Note deletion must run with
+    // `foreign_keys` OFF (TagMap.NoteId still references the row being
+    // deleted until trim sweeps it on save), restored via `PragmaGuard`.
+    let guard_pragma = db::pragma_guard::PragmaGuard::new(&conn).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("delete_notes_apply", Some(session.target_path.as_path()))
+    })?;
+    conn.execute_batch("PRAGMA foreign_keys = 'OFF';")
+        .map_err(|err| {
+            error::ArchiveError::from(err)
+                .to_dto("delete_notes_apply", Some(session.target_path.as_path()))
+        })?;
+
+    // `unchecked_transaction` (shared `&self`) because `guard_pragma` already
+    // holds a shared borrow of `conn` for the duration of this function —
+    // same pattern as `trim_db`/`dry_run_delete_notes`.
+    let tx = conn.unchecked_transaction().map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("delete_notes_apply", Some(session.target_path.as_path()))
+    })?;
+    let deleted = db::delete::delete_notes(&tx, &ids)
+        .map_err(|err| err.to_dto("delete_notes_apply", Some(session.target_path.as_path())))?;
+    tx.commit().map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("delete_notes_apply", Some(session.target_path.as_path()))
+    })?;
+    drop(guard_pragma);
+
+    session.dirty = true;
+
+    let mut deleted_map = BTreeMap::new();
+    if deleted > 0 {
+        deleted_map.insert("Note".to_string(), deleted);
+    }
+    Ok(DryRunReport {
+        added: BTreeMap::new(),
+        overwritten: BTreeMap::new(),
+        deleted: deleted_map,
+        total_deleted: deleted,
+    })
+}
+
 /// Tauri builder wiring for the Walking Skeleton.
 ///
 /// `open_archive` (01-07) and `check_jwlcore` (01-03) are registered here.
@@ -130,7 +225,9 @@ pub fn run() {
             jwlcore::loader::check_jwlcore,
             save_archive,
             save_as,
-            new_archive
+            new_archive,
+            delete_notes_dry_run,
+            delete_notes_apply
         ])
         .run(tauri::generate_context!())
     {
