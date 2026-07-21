@@ -31,12 +31,35 @@ fn malformed_input_produces_sanitized_error_dto() {
 }
 
 #[test]
-fn unsupported_schema_reports_a_phase3_message_key() {
-    let err = ArchiveError::UnsupportedSchema { version: 14 };
+fn schema_too_old_and_too_new_report_distinct_codes() {
+    let too_old = ArchiveError::SchemaTooOld { version: 11 };
+    let too_old_dto = too_old.to_dto("open_archive", None);
+    assert_eq!(too_old_dto.code, "schema_too_old");
+    assert!(!too_old_dto.message_key.is_empty());
+    assert_eq!(too_old_dto.safe_file_name, None);
+
+    let too_new = ArchiveError::SchemaTooNew { version: 17 };
+    let too_new_dto = too_new.to_dto("open_archive", None);
+    assert_eq!(too_new_dto.code, "schema_too_new");
+    assert!(!too_new_dto.message_key.is_empty());
+    assert_ne!(
+        too_old_dto.code, too_new_dto.code,
+        "too-old and too-new must be distinct codes"
+    );
+}
+
+#[test]
+fn schema_upgrade_failed_never_leaks_reason_into_dto() {
+    let err = ArchiveError::SchemaUpgradeFailed {
+        reason: "internal SQL detail that must not cross IPC".to_string(),
+    };
     let dto = err.to_dto("open_archive", None);
-    assert_eq!(dto.code, "unsupported_schema");
-    assert!(dto.message_key.contains("phase3"));
-    assert_eq!(dto.safe_file_name, None);
+    assert_eq!(dto.code, "schema_upgrade_failed");
+    let json = serde_json::to_string(&dto).expect("ErrorDto must serialize");
+    assert!(
+        !json.contains("internal SQL detail"),
+        "the internal reason must never leak into the DTO"
+    );
 }
 
 /// End-to-end: opening a genuinely non-zip file must surface as a typed

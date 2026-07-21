@@ -20,8 +20,6 @@ export function describeError(err: ErrorDto): string {
       return "Couldn't open this archive — it's missing the manifest.json file every .jwlibrary backup must contain. Choose a different file or check that it hasn't been moved.";
     case "missing_user_data_backup":
       return "Couldn't open this archive — it's missing the user_data backup every .jwlibrary backup must contain. Choose a different file or check that it hasn't been moved.";
-    case "unsupported_schema":
-      return "Couldn't open this archive — it was created with a schema version this app doesn't support yet (only schema v16 is supported today; broader version support is planned for a future release). Choose a different file.";
     case "schema_too_old":
       return "Couldn't open this archive — it was created with a schema version too old for this app to open (the oldest supported version is 12). Choose a different file or use an older version of the app.";
     case "schema_too_new":

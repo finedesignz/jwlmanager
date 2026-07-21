@@ -79,19 +79,33 @@ fn test_type_confused_schema_version_is_rejected_not_coerced() {
 }
 
 #[test]
-fn test_check_validity_rejects_v14_accepts_v16() {
+fn test_check_validity_accepts_v14_and_v16_rejects_out_of_range() {
     let v14 = known_manifest_json().replace("\"schemaVersion\":16", "\"schemaVersion\":14");
     let v14_result = check_validity(v14.as_bytes());
-    match v14_result {
-        Err(ArchiveError::UnsupportedSchema { version }) => assert_eq!(version, 14),
-        other => panic!("expected UnsupportedSchema {{ version: 14 }}, got {other:?}"),
-    }
+    assert!(
+        v14_result.is_ok(),
+        "a v14 manifest must now be accepted (12-16 range, SCHEMA-01/02): {v14_result:?}"
+    );
 
     let v16_result = check_validity(known_manifest_json().as_bytes());
     assert!(
         v16_result.is_ok(),
         "a v16 manifest must be accepted: {v16_result:?}"
     );
+
+    let v11 = known_manifest_json().replace("\"schemaVersion\":16", "\"schemaVersion\":11");
+    let v11_result = check_validity(v11.as_bytes());
+    match v11_result {
+        Err(ArchiveError::SchemaTooOld { version }) => assert_eq!(version, 11),
+        other => panic!("expected SchemaTooOld {{ version: 11 }}, got {other:?}"),
+    }
+
+    let v17 = known_manifest_json().replace("\"schemaVersion\":16", "\"schemaVersion\":17");
+    let v17_result = check_validity(v17.as_bytes());
+    match v17_result {
+        Err(ArchiveError::SchemaTooNew { version }) => assert_eq!(version, 17),
+        other => panic!("expected SchemaTooNew {{ version: 17 }}, got {other:?}"),
+    }
 }
 
 #[test]

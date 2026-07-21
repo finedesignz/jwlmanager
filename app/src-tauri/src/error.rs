@@ -27,8 +27,6 @@ pub enum ArchiveError {
     MissingManifest,
     #[error("archive is missing its userData.db backup")]
     MissingUserDataBackup,
-    #[error("unsupported schema version {version}")]
-    UnsupportedSchema { version: i64 },
     #[error("schema version {version} is too old to open (minimum supported: 12)")]
     SchemaTooOld { version: i64 },
     #[error("schema version {version} is newer than this app supports")]
@@ -93,10 +91,6 @@ impl ArchiveError {
             ArchiveError::MissingUserDataBackup => (
                 "missing_user_data_backup",
                 "error.archive.missing_user_data_backup",
-            ),
-            ArchiveError::UnsupportedSchema { .. } => (
-                "unsupported_schema",
-                "error.archive.unsupported_schema_phase3",
             ),
             ArchiveError::SchemaTooOld { .. } => ("schema_too_old", "error.archive.schema_too_old"),
             ArchiveError::SchemaTooNew { .. } => ("schema_too_new", "error.archive.schema_too_new"),
