@@ -10,22 +10,21 @@
 //! (crate `serde_json` `preserve_order` feature keeps them in read order
 //! rather than re-sorting alphabetically).
 //!
-//! Phase-1 schema gate is v16-ONLY (matches 01-07's `archive/mod.rs` gate,
-//! finding 2, 01-07-PLAN.md) — NOT the legacy Python `schemaVersion > 11`
-//! acceptance in `JWLManager.py:994-1008` / FUNCTIONALITY-SPEC.md §2.3.
-//! v12-15 acceptance/upgrade is SCHEMA-01/02, deferred to Phase 3.
+//! Schema gate accepts the 12-16 range (SCHEMA-01/02, 03-02-PLAN.md,
+//! finding 3), sharing `archive::{MIN,MAX,WORKING}_SUPPORTED_SCHEMA_VERSION`
+//! with `archive/mod.rs`'s independent gate so the two CANNOT drift out of
+//! lockstep. This mirrors the legacy Python `schemaVersion > 11` acceptance
+//! in `JWLManager.py:994-1008` / FUNCTIONALITY-SPEC.md §2.3 for the lower
+//! bound, plus an explicit upper bound the Python original didn't have.
 
+use crate::archive::{
+    MAX_SUPPORTED_SCHEMA_VERSION, MIN_SUPPORTED_SCHEMA_VERSION, WORKING_SCHEMA_VERSION,
+};
 use crate::error::ArchiveError;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
-
-/// The only schema version Phase 1 accepts. Mirrors
-/// `archive::SUPPORTED_SCHEMA_VERSION` (01-07) — kept as a private local
-/// constant here rather than importing across modules, since both are
-/// intentionally the same literal `16` for the same Phase-1 reason (finding 2).
-const SUPPORTED_SCHEMA_VERSION: i64 = 16;
 
 /// Top-level `manifest.json` shape. Field declaration order is load-bearing —
 /// it is what makes `serde_json::to_string` emit Python's exact key order.
@@ -81,7 +80,7 @@ impl Manifest {
                 device_name: device_name.to_string(),
                 database_name: "userData.db".to_string(),
                 hash: String::new(),
-                schema_version: SUPPORTED_SCHEMA_VERSION,
+                schema_version: WORKING_SCHEMA_VERSION,
                 extra: serde_json::Map::new(),
             },
             extra: serde_json::Map::new(),
@@ -101,16 +100,22 @@ impl Manifest {
         Ok(serde_json::to_string(self)?)
     }
 
-    /// v16-ONLY acceptance gate (Phase 1 narrowing of `check_validity`,
-    /// `JWLManager.py:994-1008`). Returns `Ok(())` iff
-    /// `userDataBackup.schemaVersion == 16`; anything else is a typed
-    /// `ArchiveError::UnsupportedSchema { version }` rejection (v12-15 is
-    /// NOT accepted here — that is SCHEMA-01/02 in Phase 3).
+    /// 12-16 range acceptance gate (widened from Phase 1's v16-ONLY narrowing
+    /// of `check_validity`, `JWLManager.py:994-1008`; SCHEMA-01/02,
+    /// 03-02-PLAN.md finding 3). Returns `Ok(())` iff
+    /// `MIN_SUPPORTED_SCHEMA_VERSION <= userDataBackup.schemaVersion <=
+    /// MAX_SUPPORTED_SCHEMA_VERSION`; below that is
+    /// `ArchiveError::SchemaTooOld`, above it `ArchiveError::SchemaTooNew`.
+    /// This gate does NOT perform the upgrade or in-range normalization
+    /// itself — that lives in `archive::mod::open_and_validate`, which is
+    /// the one place a manifest/PRAGMA mismatch is resolved (finding 4).
     pub fn check_schema_gate(&self) -> Result<(), ArchiveError> {
-        if self.user_data_backup.schema_version != SUPPORTED_SCHEMA_VERSION {
-            return Err(ArchiveError::UnsupportedSchema {
-                version: self.user_data_backup.schema_version,
-            });
+        let version = self.user_data_backup.schema_version;
+        if version < MIN_SUPPORTED_SCHEMA_VERSION {
+            return Err(ArchiveError::SchemaTooOld { version });
+        }
+        if version > MAX_SUPPORTED_SCHEMA_VERSION {
+            return Err(ArchiveError::SchemaTooNew { version });
         }
         Ok(())
     }

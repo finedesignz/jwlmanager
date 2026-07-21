@@ -21,9 +21,11 @@ use rusqlite::Connection;
 // Gate accept/reject range
 // ---------------------------------------------------------------------------
 
+type FixtureGenerator = fn() -> (tempfile::TempDir, std::path::PathBuf);
+
 #[test]
 fn test_gate_accepts_v12_through_v16() {
-    let generators: Vec<(i64, fn() -> (tempfile::TempDir, std::path::PathBuf))> = vec![
+    let generators: Vec<(i64, FixtureGenerator)> = vec![
         (12, common::generate_v12_fixture),
         (13, common::generate_v13_fixture),
         (14, common::generate_v14_fixture),
@@ -98,7 +100,10 @@ fn test_upgrade_v14_to_v16() {
             has_edition = true;
         }
     }
-    assert!(has_specialty && has_edition, "Location must have Specialty+Edition after upgrade");
+    assert!(
+        has_specialty && has_edition,
+        "Location must have Specialty+Edition after upgrade"
+    );
 
     let index_count: i64 = conn
         .query_row(
@@ -120,8 +125,13 @@ fn test_upgrade_noop_on_v16() {
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
     assert_eq!(version, 16);
-    let note_count: i64 = conn.query_row("SELECT COUNT(*) FROM Note", [], |r| r.get(0)).unwrap();
-    assert_eq!(note_count, 2, "notes must be intact, unchanged (idempotent no-op)");
+    let note_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM Note", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(
+        note_count, 2,
+        "notes must be intact, unchanged (idempotent no-op)"
+    );
 }
 
 #[test]
@@ -157,7 +167,10 @@ fn test_upgrade_skips_existing_columns() {
     }
     let mut conn = Connection::open(&db_path).expect("reopen extracted db");
     let result = upgrade_to_v16(&mut conn);
-    assert!(result.is_ok(), "upgrade must skip already-present columns: {result:?}");
+    assert!(
+        result.is_ok(),
+        "upgrade must skip already-present columns: {result:?}"
+    );
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
@@ -201,14 +214,20 @@ fn test_upgrade_preserves_representative_location_types() {
 
     let before_count: i64 = {
         let conn = Connection::open(&db_path).unwrap();
-        conn.query_row("SELECT COUNT(*) FROM Location", [], |r| r.get(0)).unwrap()
+        conn.query_row("SELECT COUNT(*) FROM Location", [], |r| r.get(0))
+            .unwrap()
     };
 
     let mut conn = Connection::open(&db_path).expect("open extracted db");
     upgrade_to_v16(&mut conn).expect("upgrade must succeed");
 
-    let after_count: i64 = conn.query_row("SELECT COUNT(*) FROM Location", [], |r| r.get(0)).unwrap();
-    assert_eq!(before_count, after_count, "Location row count must be unchanged");
+    let after_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM Location", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(
+        before_count, after_count,
+        "Location row count must be unchanged"
+    );
 
     // Representative rows seeded by insert_representative_locations: 20-25.
     let ids: Vec<i64> = {
@@ -220,16 +239,31 @@ fn test_upgrade_preserves_representative_location_types() {
             .map(|r| r.unwrap())
             .collect()
     };
-    assert_eq!(ids, vec![20, 21, 22, 23, 24, 25], "all representative Location rows must survive");
+    assert_eq!(
+        ids,
+        vec![20, 21, 22, 23, 24, 25],
+        "all representative Location rows must survive"
+    );
 }
 
 #[test]
 fn test_foreign_keys_off_around_rebuild() {
+    // upgrade_to_v16 must explicitly disable foreign_keys before the
+    // DROP TABLE Location rebuild (this build's bundled SQLite does not
+    // default to OFF, per 03-01-SUMMARY.md's empirical finding) and must
+    // never leave it enabled afterward — it only ever disables, never
+    // enables (finding 6's actual constraint).
     let (_dir, archive_path) = common::generate_v14_fixture();
     let (_zip_dir, extracted) = common::extract_to_tempdir(&archive_path);
-    let conn = Connection::open(extracted.join("userData.db")).expect("open extracted db");
-    let fk: i64 = conn.query_row("PRAGMA foreign_keys", [], |r| r.get(0)).unwrap();
-    assert_eq!(fk, 0, "foreign_keys must default OFF before the rebuild");
+    let mut conn = Connection::open(extracted.join("userData.db")).expect("open extracted db");
+    upgrade_to_v16(&mut conn).expect("upgrade must succeed");
+    let fk: i64 = conn
+        .query_row("PRAGMA foreign_keys", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(
+        fk, 0,
+        "foreign_keys must be OFF after the rebuild, never re-enabled"
+    );
 }
 
 #[test]
@@ -268,9 +302,15 @@ fn test_upgrade_rollback_leaves_original_version() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 14, "PRAGMA user_version must be unchanged after a rolled-back failure");
+    assert_eq!(
+        version, 14,
+        "PRAGMA user_version must be unchanged after a rolled-back failure"
+    );
     let after_rows = common::normalized_table_rows(&conn, "Location_poisoned");
-    assert_eq!(before_rows, after_rows, "Location_poisoned rows must be unchanged after rollback");
+    assert_eq!(
+        before_rows, after_rows,
+        "Location_poisoned rows must be unchanged after rollback"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -290,7 +330,10 @@ fn test_post_upgrade_contract_rejects_incomplete_db() {
     }
     let conn = Connection::open(&db_path).expect("reopen extracted db");
     let result = validate_v16_contract(&conn);
-    assert!(result.is_err(), "contract validator must reject a DB missing IX_Location_Media");
+    assert!(
+        result.is_err(),
+        "contract validator must reject a DB missing IX_Location_Media"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -310,7 +353,11 @@ fn test_in_range_manifest_pragma_mismatch_normalizes_manifest_low() {
     // Build a fixture: v16 DB, manifest claims 14.
     let (mismatch_dir, mismatch_path) = build_mismatch_fixture(16, 14);
     let result = open_and_validate(&mismatch_path, &dev_resources_db_path());
-    assert!(result.is_ok(), "in-range mismatch must normalize, not reject: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "in-range mismatch must normalize, not reject: {:?}",
+        result.err()
+    );
     let (session, _notes) = result.unwrap();
     assert_eq!(session.manifest.schema_version, 16);
     drop(mismatch_dir);
@@ -321,7 +368,11 @@ fn test_in_range_manifest_pragma_mismatch_normalizes_db_low() {
     // manifest schemaVersion == 16, DB PRAGMA == 14 -> must upgrade to 16.
     let (mismatch_dir, mismatch_path) = build_mismatch_fixture(14, 16);
     let result = open_and_validate(&mismatch_path, &dev_resources_db_path());
-    assert!(result.is_ok(), "in-range mismatch must normalize (upgrade), not reject: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "in-range mismatch must normalize (upgrade), not reject: {:?}",
+        result.err()
+    );
     let (session, _notes) = result.unwrap();
     assert_eq!(session.manifest.schema_version, 16);
     drop(mismatch_dir);
@@ -330,7 +381,10 @@ fn test_in_range_manifest_pragma_mismatch_normalizes_db_low() {
 /// Builds a fixture whose DB PRAGMA user_version is `db_version` (12-16,
 /// upgraded from a v14-shape fixture if lower) while the manifest declares
 /// `manifest_version` — used to test finding-4 mismatch normalization.
-fn build_mismatch_fixture(db_version: i64, manifest_version: i64) -> (tempfile::TempDir, std::path::PathBuf) {
+fn build_mismatch_fixture(
+    db_version: i64,
+    manifest_version: i64,
+) -> (tempfile::TempDir, std::path::PathBuf) {
     let (_dir, source_path) = if db_version == 16 {
         common::generate_v16_fixture()
     } else {
@@ -376,7 +430,10 @@ fn test_source_file_unchanged_after_open() {
     let before = common::read_file_bytes(&archive_path);
     let _ = open_and_validate(&archive_path, &dev_resources_db_path()).expect("must open");
     let after = common::read_file_bytes(&archive_path);
-    assert_eq!(before, after, "source file must be byte-identical after an upgrade-on-open");
+    assert_eq!(
+        before, after,
+        "source file must be byte-identical after an upgrade-on-open"
+    );
 }
 
 #[test]
@@ -404,7 +461,9 @@ fn test_saved_upgraded_archive_reopen_round_trip() {
     assert_eq!(reopened_session.manifest.schema_version, 16);
 
     let conn = Connection::open(&reopened_session.db_path).unwrap();
-    let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+    let version: i64 = conn
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(version, 16);
 
     let mut has_specialty = false;
@@ -414,7 +473,10 @@ fn test_saved_upgraded_archive_reopen_round_trip() {
             has_specialty = true;
         }
     }
-    assert!(has_specialty, "reopened archive Location must have Specialty column");
+    assert!(
+        has_specialty,
+        "reopened archive Location must have Specialty column"
+    );
 
     let index_count: i64 = conn
         .query_row(
@@ -426,7 +488,10 @@ fn test_saved_upgraded_archive_reopen_round_trip() {
     assert_eq!(index_count, 1);
 
     let post_save_notes = common::normalized_table_rows(&conn, "Note");
-    assert_eq!(pre_save_notes, post_save_notes, "notes must be unchanged across save+reopen");
+    assert_eq!(
+        pre_save_notes, post_save_notes,
+        "notes must be unchanged across save+reopen"
+    );
 
     // Saved manifest.json on disk (inside the archive) must read schemaVersion 16.
     let (_reopen_extract_dir, reopened_extracted) = common::extract_to_tempdir(&archive_path);
