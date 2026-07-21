@@ -8,7 +8,7 @@
 
 - [x] **Phase 1: Open, View, Save (Foundation Slice)** - Open a real archive, browse Notes, save back a file JW Library still opens; jwlCore loads; CI + fixtures exist from day one.
  (completed 2026-07-20)
-- [ ] **Phase 2: Safe Delete (Dry-Run + Trim + Transactions)** - User can delete Notes with a dry-run preview, transactional safety, and correct post-save trim/VACUUM.
+- [x] **Phase 2: Safe Delete (Dry-Run + Trim + Transactions)** - User can delete Notes with a dry-run preview, transactional safety, and correct post-save trim/VACUUM. (completed 2026-07-21)
 - [x] **Phase 3: Schema Upgrade** - Any accepted archive (v12–16) opens correctly, auto-upgraded to v16 in memory. (completed 2026-07-21)
 - [ ] **Phase 4: Schema Downgrade** - User can explicitly save a v14-compatible archive with the LocationId remap closure, previewed via dry-run, and the working copy stays v16.
 - [ ] **Phase 5: Two-Archive Merge** - User can merge two archives via jwlCore with a dry-run preview and matching results to the Python app.
@@ -55,7 +55,7 @@
 **Plans**: 3 plans
 - [x] 02-01-PLAN.md — Port trim_db sweep to db/trim.rs, wire into save (hash-last), Wave-0 fixtures + column-order/window-fn gates
 - [x] 02-02-PLAN.md — Delete backend: NonEmptyNoteIds, DryRunReport, dry-run/apply commands, rollback + QA-02 round-trip
-- [ ] 02-03-PLAN.md — Selection + DeletePreviewDialog confirm/cancel UI on the Phase 1 surface
+- [x] 02-03-PLAN.md — Selection + DeletePreviewDialog confirm/cancel UI on the Phase 1 surface
 
 ### Phase 3: Schema Upgrade
 **Goal**: Any archive a real user might hand the app (schema v12–16) opens correctly and is normalized to v16 in memory.
@@ -170,7 +170,7 @@
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Open, View, Save | 7/7 | Complete   | 2026-07-20 |
-| 2. Safe Delete | 2/3 | In Progress|  |
+| 2. Safe Delete | 3/3 | Complete   | 2026-07-21 |
 | 3. Schema Upgrade | 3/3 | Complete   | 2026-07-21 |
 | 4. Schema Downgrade | 0/TBD | Not started | - |
 | 5. Two-Archive Merge | 0/TBD | Not started | - |
