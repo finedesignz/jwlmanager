@@ -296,8 +296,13 @@ fn insert_representative_locations(db_path: &Path) {
 /// fidelity with a real JW Library v12/v13 database.
 fn reverse_mutate_to_pre_v16_shape(db_path: &Path, version: i64) {
     let conn = Connection::open(db_path).expect("failed to open db for reverse-mutation");
+    // foreign_keys defaults OFF in this codebase (03-RESEARCH.md verified) —
+    // explicitly OFF here too so the Location rebuild (other tables FK-ref
+    // Location) doesn't trip enforcement on a build where the SQLite default
+    // compile-time setting differs.
     conn.execute_batch(
-        "DROP INDEX IF EXISTS IX_Location_Media;
+        "PRAGMA foreign_keys = OFF;
+         DROP INDEX IF EXISTS IX_Location_Media;
          CREATE TABLE Location_old (
              LocationId     INTEGER NOT NULL PRIMARY KEY,
              BookNumber     INTEGER,
