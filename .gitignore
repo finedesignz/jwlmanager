@@ -1,0 +1,5 @@
+
+# Windows runtime DLLs staged at root for the Python app (jwlcore.py:_load_lib expects them here on win32).
+# Source of truth is libs/ — these are copies, never commit them.
+/jwlCore-amd64.dll
+/sqlite3_64.dll

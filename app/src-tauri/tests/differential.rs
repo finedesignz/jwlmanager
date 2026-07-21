@@ -41,10 +41,23 @@ fn repo_root() -> std::path::PathBuf {
 ///
 /// Run explicitly with `cargo test --test differential -- --ignored` on a
 /// machine with `res/requirements.txt` installed (the RECORDED MANUAL GATE).
+/// STATUS: **VERIFIED PASSING** on 2026-07-20 (Windows x64, Python 3.13.3,
+/// PySide6 6.9.3, jwlCore v0.32.1). The Python app's own `check_validity`
+/// accepted a Tauri-saved archive — ARCH-02's differential oracle is real,
+/// not asserted. Still `#[ignore]`d because CI (`app-ci.yml`) is a Rust-only
+/// matrix with no Python/PySide6 install step; re-run locally with:
+///   `cargo test --test differential -- --ignored`
+///
+/// Local prerequisites (one-time):
+///   1. `python -m pip install -r res/requirements.txt`
+///   2. Copy `libs/jwlCore-amd64.dll` + `libs/sqlite3_64.dll` to the repo root
+///      — on win32 `jwlcore.py:_load_lib` resolves the DLL next to itself, which
+///      is the repo root in a source checkout (PyInstaller does this in the
+///      shipped build). Both copies are gitignored.
 #[test]
-#[ignore = "requires python3 + PySide6 (res/requirements.txt) installed locally; \
-            not present in this dev/CI sandbox — see 01-05-SUMMARY.md 'ARCH-02 Oracle Status' \
-            for the required manual gate before Phase 1 is considered complete"]
+#[ignore = "requires python3 + PySide6 (res/requirements.txt) + the win32 root-staged \
+            jwlCore/sqlite3 DLLs; CI is a Rust-only matrix. VERIFIED PASSING locally \
+            2026-07-20 — see this test's doc comment and 01-05-SUMMARY.md"]
 fn python_app_opens_tauri_saved_archive() {
     let (_fixture_dir, archive_path) = common::generate_v16_fixture();
     let (session, _notes) = open_and_validate(&archive_path, &dev_resources_db_path())
@@ -68,9 +81,23 @@ fn python_app_opens_tauri_saved_archive() {
         path = saved_path
     );
 
+    // Run from the repo root and put it first on PATH. On Windows `jwlcore.py`
+    // resolves `jwlCore-amd64.dll` next to itself (repo root), and that DLL has
+    // a STATIC import of `sqlite3_64.dll` — the OS loader resolves that one via
+    // the normal search order, which does NOT include the loaded DLL's own
+    // directory. Without this the process dies with a bare
+    // "could not load: sqlite3_64.dll" before `check_validity` is ever reached.
+    // Same root cause (and same fix) as `src/jwlcore/loader.rs`.
+    let root = repo_root();
+    let path_var = std::env::var("PATH").unwrap_or_default();
+    let sep = if cfg!(windows) { ";" } else { ":" };
+    let patched_path = format!("{}{}{}", root.display(), sep, path_var);
+
     let output = Command::new("python3")
         .arg("-c")
         .arg(&python_code)
+        .current_dir(&root)
+        .env("PATH", &patched_path)
         .output()
         .expect("failed to invoke python3 — is it on PATH?");
 
