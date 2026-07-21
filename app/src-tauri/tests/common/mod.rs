@@ -187,9 +187,239 @@ fn insert_synthetic_notes(db_path: &Path) {
 /// Compact-JSON manifest matching Python's field order and
 /// `separators=(',', ':')` form (Pattern 1, 01-PATTERNS.md).
 fn synthetic_manifest_json() -> String {
-    // Field order + compact separators intentionally match
-    // JWLManager.py:979-991 / :1152-1170 (see 01-PATTERNS.md Pattern 1).
-    r#"{"name":"JWL Manager Fixture","creationDate":"2026-01-01T00:00:00Z","version":1,"type":0,"userDataBackup":{"lastModifiedDate":"2026-01-01T00:00:00Z","deviceName":"JWL Manager Fixture_test","databaseName":"userData.db","hash":"0000000000000000000000000000000000000000000000000000000000000000","schemaVersion":16}}"#.to_string()
+    synthetic_manifest_json_for(16)
+}
+
+/// Same compact-JSON manifest shape as [`synthetic_manifest_json`], but with
+/// `userDataBackup.schemaVersion` parameterized. The gate cross-checks the
+/// manifest's declared schema version against the DB's `PRAGMA user_version`
+/// (03-CONTEXT.md D3-07), so a versioned fixture must carry a manifest whose
+/// `schemaVersion` equals the DB's actual version.
+fn synthetic_manifest_json_for(version: i64) -> String {
+    format!(
+        r#"{{"name":"JWL Manager Fixture","creationDate":"2026-01-01T00:00:00Z","version":1,"type":0,"userDataBackup":{{"lastModifiedDate":"2026-01-01T00:00:00Z","deviceName":"JWL Manager Fixture_test","databaseName":"userData.db","hash":"0000000000000000000000000000000000000000000000000000000000000000","schemaVersion":{version}}}}}"#
+    )
+}
+
+/// Inserts a REPRESENTATIVE set of additional `Location` rows (03-REVIEWS.md
+/// finding 5) so 03-02's `Location_new` rebuild (`INSERT..SELECT` against the
+/// UNIQUE + three CHECK constraints ported from `JWLManager.py:1026-1062`) is
+/// actually exercised across every `Type` shape, not just the single scripture
+/// row `insert_synthetic_notes` already seeds at `LocationId = 1`. Each row is
+/// authored to LEGALLY satisfy the CHECK constraints so a correct upgrade
+/// preserves all of them (T-03-12 in 03-01-PLAN.md's threat register — a
+/// constraint violation surfaced here is a real upgrade defect, not a fixture
+/// artifact). Must run BEFORE any reverse-mutation to a pre-v16 shape, while
+/// `Location` still has the v16 `Specialty`/`Edition` columns.
+fn insert_representative_locations(db_path: &Path) {
+    let conn = Connection::open(db_path).expect("failed to open seeded userData.db");
+
+    // Publication/document: Type 0, DocumentId present (non-zero), no
+    // BookNumber/ChapterNumber/Track — satisfies the first Type-0 CHECK
+    // branch (DocumentId IS NOT NULL AND DocumentId != 0).
+    conn.execute(
+        "INSERT INTO Location (LocationId, BookNumber, ChapterNumber, DocumentId, Track, \
+         IssueTagNumber, KeySymbol, MepsLanguage, Type, Title, Specialty, Edition) \
+         VALUES (20, NULL, NULL, 1001, NULL, 0, NULL, 0, 0, 'Fixture Publication', NULL, NULL)",
+        [],
+    )
+    .expect("insert representative publication Location");
+
+    // Media/track: Type 0, Track present + non-empty KeySymbol — satisfies
+    // the Track branch of the Type-0 CHECK.
+    conn.execute(
+        "INSERT INTO Location (LocationId, BookNumber, ChapterNumber, DocumentId, Track, \
+         IssueTagNumber, KeySymbol, MepsLanguage, Type, Title, Specialty, Edition) \
+         VALUES (21, NULL, NULL, NULL, 5, 0, 'pub-media', 0, 0, 'Fixture Media Track', NULL, NULL)",
+        [],
+    )
+    .expect("insert representative media Location");
+
+    // Type 1: KeySymbol required non-empty; Book/Chapter/DocumentId/Track
+    // must all be NULL/zero per the Type-1 CHECK.
+    conn.execute(
+        "INSERT INTO Location (LocationId, BookNumber, ChapterNumber, DocumentId, Track, \
+         IssueTagNumber, KeySymbol, MepsLanguage, Type, Title, Specialty, Edition) \
+         VALUES (22, NULL, NULL, NULL, NULL, 0, 'fixture-type1', 0, 1, 'Fixture Type 1', NULL, NULL)",
+        [],
+    )
+    .expect("insert representative Type-1 Location");
+
+    // Type 2: only Book/Chapter must be NULL/zero per the Type-2/3 CHECK;
+    // everything else is unconstrained.
+    conn.execute(
+        "INSERT INTO Location (LocationId, BookNumber, ChapterNumber, DocumentId, Track, \
+         IssueTagNumber, KeySymbol, MepsLanguage, Type, Title, Specialty, Edition) \
+         VALUES (23, NULL, NULL, 0, NULL, 0, NULL, 0, 2, 'Fixture Type 2', NULL, NULL)",
+        [],
+    )
+    .expect("insert representative Type-2 Location");
+
+    // Type 3: same shape as Type 2, distinct Type value.
+    conn.execute(
+        "INSERT INTO Location (LocationId, BookNumber, ChapterNumber, DocumentId, Track, \
+         IssueTagNumber, KeySymbol, MepsLanguage, Type, Title, Specialty, Edition) \
+         VALUES (24, NULL, NULL, 0, NULL, 0, NULL, 0, 3, 'Fixture Type 3', NULL, NULL)",
+        [],
+    )
+    .expect("insert representative Type-3 Location");
+
+    // NULL-heavy: Type 2 again (least-constrained CHECK branch) but with
+    // every other nullable column left NULL — the minimal legal row.
+    conn.execute(
+        "INSERT INTO Location (LocationId, BookNumber, ChapterNumber, DocumentId, Track, \
+         IssueTagNumber, KeySymbol, MepsLanguage, Type, Title, Specialty, Edition) \
+         VALUES (25, NULL, NULL, NULL, NULL, 0, NULL, NULL, 2, NULL, NULL, NULL)",
+        [],
+    )
+    .expect("insert representative NULL-heavy Location");
+}
+
+/// Reverse-mutates a v16-shaped `userData.db` (as seeded by
+/// [`seed_from_res_blank`]) down to the pre-v16 `Location` shape and sets
+/// `PRAGMA user_version`.
+///
+/// This applies ONLY the documented, verified v16<->v14 delta from
+/// `.planning/research/FUNCTIONALITY-SPEC.md` and `JWLManager.py:1016-1070`:
+/// drop the `Specialty`/`Edition` columns from `Location`, drop the
+/// `IX_Location_Media` unique index (which is defined over those columns and
+/// cannot exist without them), then set the requested version.
+///
+/// IMPORTANT (03-RESEARCH.md Pitfall 2): this is the ONLY schema delta this
+/// codebase has independently verified below v16. For `version < 14` (v11,
+/// v12, v13) this fixture is a REVERSE-MUTATED v16 shape carrying the same
+/// pre-v16 Location shape as v14/v15, NOT an independently-verified v12/v13
+/// archive — no further schema differences below v14 are known or asserted
+/// here. These fixtures exist to exercise the upgrade CODE PATH (gate
+/// accept/reject + the single monolithic upgrade transformation, D3-01)
+/// against every acceptable/rejectable `user_version`, not to claim bit-exact
+/// fidelity with a real JW Library v12/v13 database.
+fn reverse_mutate_to_pre_v16_shape(db_path: &Path, version: i64) {
+    let conn = Connection::open(db_path).expect("failed to open db for reverse-mutation");
+    conn.execute_batch(
+        "DROP INDEX IF EXISTS IX_Location_Media;
+         CREATE TABLE Location_old (
+             LocationId     INTEGER NOT NULL PRIMARY KEY,
+             BookNumber     INTEGER,
+             ChapterNumber  INTEGER,
+             DocumentId     INTEGER,
+             Track          INTEGER,
+             IssueTagNumber INTEGER NOT NULL DEFAULT 0,
+             KeySymbol      TEXT,
+             MepsLanguage   INTEGER,
+             Type           INTEGER NOT NULL,
+             Title          TEXT
+         );
+         INSERT INTO Location_old SELECT LocationId, BookNumber, ChapterNumber, DocumentId, \
+             Track, IssueTagNumber, KeySymbol, MepsLanguage, Type, Title FROM Location;
+         DROP TABLE Location;
+         ALTER TABLE Location_old RENAME TO Location;",
+    )
+    .expect("failed to reverse-mutate Location to pre-v16 shape");
+    conn.pragma_update(None, "user_version", version)
+        .expect("failed to set PRAGMA user_version");
+}
+
+/// Shared archive-assembly step used by every `.jwlibrary` fixture generator:
+/// zips the seeded `userData.db` + `default_thumbnail.png` from `work_dir`
+/// alongside the given `manifest.json` body, plus the same loose-media and
+/// unknown-entry fixtures `generate_v16_fixture` has always included (01-05
+/// preservation round-trip coverage).
+fn build_fixture_archive(work_dir: &Path, manifest_json: &str) -> (TempDir, PathBuf) {
+    let archive_dir = TempDir::new().expect("failed to create fixture archive dir");
+    let archive_path = archive_dir.path().join("fixture.jwlibrary");
+    let zip_file = fs::File::create(&archive_path).expect("failed to create fixture archive");
+    let mut writer = ZipWriter::new(zip_file);
+    let options = SimpleFileOptions::default();
+
+    writer
+        .start_file("manifest.json", options)
+        .expect("start manifest.json");
+    writer
+        .write_all(manifest_json.as_bytes())
+        .expect("write manifest.json");
+
+    for name in ["userData.db", "default_thumbnail.png"] {
+        writer.start_file(name, options).expect("start entry");
+        let bytes = fs::read(work_dir.join(name)).expect("read seeded entry");
+        writer.write_all(&bytes).expect("write entry");
+    }
+
+    writer
+        .start_file("media/test.png", options)
+        .expect("start media entry");
+    writer
+        .write_all(b"\x89PNG\r\n\x1a\nfixture-not-a-real-png")
+        .expect("write media entry");
+
+    writer
+        .start_file("future_unknown.dat", options)
+        .expect("start unknown entry");
+    writer
+        .write_all(b"forward-compat placeholder bytes")
+        .expect("write unknown entry");
+
+    writer.finish().expect("finish fixture zip");
+    (archive_dir, archive_path)
+}
+
+/// Builds a synthetic `.jwlibrary` fixture at an arbitrary pre-v16
+/// `user_version` (11-15), seeded from `res/blank`, carrying the same
+/// located/independent Notes as [`generate_v16_fixture`] PLUS the
+/// representative `Location` Type coverage from
+/// [`insert_representative_locations`] (finding 5), then reverse-mutated to
+/// the pre-v16 `Location` shape (see [`reverse_mutate_to_pre_v16_shape`] for
+/// the v12/v13 fidelity caveat). The manifest's `schemaVersion` is set to the
+/// same `version` (D3-07 cross-check).
+pub fn generate_fixture_pre_v16_shape(version: i64) -> (TempDir, PathBuf) {
+    assert!(
+        (11..16).contains(&version),
+        "generate_fixture_pre_v16_shape is for versions 11-15; got {version}"
+    );
+    let work_dir = TempDir::new().expect("failed to create fixture work dir");
+    seed_from_res_blank(work_dir.path());
+    let db_path = work_dir.path().join("userData.db");
+    insert_synthetic_notes(&db_path);
+    insert_representative_locations(&db_path);
+    reverse_mutate_to_pre_v16_shape(&db_path, version);
+
+    build_fixture_archive(work_dir.path(), &synthetic_manifest_json_for(version))
+}
+
+/// Builds a synthetic out-of-range `.jwlibrary` fixture at `user_version =
+/// 17` (a hypothetical newer-than-supported schema, D3-09's reject path).
+/// Keeps the full v16 `Location` shape (Specialty/Edition + IX_Location_Media)
+/// since a real newer schema would only ever add to v16, never regress it.
+pub fn generate_fixture_v17_shape() -> (TempDir, PathBuf) {
+    let work_dir = TempDir::new().expect("failed to create fixture work dir");
+    seed_from_res_blank(work_dir.path());
+    let db_path = work_dir.path().join("userData.db");
+    insert_synthetic_notes(&db_path);
+    insert_representative_locations(&db_path);
+    let conn = Connection::open(&db_path).expect("failed to open db to set user_version");
+    conn.pragma_update(None, "user_version", 17_i64)
+        .expect("failed to set PRAGMA user_version to 17");
+    drop(conn);
+
+    build_fixture_archive(work_dir.path(), &synthetic_manifest_json_for(17))
+}
+
+/// Thin by-name wrappers over [`generate_fixture_pre_v16_shape`] for callers
+/// that want a specific version without repeating the magic number.
+pub fn generate_v11_fixture() -> (TempDir, PathBuf) {
+    generate_fixture_pre_v16_shape(11)
+}
+pub fn generate_v12_fixture() -> (TempDir, PathBuf) {
+    generate_fixture_pre_v16_shape(12)
+}
+pub fn generate_v13_fixture() -> (TempDir, PathBuf) {
+    generate_fixture_pre_v16_shape(13)
+}
+pub fn generate_v14_fixture() -> (TempDir, PathBuf) {
+    generate_fixture_pre_v16_shape(14)
+}
+pub fn generate_v15_fixture() -> (TempDir, PathBuf) {
+    generate_fixture_pre_v16_shape(15)
 }
 
 /// Builds a full synthetic v16 `.jwlibrary` fixture, seeded from `res/blank`,
@@ -206,43 +436,7 @@ pub fn generate_v16_fixture() -> (TempDir, PathBuf) {
     seed_from_res_blank(work_dir.path());
     insert_synthetic_notes(&work_dir.path().join("userData.db"));
 
-    let archive_dir = TempDir::new().expect("failed to create fixture archive dir");
-    let archive_path = archive_dir.path().join("fixture.jwlibrary");
-    let zip_file = fs::File::create(&archive_path).expect("failed to create fixture archive");
-    let mut writer = ZipWriter::new(zip_file);
-    let options = SimpleFileOptions::default();
-
-    writer
-        .start_file("manifest.json", options)
-        .expect("start manifest.json");
-    writer
-        .write_all(synthetic_manifest_json().as_bytes())
-        .expect("write manifest.json");
-
-    for name in ["userData.db", "default_thumbnail.png"] {
-        writer.start_file(name, options).expect("start entry");
-        let bytes = fs::read(work_dir.path().join(name)).expect("read seeded entry");
-        writer.write_all(&bytes).expect("write entry");
-    }
-
-    // Loose-media entry (01-05 preservation test).
-    writer
-        .start_file("media/test.png", options)
-        .expect("start media entry");
-    writer
-        .write_all(b"\x89PNG\r\n\x1a\nfixture-not-a-real-png")
-        .expect("write media entry");
-
-    // Unknown/forward-compat entry (01-05 preservation test).
-    writer
-        .start_file("future_unknown.dat", options)
-        .expect("start unknown entry");
-    writer
-        .write_all(b"forward-compat placeholder bytes")
-        .expect("write unknown entry");
-
-    writer.finish().expect("finish fixture zip");
-    (archive_dir, archive_path)
+    build_fixture_archive(work_dir.path(), &synthetic_manifest_json())
 }
 
 // ---------------------------------------------------------------------------
