@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: verifying
-stopped_at: Completed 01-05-PLAN.md (atomic save, save-as, new_archive, ARCH-02 differential oracle)
-last_updated: "2026-07-20T05:41:33.985Z"
+stopped_at: Completed 01-06-PLAN.md (command bar + typed error surface + jwlCore capability notice) — Phase 1 all 7 plans complete
+last_updated: "2026-07-21T04:29:29.902Z"
 progress:
   total_phases: 11
   completed_phases: 1
-  total_plans: 7
-  completed_plans: 7
+  total_plans: 10
+  completed_plans: 8
   percent: 9
 ---
 
@@ -18,14 +18,16 @@ progress:
 ## Project Reference
 
 **Core value:** Never lose or corrupt a user's archive.
-**Current focus:** Phase 1 — Open, View, Save (Foundation Slice)
+**Current focus:** Phase 3 — Schema Upgrade
 
 ## Current Position
 
+Phase: 3 (Schema Upgrade) — EXECUTING
+Plan: 1 of 3
 **Phase:** 1 of 11 — Open, View, Save (Foundation Slice)
 **Plan:** 7 of 7
 **Status:** Phase complete — ready for verification
-**Progress:** [██████████] 100%
+**Progress:** [████████░░] 80%
 
 ## Performance Metrics
 
@@ -56,6 +58,7 @@ progress:
 - [Phase 01]: 01-06: shadcn deferred; CommandBar/ErrorBanner/JwlCoreNotice use plain HTML + the existing hand-authored CSS-token stylesheet (01-01's substitute pattern), not a new component registry
 - [Phase 01]: 01-06: cancel affordance for Open/New/Save-As is the native dialog dismissal (open()/save() resolving null), not a separate abort button, per the plan's own action text
 - [Phase 01]: 01-06: lib/errors.ts keys off ArchiveError::to_dto's real snake_case code strings (not_a_zip, zip_slip_rejected, ...) read directly from error.rs, not the plan's illustrative PascalCase variant names
+- [Phase ?]: v12/v13 fixtures apply only the documented v16<->v14 delta; not independently-verified
 
 ### Todos
 
@@ -69,6 +72,6 @@ progress:
 
 ## Session Continuity
 
-**Last session:** 2026-07-19T22:45:00.000Z
+**Last session:** 2026-07-21T04:29:05.669Z
 **Stopped at:** Completed 01-06-PLAN.md (command bar + typed error surface + jwlCore capability notice) — Phase 1 all 7 plans complete
 **Next action:** Run gsd-verifier / gsd-validate-phase for Phase 1, then close the three recorded manual gates before Phase 2.
