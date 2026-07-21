@@ -70,6 +70,70 @@ fn python_app_opens_tauri_saved_archive() {
     )
     .expect("save_archive must succeed before handing off to the Python oracle");
 
+    let (ok, stdout, stderr) = run_python_check_validity(&archive_path);
+    assert!(
+        ok,
+        "Python app (JWLManager.check_validity) did not accept the Tauri-saved archive.\n\
+         stdout: {stdout}\nstderr: {stderr}"
+    );
+}
+
+/// Extended v14-upgrade oracle (03-03, D3-11 code-path proof): seeds a
+/// synthetic pre-v16-shaped fixture at `user_version = 14`, runs it through
+/// `open_and_validate` (which now upgrades it to v16 in-place, 03-02), saves
+/// it through the Tauri save path, then hands the result to the SAME Python
+/// `check_validity` oracle as [`python_app_opens_tauri_saved_archive`].
+///
+/// This proves that an UPGRADED archive — not just a synthetic archive that
+/// was already at v16 — is accepted by the Python app / JW Library
+/// ecosystem, which is the reason this phase exists (03-CONTEXT.md D3-11).
+///
+/// `#[ignore]`d for the same reason as the v16 oracle above (RECORDED MANUAL
+/// GATE, CI is Rust-only, no PySide6). Run explicitly with:
+///   `cargo test --test differential -- --ignored`
+///
+/// STATUS: pending the owner's local run — do NOT mark VERIFIED PASSING
+/// until a human has actually executed this test and confirmed
+/// `ORACLE_RESULT:PASS` (finding 9 / no-overclaim, T-03-08).
+#[test]
+#[ignore = "requires python3 + PySide6 (res/requirements.txt) + the win32 root-staged \
+            jwlCore/sqlite3 DLLs; CI is a Rust-only matrix. RECORDED MANUAL GATE — run \
+            with `cargo test --test differential -- --ignored` and update this doc \
+            comment's STATUS line to VERIFIED PASSING once a human confirms the result. \
+            Not yet marked VERIFIED PASSING (03-03)."]
+fn python_app_opens_upgraded_v14_archive() {
+    let (_fixture_dir, archive_path) = common::generate_fixture_pre_v16_shape(14);
+    let (session, _notes) = open_and_validate(&archive_path, &dev_resources_db_path())
+        .expect("open_and_validate must succeed and upgrade v14 to v16");
+
+    assert_eq!(
+        session.manifest.schema_version, 16,
+        "open_and_validate must have upgraded the v14 fixture to v16 before save \
+         (proves the upgrade actually ran, not just that the fixture claims v16)"
+    );
+
+    save_archive(
+        &session,
+        "JWL Manager",
+        "JWL Manager_test",
+        "2026-01-02T00:00:00Z",
+    )
+    .expect("save_archive must succeed before handing off to the Python oracle");
+
+    let (ok, stdout, stderr) = run_python_check_validity(&archive_path);
+    assert!(
+        ok,
+        "Python app (JWLManager.check_validity) did not accept the upgraded (v14->v16) \
+         Tauri-saved archive.\nstdout: {stdout}\nstderr: {stderr}"
+    );
+}
+
+/// Shared Python-oracle invocation used by every differential test: shells to
+/// `python3` and calls `JWLManager.Window.check_validity` (unbound,
+/// `self=None` — the success path never touches `self`, only the two
+/// `QMessageBox.warning` failure branches do) against the given archive path.
+/// Returns `(accepted, stdout, stderr)`.
+fn run_python_check_validity(archive_path: &Path) -> (bool, String, String) {
     let saved_path = archive_path.to_string_lossy().replace('\\', "\\\\");
     let python_code = format!(
         "import sys\n\
@@ -101,14 +165,10 @@ fn python_app_opens_tauri_saved_archive() {
         .output()
         .expect("failed to invoke python3 — is it on PATH?");
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-
-    assert!(
-        output.status.success() && stdout.contains("ORACLE_RESULT:PASS"),
-        "Python app (JWLManager.check_validity) did not accept the Tauri-saved archive.\n\
-         stdout: {stdout}\nstderr: {stderr}"
-    );
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let ok = output.status.success() && stdout.contains("ORACLE_RESULT:PASS");
+    (ok, stdout, stderr)
 }
 
 /// Owner's real archive round-trip (D-07): opens `JWLM_REAL_ARCHIVE` if set,
