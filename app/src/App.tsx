@@ -33,6 +33,10 @@ export default function App() {
     setError(null);
   }
 
+  function handleNotesChanged(result: NotesRow[]) {
+    setNotes(result);
+  }
+
   function handleError(err: ErrorDto) {
     setError(err);
   }
@@ -58,7 +62,7 @@ export default function App() {
 
       {archiveOpen ? (
         <main className="notes-main">
-          <NotesList notes={notes} />
+          <NotesList notes={notes} onNotesChanged={handleNotesChanged} onError={handleError} />
         </main>
       ) : (
         <main className="empty-state">

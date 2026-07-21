@@ -42,6 +42,8 @@ export function describeError(err: ErrorDto): string {
       return "Couldn't read this archive's zip container — it may be corrupted. Choose a different file or restore from an earlier backup.";
     case "json_error":
       return "Couldn't read this archive's manifest — it isn't valid JSON. Choose a different file or restore from an earlier backup.";
+    case "delete_failed":
+      return "Couldn't delete the selected notes — the archive is unchanged. Try again, or close and reopen the archive if the problem continues.";
     default:
       return `Couldn't complete this operation (${err.operation}). Choose a different file or try again.`;
   }
