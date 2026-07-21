@@ -3,3 +3,7 @@
 # Source of truth is libs/ — these are copies, never commit them.
 /jwlCore-amd64.dll
 /sqlite3_64.dll
+
+# Python bytecode from running the JWLManager.py differential oracle locally
+__pycache__/
+*.pyc
