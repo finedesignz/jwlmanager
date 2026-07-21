@@ -65,7 +65,7 @@
   3. Any accepted archive is upgraded to working version 16 immediately on open, verified by round-trip test
 **Plans**: 3 plans (3 waves)
 - [x] 03-01-PLAN.md - Versioned fixture generator (v11-v15/v17) + typed error variants + frontend copy (Wave 1)
-- [ ] 03-02-PLAN.md - Transactional upgrade_to_v16 DDL port + range gate widening + full test matrix (Wave 2)
+- [x] 03-02-PLAN.md - Transactional upgrade_to_v16 DDL port + range gate widening + full test matrix (Wave 2)
 - [ ] 03-03-PLAN.md - v14-upgrade differential oracle + env-gated real-v14 acceptance (recorded manual gates) (Wave 3)
 
 ### Phase 4: Schema Downgrade
@@ -168,7 +168,7 @@
 |-------|----------------|--------|-----------|
 | 1. Open, View, Save | 7/7 | Complete   | 2026-07-20 |
 | 2. Safe Delete | 0/TBD | Not started | - |
-| 3. Schema Upgrade | 1/3 | In Progress|  |
+| 3. Schema Upgrade | 2/3 | In Progress|  |
 | 4. Schema Downgrade | 0/TBD | Not started | - |
 | 5. Two-Archive Merge | 0/TBD | Not started | - |
 | 6. Full Data Browsing | 0/TBD | Not started | - |

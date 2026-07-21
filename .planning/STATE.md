@@ -4,12 +4,12 @@ milestone: v1.0
 milestone_name: milestone
 status: verifying
 stopped_at: Completed 01-06-PLAN.md (command bar + typed error surface + jwlCore capability notice) — Phase 1 all 7 plans complete
-last_updated: "2026-07-21T04:29:29.902Z"
+last_updated: "2026-07-21T04:38:56.523Z"
 progress:
   total_phases: 11
   completed_phases: 1
   total_plans: 10
-  completed_plans: 8
+  completed_plans: 9
   percent: 9
 ---
 
@@ -23,10 +23,10 @@ progress:
 ## Current Position
 
 Phase: 3 (Schema Upgrade) — EXECUTING
-Plan: 1 of 3
+Plan: 2 of 3 complete (03-02 done; 03-03 remaining — Python differential test)
 **Phase:** 1 of 11 — Open, View, Save (Foundation Slice)
 **Plan:** 7 of 7
-**Status:** Phase complete — ready for verification
+**Status:** Phase 1 complete — ready for verification; Phase 3 in progress
 **Progress:** [████████░░] 80%
 
 ## Performance Metrics
@@ -59,6 +59,11 @@ Plan: 1 of 3
 - [Phase 01]: 01-06: cancel affordance for Open/New/Save-As is the native dialog dismissal (open()/save() resolving null), not a separate abort button, per the plan's own action text
 - [Phase 01]: 01-06: lib/errors.ts keys off ArchiveError::to_dto's real snake_case code strings (not_a_zip, zip_slip_rejected, ...) read directly from error.rs, not the plan's illustrative PascalCase variant names
 - [Phase ?]: v12/v13 fixtures apply only the documented v16<->v14 delta; not independently-verified
+- [Phase 03]: 03-02: upgrade_to_v16 ports JWLManager.py:1016-1070's DDL transactionally (rusqlite Transaction, rollback on any failure) — never the Python original's silent except:pass; conditional Specialty/Edition INSERT source columns preserve pre-existing data instead of the original's data-destroying NULL,NULL
+- [Phase 03]: 03-02: post-upgrade v16 contract validator (validate_v16_contract) runs before session acceptance so an unknown/incomplete v12/v13 shape gap fails loud instead of being silently stamped v16
+- [Phase 03]: 03-02: archive/mod.rs and archive/manifest.rs schema gates widened to 12-16 sharing one MIN/MAX/WORKING const module so they cannot drift; in-range manifest/PRAGMA mismatch normalizes to the final PRAGMA value rather than rejecting
+- [Phase 03]: 03-02: foreign_keys does NOT default OFF in this build's bundled SQLite (contra 03-RESEARCH.md's assumption) — upgrade_to_v16 explicitly disables it on the connection before opening the transaction (pragma changes are a no-op inside an active transaction), never re-enables it
+- [Phase 03]: 03-02: ArchiveError::UnsupportedSchema removed entirely (zero remaining producers after gate widen) along with its unsupported_schema_phase3 message_key and errors.ts case
 
 ### Todos
 
@@ -72,6 +77,6 @@ Plan: 1 of 3
 
 ## Session Continuity
 
-**Last session:** 2026-07-21T04:29:05.669Z
-**Stopped at:** Completed 01-06-PLAN.md (command bar + typed error surface + jwlCore capability notice) — Phase 1 all 7 plans complete
-**Next action:** Run gsd-verifier / gsd-validate-phase for Phase 1, then close the three recorded manual gates before Phase 2.
+**Last session:** 2026-07-20T00:00:00.000Z
+**Stopped at:** Completed 03-02-PLAN.md (transactional schema upgrade + contract validator + dual-gate widening) — Phase 3 plan 2 of 3 complete
+**Next action:** Execute 03-03-PLAN.md (Python differential test against real v14 owner archives), then Phase 3 verification.
