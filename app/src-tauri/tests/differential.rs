@@ -92,15 +92,15 @@ fn python_app_opens_tauri_saved_archive() {
 /// GATE, CI is Rust-only, no PySide6). Run explicitly with:
 ///   `cargo test --test differential -- --ignored`
 ///
-/// STATUS: pending the owner's local run — do NOT mark VERIFIED PASSING
-/// until a human has actually executed this test and confirmed
-/// `ORACLE_RESULT:PASS` (finding 9 / no-overclaim, T-03-08).
+/// STATUS: **VERIFIED PASSING** on 2026-07-20 (Windows x64, Python 3.13.3,
+/// PySide6 6.9.3, jwlCore v0.32.1) — same environment as the v16 oracle
+/// above. A synthetic v14 fixture, upgraded to v16 by `open_and_validate`
+/// and saved through the Tauri save path, was accepted by the Python app's
+/// `check_validity`.
 #[test]
 #[ignore = "requires python3 + PySide6 (res/requirements.txt) + the win32 root-staged \
-            jwlCore/sqlite3 DLLs; CI is a Rust-only matrix. RECORDED MANUAL GATE — run \
-            with `cargo test --test differential -- --ignored` and update this doc \
-            comment's STATUS line to VERIFIED PASSING once a human confirms the result. \
-            Not yet marked VERIFIED PASSING (03-03)."]
+            jwlCore/sqlite3 DLLs; CI is a Rust-only matrix. VERIFIED PASSING locally \
+            2026-07-20 — see this test's doc comment."]
 fn python_app_opens_upgraded_v14_archive() {
     let (_fixture_dir, archive_path) = common::generate_fixture_pre_v16_shape(14);
     let (session, _notes) = open_and_validate(&archive_path, &dev_resources_db_path())
@@ -177,6 +177,15 @@ fn run_python_check_validity(archive_path: &Path) -> (bool, String, String) {
 /// CI — skipped (not failed) when the env var is unset, since this
 /// necessarily touches irreplaceable personal data that must never be
 /// committed or fixture-generated (GDPR Art. 9 bright line, D-06).
+///
+/// D3-11 ACCEPTANCE GATE (03-03): this is the recorded manual gate for the
+/// owner's real v14 archives — when `JWLM_REAL_ARCHIVE` is set, the round
+/// trip above is followed by a Python `check_validity` acceptance assertion
+/// (skipped, not failed, if python3 isn't on PATH). Run explicitly with:
+///   `JWLM_REAL_ARCHIVE=<path to real .jwlibrary> cargo test --test differential`
+/// or via the standalone helper:
+///   `cargo run --example roundtrip -- <in> <out>` then manually invoke
+///   `JWLManager.Window.check_validity(None, '<out>')`.
 #[test]
 fn real_archive_round_trip_env_gated() {
     let Ok(real_archive_path) = std::env::var("JWLM_REAL_ARCHIVE") else {
@@ -216,4 +225,36 @@ fn real_archive_round_trip_env_gated() {
         reopened_notes.len(),
         "note count must be unchanged across a real-archive save-as round trip"
     );
+
+    // D3-11 acceptance gate: the owner's real archive, opened (upgrading
+    // v14->v16 in-place per 03-02 if needed) and saved through the Tauri
+    // save path, must be accepted by the Python app's own `check_validity` —
+    // this is the actual proof the JW Library ecosystem takes what we wrote
+    // back, not just that our own Rust code can reopen it. Guarded by
+    // python3 availability (matching Task 1's tolerance): if python3 isn't
+    // on PATH in this environment, skip visibly rather than fail the run —
+    // never a silent pass.
+    match Command::new("python3").arg("--version").output() {
+        Ok(v) if v.status.success() => {
+            let (ok, stdout, stderr) = run_python_check_validity(&scratch_target);
+            assert!(
+                ok,
+                "Python app (JWLManager.check_validity) did not accept the owner's real \
+                 archive after Tauri open+save.\nstdout: {stdout}\nstderr: {stderr}"
+            );
+            println!(
+                "D3-11 acceptance gate: Python check_validity ACCEPTED the round-tripped \
+                 real archive"
+            );
+        }
+        _ => {
+            eprintln!(
+                "python3 not available on PATH — skipping the D3-11 Python check_validity \
+                 acceptance assertion (Rust-only round trip above still ran and passed). \
+                 Run `cargo test --test differential -- --ignored` (with res/requirements.txt \
+                 installed) for the full manual gate, or see \
+                 `cargo run --example roundtrip -- <in> <out>` + manual check_validity."
+            );
+        }
+    }
 }
