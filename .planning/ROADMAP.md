@@ -52,7 +52,10 @@
   3. A failed delete mid-transaction leaves the archive unchanged (rollback verified by round-trip test)
   4. Empty selections cannot trigger a delete at all (impossible by construction, not just a disabled button)
   5. All SQL executed is parameterized; a round-trip semantic-equivalence test exists for the delete operation
-**Plans**: TBD
+**Plans**: 3 plans
+- [ ] 02-01-PLAN.md — Port trim_db sweep to db/trim.rs, wire into save (hash-last), Wave-0 fixtures + column-order/window-fn gates
+- [ ] 02-02-PLAN.md — Delete backend: NonEmptyNoteIds, DryRunReport, dry-run/apply commands, rollback + QA-02 round-trip
+- [ ] 02-03-PLAN.md — Selection + DeletePreviewDialog confirm/cancel UI on the Phase 1 surface
 
 ### Phase 3: Schema Upgrade
 **Goal**: Any archive a real user might hand the app (schema v12–16) opens correctly and is normalized to v16 in memory.
