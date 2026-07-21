@@ -48,7 +48,7 @@
 
 ### Editing (EDIT)
 
-- [ ] **EDIT-01**: User can delete selected items from any category
+- [x] **EDIT-01**: User can delete selected items from any category
 - [ ] **EDIT-02**: User can change highlight colors, with overlapping ranges union-merged as the Python app does
 - [ ] **EDIT-03**: User can add, remove, and rename tags
 - [ ] **EDIT-04**: User can reorder items (preserving the two-pass negative-position technique that dodges TagMap uniqueness)
@@ -65,16 +65,16 @@
 
 ### Safety (SAFE)
 
-- [ ] **SAFE-01**: Before any destructive operation (merge, import, delete, downgrade), user sees a dry-run preview stating what will be added, overwritten, and deleted, with a cancel option
-- [ ] **SAFE-02**: All SQL is parameterized — no string-interpolated values, including IN-clauses
-- [ ] **SAFE-03**: Empty-selection operations are impossible by construction, not merely guarded by button state
-- [ ] **SAFE-04**: Every archive-mutating operation runs in a transaction that rolls back cleanly on failure
+- [x] **SAFE-01**: Before any destructive operation (merge, import, delete, downgrade), user sees a dry-run preview stating what will be added, overwritten, and deleted, with a cancel option
+- [x] **SAFE-02**: All SQL is parameterized — no string-interpolated values, including IN-clauses
+- [x] **SAFE-03**: Empty-selection operations are impossible by construction, not merely guarded by button state
+- [x] **SAFE-04**: Every archive-mutating operation runs in a transaction that rolls back cleanly on failure
 - [x] **SAFE-05**: Errors surface to the user with actionable context — no silently swallowed exceptions
 
 ### Quality (QA)
 
 - [x] **QA-01**: Fixture `.jwlibrary` archives exist covering each accepted schema version and are used by automated tests
-- [ ] **QA-02**: Every archive-mutating operation has a round-trip test asserting semantic (normalized-table) equivalence — never byte equality
+- [x] **QA-02**: Every archive-mutating operation has a round-trip test asserting semantic (normalized-table) equivalence — never byte equality
 - [x] **QA-03**: Tests run in CI on every push
 
 ### Platform (PLAT)

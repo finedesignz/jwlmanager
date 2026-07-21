@@ -54,7 +54,7 @@
   5. All SQL executed is parameterized; a round-trip semantic-equivalence test exists for the delete operation
 **Plans**: 3 plans
 - [x] 02-01-PLAN.md — Port trim_db sweep to db/trim.rs, wire into save (hash-last), Wave-0 fixtures + column-order/window-fn gates
-- [ ] 02-02-PLAN.md — Delete backend: NonEmptyNoteIds, DryRunReport, dry-run/apply commands, rollback + QA-02 round-trip
+- [x] 02-02-PLAN.md — Delete backend: NonEmptyNoteIds, DryRunReport, dry-run/apply commands, rollback + QA-02 round-trip
 - [ ] 02-03-PLAN.md — Selection + DeletePreviewDialog confirm/cancel UI on the Phase 1 surface
 
 ### Phase 3: Schema Upgrade
@@ -170,7 +170,7 @@
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Open, View, Save | 7/7 | Complete   | 2026-07-20 |
-| 2. Safe Delete | 1/3 | In Progress|  |
+| 2. Safe Delete | 2/3 | In Progress|  |
 | 3. Schema Upgrade | 3/3 | Complete   | 2026-07-21 |
 | 4. Schema Downgrade | 0/TBD | Not started | - |
 | 5. Two-Archive Merge | 0/TBD | Not started | - |

@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
+status: verifying
 stopped_at: Completed 03-02-PLAN.md (transactional schema upgrade + contract validator + dual-gate widening) — Phase 3 plan 2 of 3 complete
-last_updated: "2026-07-21T06:18:20.640Z"
+last_updated: "2026-07-21T15:39:59.170Z"
 progress:
   total_phases: 11
   completed_phases: 2
   total_plans: 13
-  completed_plans: 10
+  completed_plans: 12
   percent: 18
 ---
 
@@ -23,11 +23,11 @@ progress:
 ## Current Position
 
 Phase: 2 (Safe Delete) — EXECUTING
-Plan: 1 of 3
+Plan: 2 of 3 complete (delete backend + dry-run preview)
 **Phase:** 1 of 11 — Open, View, Save (Foundation Slice)
 **Plan:** 7 of 7
-**Status:** Executing Phase 2
-**Progress:** [██████████] 100%
+**Status:** Phase complete — ready for verification
+**Progress:** [█████████░] 92%
 
 ## Performance Metrics
 
@@ -64,6 +64,9 @@ Plan: 1 of 3
 - [Phase 03]: 03-02: archive/mod.rs and archive/manifest.rs schema gates widened to 12-16 sharing one MIN/MAX/WORKING const module so they cannot drift; in-range manifest/PRAGMA mismatch normalizes to the final PRAGMA value rather than rejecting
 - [Phase 03]: 03-02: foreign_keys does NOT default OFF in this build's bundled SQLite (contra 03-RESEARCH.md's assumption) — upgrade_to_v16 explicitly disables it on the connection before opening the transaction (pragma changes are a no-op inside an active transaction), never re-enables it
 - [Phase 03]: 03-02: ArchiveError::UnsupportedSchema removed entirely (zero remaining producers after gate widen) along with its unsupported_schema_phase3 message_key and errors.ts case
+- [Phase 02]: 02-02: D2-05 corrected — delete_notes removes Note rows ONLY; UserMark/BlockRange highlights are durable and survive a Note's deletion (only genuinely orphaned rows are swept by trim on save), matching JWLManager.py:3666 exactly
+- [Phase 02]: 02-02: dry_run_delete_notes computes SEMANTIC per-table added/overwritten/deleted from before/after primary-key-set snapshots (never raw changes()), run inside a never-committed rusqlite::Transaction reusing Plan 01's VACUUM-free trim_sweep; overwritten is a PK-set-intersection simplification, sufficient for the TagMap re-densify's 0-false-deletion requirement
+- [Phase 02]: 02-02: NonEmptyNoteIds (serde try_from newtype) makes an empty delete selection unrepresentable at IPC deserialization, before either Tauri command body runs
 
 ### Todos
 
@@ -77,6 +80,6 @@ Plan: 1 of 3
 
 ## Session Continuity
 
-**Last session:** 2026-07-21T04:43:04.749Z
+**Last session:** 2026-07-21T15:39:59.164Z
 **Stopped at:** Completed 03-02-PLAN.md (transactional schema upgrade + contract validator + dual-gate widening) — Phase 3 plan 2 of 3 complete
 **Next action:** Execute 03-03-PLAN.md (Python differential test against real v14 owner archives), then Phase 3 verification.
