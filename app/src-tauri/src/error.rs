@@ -33,6 +33,8 @@ pub enum ArchiveError {
     SchemaTooNew { version: i64 },
     #[error("schema upgrade failed: {reason}")]
     SchemaUpgradeFailed { reason: String },
+    #[error("orphan sweep / trim failed: {reason}")]
+    TrimFailed { reason: String },
     #[error("archive entry rejected: possible path traversal (zip-slip)")]
     ZipSlipRejected,
     #[error("session state lock was poisoned")]
@@ -101,6 +103,9 @@ impl ArchiveError {
                 "schema_upgrade_failed",
                 "error.archive.schema_upgrade_failed",
             ),
+            // `reason` is internal-only (module docs) — the DTO exposes only
+            // the stable code + message_key; the frontend copy is generic.
+            ArchiveError::TrimFailed { .. } => ("trim_failed", "error.archive.trim_failed"),
             ArchiveError::ZipSlipRejected => {
                 ("zip_slip_rejected", "error.archive.zip_slip_rejected")
             }

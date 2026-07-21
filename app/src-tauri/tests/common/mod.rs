@@ -445,6 +445,221 @@ pub fn generate_v16_fixture() -> (TempDir, PathBuf) {
 }
 
 // ---------------------------------------------------------------------------
+// Trim (orphan sweep) fixture generator (02-01-PLAN.md Wave 0)
+// ---------------------------------------------------------------------------
+
+/// Inserts the multi-table-orphan graph 02-01-PLAN.md's Wave 0 requires:
+///
+/// - PRE-EXISTING genuine orphans (swept by trim regardless of any delete):
+///   Location 950 (referenced by nothing), UserMark 951 (no BlockRange, no
+///   Note — swept via the not-in-BlockRange-and-not-in-Note branch), and a
+///   dangling BlockRange 952 (UserMarkId 999 does not exist). These exercise
+///   the sweep + the two NOT-EXISTS-rewritten predicates (Location,
+///   PlaylistItem) that a verbatim nullable `NOT IN` would fail to sweep
+///   (finding 3).
+/// - SURVIVING highlight (anti-over-delete, finding 1): UserMark 890 +
+///   BlockRange 890 + Location 890 — a valid highlight referenced by no
+///   deleted Note; trim must NEVER sweep it.
+/// - Note 900 anchors highlight UserMark 900 (-> BlockRange 900, Location
+///   900) and carries TagMap 900. Deleting Note 900 orphans ONLY TagMap 900
+///   (swept); the highlight UserMark 900/BlockRange 900/Location 900 SURVIVES
+///   the note deletion (a highlight is durable, not owned by the note —
+///   FUNCTIONALITY-SPEC:140).
+/// - SURVIVOR (finding 9): Note 901 references Location 901, which is ALSO
+///   referenced by a Bookmark (`Bookmark.LocationId = 901`). Deleting Note
+///   901 must NOT sweep Location 901 — the Bookmark reference keeps it live.
+/// - GAPPED TAG POSITIONS (finding 6): Tag 901 carries three TagMap rows at
+///   Positions 5, 9, 20 (never duplicated within one TagId — that would
+///   violate `UNIQUE(TagId, Position)` and refuse to insert into a valid v16
+///   DB) linking three additional independent Notes. Re-densify must compact
+///   these to contiguous 0-based positions 0, 1, 2 (ordered by original
+///   Position then TagMapId).
+fn insert_trim_fixture_rows(db_path: &Path) {
+    let conn = Connection::open(db_path).expect("failed to open seeded userData.db");
+    // A pre-trim archive can legitimately carry dangling rows (prior edits,
+    // vendor churn) — that is WHY trim exists. Insert the intentional
+    // pre-existing orphans below with FK enforcement off, exactly as the real
+    // delete/trim paths run (JWLManager.py:3681/3862 both force it off).
+    conn.execute_batch("PRAGMA foreign_keys = OFF")
+        .expect("disable foreign_keys for orphan fixture inserts");
+
+    // --- Genuine PRE-EXISTING orphans (swept by trim regardless of any
+    //     delete) ----------------------------------------------------------
+    // Location 950: referenced by nothing → swept once UserMark 951 is gone.
+    conn.execute(
+        "INSERT INTO Location (LocationId, BookNumber, ChapterNumber, DocumentId, Track, \
+         IssueTagNumber, KeySymbol, MepsLanguage, Type, Title, Specialty, Edition) \
+         VALUES (950, NULL, NULL, 9501, NULL, 0, NULL, 0, 0, 'Trim Genuine-Orphan Location', NULL, NULL)",
+        [],
+    )
+    .expect("insert genuine-orphan Location 950");
+    // UserMark 951: NO BlockRange, NO Note references it → swept via the
+    // (not-in-BlockRange AND not-in-Note) branch. A UserMark WITH a BlockRange
+    // is a durable highlight and is intentionally NOT an orphan.
+    conn.execute(
+        "INSERT INTO UserMark (UserMarkId, ColorIndex, LocationId, StyleIndex, UserMarkGuid, Version) \
+         VALUES (951, 1, 950, 0, 'fixture-trim-usermark-0951', 1)",
+        [],
+    )
+    .expect("insert genuine-orphan UserMark 951");
+    // BlockRange 952: UserMarkId 999 does not exist → dangling → swept.
+    conn.execute(
+        "INSERT INTO BlockRange (BlockRangeId, BlockType, Identifier, StartToken, EndToken, UserMarkId) \
+         VALUES (952, 1, 1, 0, 5, 999)",
+        [],
+    )
+    .expect("insert dangling BlockRange 952");
+
+    // --- SURVIVING highlight (anti-over-delete, codex finding 1): UserMark
+    //     890 + BlockRange 890 + Location 890 form a valid highlight that no
+    //     deleted Note references. Trim must NEVER sweep it. ----------------
+    conn.execute(
+        "INSERT INTO Location (LocationId, BookNumber, ChapterNumber, DocumentId, Track, \
+         IssueTagNumber, KeySymbol, MepsLanguage, Type, Title, Specialty, Edition) \
+         VALUES (890, NULL, NULL, 8901, NULL, 0, NULL, 0, 0, 'Trim Survivor Highlight Location', NULL, NULL)",
+        [],
+    )
+    .expect("insert survivor-highlight Location 890");
+    conn.execute(
+        "INSERT INTO UserMark (UserMarkId, ColorIndex, LocationId, StyleIndex, UserMarkGuid, Version) \
+         VALUES (890, 2, 890, 0, 'fixture-trim-usermark-0890', 1)",
+        [],
+    )
+    .expect("insert survivor-highlight UserMark 890");
+    conn.execute(
+        "INSERT INTO BlockRange (BlockRangeId, BlockType, Identifier, StartToken, EndToken, UserMarkId) \
+         VALUES (890, 1, 1, 0, 8, 890)",
+        [],
+    )
+    .expect("insert survivor-highlight BlockRange 890");
+
+    // --- Note-900 graph: Note 900 anchors the highlight UserMark 900 →
+    //     BlockRange 900 (Location 900). Deleting Note 900 orphans ONLY its
+    //     TagMap 900 entry — the highlight (UserMark 900/BlockRange 900/
+    //     Location 900) SURVIVES, because a highlight is durable and is not
+    //     owned by the note (codex finding 1 / FUNCTIONALITY-SPEC:140). -----
+    conn.execute(
+        "INSERT INTO Location (LocationId, BookNumber, ChapterNumber, DocumentId, Track, \
+         IssueTagNumber, KeySymbol, MepsLanguage, Type, Title, Specialty, Edition) \
+         VALUES (900, NULL, NULL, 9001, NULL, 0, NULL, 0, 0, 'Trim Orphan Location', NULL, NULL)",
+        [],
+    )
+    .expect("insert orphan-producing Location 900");
+
+    conn.execute(
+        "INSERT INTO UserMark (UserMarkId, ColorIndex, LocationId, StyleIndex, UserMarkGuid, Version) \
+         VALUES (900, 1, 900, 0, 'fixture-trim-usermark-0900', 1)",
+        [],
+    )
+    .expect("insert UserMark 900");
+
+    conn.execute(
+        "INSERT INTO BlockRange (BlockRangeId, BlockType, Identifier, StartToken, EndToken, UserMarkId) \
+         VALUES (900, 1, 1, 0, 5, 900)",
+        [],
+    )
+    .expect("insert BlockRange 900");
+
+    conn.execute(
+        "INSERT INTO Note (NoteId, Guid, UserMarkId, LocationId, Title, Content, LastModified, \
+         Created, BlockType, BlockIdentifier) \
+         VALUES (900, 'fixture-trim-note-guid-0900', 900, 900, 'Trim orphan note title', \
+         'Trim orphan note content.', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 0, NULL)",
+        [],
+    )
+    .expect("insert Note 900");
+
+    conn.execute(
+        "INSERT INTO Tag (TagId, Type, Name) VALUES (900, 1, 'Fixture Trim Tag 900')",
+        [],
+    )
+    .expect("insert Tag 900");
+    conn.execute(
+        "INSERT INTO TagMap (TagMapId, PlaylistItemId, LocationId, NoteId, TagId, Position) \
+         VALUES (900, NULL, NULL, 900, 900, 0)",
+        [],
+    )
+    .expect("insert TagMap 900");
+
+    // --- Survivor Location (finding 9) --------------------------------------
+    conn.execute(
+        "INSERT INTO Location (LocationId, BookNumber, ChapterNumber, DocumentId, Track, \
+         IssueTagNumber, KeySymbol, MepsLanguage, Type, Title, Specialty, Edition) \
+         VALUES (901, NULL, NULL, 9011, NULL, 0, NULL, 0, 0, 'Trim Survivor Location', NULL, NULL)",
+        [],
+    )
+    .expect("insert survivor Location 901");
+
+    conn.execute(
+        "INSERT INTO Note (NoteId, Guid, UserMarkId, LocationId, Title, Content, LastModified, \
+         Created, BlockType, BlockIdentifier) \
+         VALUES (901, 'fixture-trim-note-guid-0901', NULL, 901, 'Trim survivor note title', \
+         'Trim survivor note content.', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 0, NULL)",
+        [],
+    )
+    .expect("insert Note 901");
+
+    conn.execute(
+        "INSERT INTO Bookmark (BookmarkId, LocationId, PublicationLocationId, Slot, Title, \
+         Snippet, BlockType, BlockIdentifier) \
+         VALUES (900, 901, 901, 0, 'Fixture Trim Bookmark', NULL, 0, NULL)",
+        [],
+    )
+    .expect("insert Bookmark referencing Location 901");
+
+    // --- Gapped tag positions (finding 6) -----------------------------------
+    conn.execute(
+        "INSERT INTO Tag (TagId, Type, Name) VALUES (901, 1, 'Fixture Trim Tag 901')",
+        [],
+    )
+    .expect("insert Tag 901");
+
+    for (note_id, tag_map_id, position) in [(902, 902, 5), (903, 903, 9), (904, 904, 20)] {
+        conn.execute(
+            &format!(
+                "INSERT INTO Note (NoteId, Guid, UserMarkId, LocationId, Title, Content, \
+                 LastModified, Created, BlockType, BlockIdentifier) VALUES ({note_id}, \
+                 'fixture-trim-note-guid-0{note_id}', NULL, NULL, 'Trim gapped note {note_id}', \
+                 'Trim gapped note content {note_id}.', '2026-01-01T00:00:00Z', \
+                 '2026-01-01T00:00:00Z', 0, NULL)"
+            ),
+            [],
+        )
+        .unwrap_or_else(|_| panic!("insert gapped-position Note {note_id}"));
+
+        conn.execute(
+            &format!(
+                "INSERT INTO TagMap (TagMapId, PlaylistItemId, LocationId, NoteId, TagId, Position) \
+                 VALUES ({tag_map_id}, NULL, NULL, {note_id}, 901, {position})"
+            ),
+            [],
+        )
+        .unwrap_or_else(|_| panic!("insert gapped-position TagMap {tag_map_id}"));
+    }
+
+    conn.execute(
+        "UPDATE LastModified SET LastModified = '2026-01-01T00:00:00Z'",
+        [],
+    )
+    .expect("update LastModified");
+}
+
+/// Builds a full synthetic v16 `.jwlibrary` fixture (seeded from `res/blank`,
+/// carrying the same base located/independent Notes as
+/// [`generate_v16_fixture`]) PLUS [`insert_trim_fixture_rows`]'s multi-table
+/// orphan graph, survivor Location, and gapped tag positions
+/// (02-01-PLAN.md Wave 0 / Task 1).
+pub fn generate_trim_fixture() -> (TempDir, PathBuf) {
+    let work_dir = TempDir::new().expect("failed to create fixture work dir");
+    seed_from_res_blank(work_dir.path());
+    let db_path = work_dir.path().join("userData.db");
+    insert_synthetic_notes(&db_path);
+    insert_trim_fixture_rows(&db_path);
+
+    build_fixture_archive(work_dir.path(), &synthetic_manifest_json())
+}
+
+// ---------------------------------------------------------------------------
 // Zip-slip fixture generator (6 variants, D-08)
 // ---------------------------------------------------------------------------
 

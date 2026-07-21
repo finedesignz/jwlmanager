@@ -198,6 +198,16 @@ pub fn save_archive_to(
         None
     };
 
+    // ARCH-04 (D2-04): trim the working-copy DB on save — orphan sweep, tag
+    // re-densify, Location.Title normalization, then VACUUM — BEFORE the
+    // manifest hash so the hash covers the final trimmed bytes (hash-last).
+    // A failed trim rolls the working copy back and surfaces a typed error;
+    // it never leaves a half-trimmed DB or writes the target.
+    {
+        let mut conn = rusqlite::Connection::open(&session.db_path)?;
+        crate::db::trim::trim_db(&mut conn)?;
+    }
+
     let manifest = update_manifest(
         &session.db_path,
         existing_manifest.as_ref(),
