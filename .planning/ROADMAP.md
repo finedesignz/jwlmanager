@@ -83,8 +83,8 @@
   3. The 7-table LocationId remap closure (Bookmark ×2, Note, UserMark, InputField, TagMap, PlaylistItemLocationMap) produces a semantically correct v14 archive, verified by round-trip test
   4. After a v14 save, the app's working in-memory copy remains at v16 (backup/restore verified)
 **Plans**: 3 plans
-- [ ] 04-01-PLAN.md — Core downgrade transform: remap closure (deterministic ORDER BY LocationId) + v14 DDL rebuild + SchemaDowngradeFailed + tests
-- [ ] 04-02-PLAN.md — dry_run_downgrade (reuse DryRunReport) + throwaway-copy save_v14_copy (session stays v16) + Tauri commands
+- [x] 04-01-PLAN.md — Core downgrade transform: remap closure (deterministic ORDER BY LocationId) + v14 DDL rebuild + SchemaDowngradeFailed + tests
+- [x] 04-02-PLAN.md — dry_run_downgrade (reuse DryRunReport) + throwaway-copy save_v14_copy (session stays v16) + Tauri commands
 - [ ] 04-03-PLAN.md — Frontend "Save v14-compatible copy…" action + preview + Python differential oracle
 
 ### Phase 5: Two-Archive Merge
@@ -176,7 +176,7 @@
 | 1. Open, View, Save | 7/7 | Complete   | 2026-07-20 |
 | 2. Safe Delete | 3/3 | Complete   | 2026-07-21 |
 | 3. Schema Upgrade | 3/3 | Complete   | 2026-07-21 |
-| 4. Schema Downgrade | 0/3 | Planned | - |
+| 4. Schema Downgrade | 2/3 | In Progress|  |
 | 5. Two-Archive Merge | 0/TBD | Not started | - |
 | 6. Full Data Browsing | 0/TBD | Not started | - |
 | 7. Full Editing | 0/TBD | Not started | - |

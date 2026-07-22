@@ -24,9 +24,9 @@
 
 - [x] **SCHEMA-01**: App accepts schema versions 12–16 and rejects ≤11 with a clear message
 - [x] **SCHEMA-02**: App upgrades any accepted archive to working version 16 on open
-- [ ] **SCHEMA-03**: App can save a v14 downgrade (the `Location.Specialty`/`Edition` + `IX_Location_Media` index delta) via an explicit user choice
+- [x] **SCHEMA-03**: App can save a v14 downgrade (the `Location.Specialty`/`Edition` + `IX_Location_Media` index delta) via an explicit user choice
 - [ ] **SCHEMA-04**: Downgrade performs the 7-table LocationId remap closure (Bookmark ×2 cols, Note, UserMark, InputField, TagMap, PlaylistItemLocationMap) with explicit, documented, tested ordering semantics
-- [ ] **SCHEMA-05**: Working copy remains at v16 after a v14 save (backup/restore)
+- [x] **SCHEMA-05**: Working copy remains at v16 after a v14 save (backup/restore)
 
 ### Merge (MERGE)
 
