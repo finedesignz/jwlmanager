@@ -99,7 +99,7 @@
   3. Merging two fixture archives produces results matching the Python app's output for the same inputs, verified by semantic round-trip test
   4. If the native library is missing or fails to load, the user sees a clear, actionable error — not a crash
 **Plans**: 3 plans
-- [ ] 05-01-PLAN.md — jwlCore mergeDatabase FFI wrapper + MergeUnavailable/MergeFailed typed errors
+- [x] 05-01-PLAN.md — jwlCore mergeDatabase FFI wrapper + MergeUnavailable/MergeFailed typed errors
 - [ ] 05-02-PLAN.md — dry-run + commit orchestration, Tauri commands, media fold-back verification
 - [ ] 05-03-PLAN.md — frontend merge action + differential parity oracle (Rust FFI vs Python)
 
@@ -181,7 +181,7 @@
 | 2. Safe Delete | 3/3 | Complete   | 2026-07-21 |
 | 3. Schema Upgrade | 3/3 | Complete   | 2026-07-21 |
 | 4. Schema Downgrade | 3/3 | Complete   | 2026-07-22 |
-| 5. Two-Archive Merge | 0/3 | Not started | - |
+| 5. Two-Archive Merge | 1/3 | In Progress|  |
 | 6. Full Data Browsing | 0/TBD | Not started | - |
 | 7. Full Editing | 0/TBD | Not started | - |
 | 8. Import / Export Parity | 0/TBD | Not started | - |

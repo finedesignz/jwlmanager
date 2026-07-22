@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: verifying
-stopped_at: Completed 03-02-PLAN.md (transactional schema upgrade + contract validator + dual-gate widening) — Phase 3 plan 2 of 3 complete
-last_updated: "2026-07-22T18:55:34.993Z"
+stopped_at: Completed 05-01-PLAN.md
+last_updated: "2026-07-22T20:33:02.690Z"
 progress:
   total_phases: 11
   completed_phases: 4
-  total_plans: 16
-  completed_plans: 16
+  total_plans: 19
+  completed_plans: 17
   percent: 36
 ---
 
@@ -27,7 +27,7 @@ Plan: 3 of 3 complete (delete preview/confirm UI)
 **Phase:** 1 of 11 — Open, View, Save (Foundation Slice)
 **Plan:** 7 of 7
 **Status:** Phase complete — ready for verification
-**Progress:** [██████████] 100%
+**Progress:** [█████████░] 89%
 
 ## Performance Metrics
 
@@ -67,6 +67,7 @@ Plan: 3 of 3 complete (delete preview/confirm UI)
 - [Phase 02]: 02-02: D2-05 corrected — delete_notes removes Note rows ONLY; UserMark/BlockRange highlights are durable and survive a Note's deletion (only genuinely orphaned rows are swept by trim on save), matching JWLManager.py:3666 exactly
 - [Phase 02]: 02-02: dry_run_delete_notes computes SEMANTIC per-table added/overwritten/deleted from before/after primary-key-set snapshots (never raw changes()), run inside a never-committed rusqlite::Transaction reusing Plan 01's VACUUM-free trim_sweep; overwritten is a PK-set-intersection simplification, sufficient for the TagMap re-densify's 0-false-deletion requirement
 - [Phase 02]: 02-02: NonEmptyNoteIds (serde try_from newtype) makes an empty delete selection unrepresentable at IPC deserialization, before either Tauri command body runs
+- [Phase ?]: 05-01: jwlCore mergeDatabase FFI wrapper (merge.rs) reuses Phase 1 load path; MergeUnavailable/MergeFailed typed errors, no crash; real DLL merged synthetic pair
 
 ### Todos
 
@@ -80,6 +81,6 @@ Plan: 3 of 3 complete (delete preview/confirm UI)
 
 ## Session Continuity
 
-**Last session:** 2026-07-21T15:45:41.419Z
-**Stopped at:** Completed 03-02-PLAN.md (transactional schema upgrade + contract validator + dual-gate widening) — Phase 3 plan 2 of 3 complete
+**Last session:** 2026-07-22T20:32:52.803Z
+**Stopped at:** Completed 05-01-PLAN.md
 **Next action:** Execute 03-03-PLAN.md (Python differential test against real v14 owner archives), then Phase 3 verification.
