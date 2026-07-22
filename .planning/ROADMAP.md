@@ -11,7 +11,8 @@
 - [x] **Phase 2: Safe Delete (Dry-Run + Trim + Transactions)** - User can delete Notes with a dry-run preview, transactional safety, and correct post-save trim/VACUUM.
  (completed 2026-07-21)
 - [x] **Phase 3: Schema Upgrade** - Any accepted archive (v12–16) opens correctly, auto-upgraded to v16 in memory. (completed 2026-07-21)
-- [x] **Phase 4: Schema Downgrade** - User can explicitly save a v14-compatible archive with the LocationId remap closure, previewed via dry-run, and the working copy stays v16. (completed 2026-07-22)
+- [x] **Phase 4: Schema Downgrade** - User can explicitly save a v14-compatible archive with the LocationId remap closure, previewed via dry-run, and the working copy stays v16.
+ (completed 2026-07-22)
 - [ ] **Phase 5: Two-Archive Merge** - User can merge two archives via jwlCore with a dry-run preview and matching results to the Python app.
 - [ ] **Phase 6: Full Data Browsing** - User can view, browse, and select (single + bulk) across all 6 categories, with valid operations surfaced per selection.
 - [ ] **Phase 7: Full Editing** - User can edit colors, tags, order, favorites, cleaning/masking, and raw records across all categories.
@@ -97,7 +98,10 @@
   2. User sees a dry-run preview before merge (add/overwrite/delete counts) and can cancel
   3. Merging two fixture archives produces results matching the Python app's output for the same inputs, verified by semantic round-trip test
   4. If the native library is missing or fails to load, the user sees a clear, actionable error — not a crash
-**Plans**: TBD
+**Plans**: 3 plans
+- [ ] 05-01-PLAN.md — jwlCore mergeDatabase FFI wrapper + MergeUnavailable/MergeFailed typed errors
+- [ ] 05-02-PLAN.md — dry-run + commit orchestration, Tauri commands, media fold-back verification
+- [ ] 05-03-PLAN.md — frontend merge action + differential parity oracle (Rust FFI vs Python)
 
 ### Phase 6: Full Data Browsing
 **Goal**: User can view and select across every category the archive holds, not just Notes.
@@ -177,7 +181,7 @@
 | 2. Safe Delete | 3/3 | Complete   | 2026-07-21 |
 | 3. Schema Upgrade | 3/3 | Complete   | 2026-07-21 |
 | 4. Schema Downgrade | 3/3 | Complete   | 2026-07-22 |
-| 5. Two-Archive Merge | 0/TBD | Not started | - |
+| 5. Two-Archive Merge | 0/3 | Not started | - |
 | 6. Full Data Browsing | 0/TBD | Not started | - |
 | 7. Full Editing | 0/TBD | Not started | - |
 | 8. Import / Export Parity | 0/TBD | Not started | - |
