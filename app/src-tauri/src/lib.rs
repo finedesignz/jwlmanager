@@ -208,6 +208,56 @@ fn delete_notes_apply(
     })
 }
 
+/// Previews the effect of downgrading the open session to v14 WITHOUT mutating
+/// the working copy (D4-08): opens the session's `db_path` and runs the real
+/// trim + merge inside a rolled-back transaction (trim-FIRST, identical order to
+/// the actual v14 save), returning the semantic [`DryRunReport`] — merged-away
+/// Locations and dedup-DELETED study rows surface as `deleted` (data loss),
+/// repointed rows as `overwritten`.
+#[tauri::command]
+fn downgrade_dry_run(state: tauri::State<SessionState>) -> Result<DryRunReport, ErrorDto> {
+    let guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("downgrade_dry_run", None))?;
+    let session = guard.as_ref().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("downgrade_dry_run", None)
+    })?;
+
+    let mut conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("downgrade_dry_run", Some(session.target_path.as_path()))
+    })?;
+
+    archive::downgrade::dry_run_downgrade(&mut conn)
+        .map_err(|err| err.to_dto("downgrade_dry_run", Some(session.target_path.as_path())))
+}
+
+/// Writes a v14-compatible copy of the open session to `path` (SCHEMA-03/05,
+/// D4-06/D4-07). Runs the lossy downgrade on a throwaway copy so the LIVE
+/// session stays byte-identical at v16 — `as_ref` (never mutated). An
+/// un-downgradeable archive (HIGH-1) fails with a typed error and writes
+/// nothing to `path`.
+#[tauri::command]
+fn save_v14_copy(path: String, state: tauri::State<SessionState>) -> Result<(), ErrorDto> {
+    let target = PathBuf::from(&path);
+    let guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("save_v14_copy", Some(target.as_path())))?;
+    let session = guard.as_ref().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("save_v14_copy", Some(target.as_path()))
+    })?;
+
+    archive::downgrade::save_v14_copy(
+        session,
+        &target,
+        APP_NAME,
+        APP_DEVICE_NAME,
+        &time::now_iso8601_utc(),
+    )
+    .map_err(|err| err.to_dto("save_v14_copy", Some(target.as_path())))?;
+    Ok(())
+}
+
 /// Tauri builder wiring for the Walking Skeleton.
 ///
 /// `open_archive` (01-07) and `check_jwlcore` (01-03) are registered here.
@@ -227,7 +277,9 @@ pub fn run() {
             save_as,
             new_archive,
             delete_notes_dry_run,
-            delete_notes_apply
+            delete_notes_apply,
+            downgrade_dry_run,
+            save_v14_copy
         ])
         .run(tauri::generate_context!())
     {

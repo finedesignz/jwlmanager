@@ -93,6 +93,7 @@ fn update_manifest(
 /// `manifest.json`, which are replaced with the freshly written bytes.
 fn rebuild_zip(
     session: &ArchiveSession,
+    db_source: &Path,
     manifest_bytes: &[u8],
     temp_zip_path: &Path,
 ) -> Result<(), ArchiveError> {
@@ -105,7 +106,11 @@ fn rebuild_zip(
         if entry.name == "manifest.json" {
             writer.write_all(manifest_bytes)?;
         } else if entry.name == "userData.db" {
-            let db_bytes = fs::read(&session.db_path)?;
+            // The userData.db bytes come from `db_source` — which is
+            // `session.db_path` for a normal save, but a throwaway v14 copy
+            // for `save_v14_copy` (MED-5): the live session is never read as
+            // the DB source when exporting a downgraded copy.
+            let db_bytes = fs::read(db_source)?;
             writer.write_all(&db_bytes)?;
         } else {
             // Every other original entry (loose media, thumbnails,
@@ -188,16 +193,6 @@ pub fn save_archive_to(
     device_name: &str,
     now_iso8601: &str,
 ) -> Result<Manifest, ArchiveError> {
-    // Read the existing manifest (if this session already has one on disk)
-    // so unknown/forward-compat top-level keys are preserved read->write.
-    let manifest_path = session.temp_dir.path().join("manifest.json");
-    let existing_manifest = if manifest_path.exists() {
-        let bytes = fs::read(&manifest_path)?;
-        Manifest::parse(&bytes).ok()
-    } else {
-        None
-    };
-
     // ARCH-04 (D2-04): trim the working-copy DB on save — orphan sweep, tag
     // re-densify, Location.Title normalization, then VACUUM — BEFORE the
     // manifest hash so the hash covers the final trimmed bytes (hash-last).
@@ -208,8 +203,68 @@ pub fn save_archive_to(
         crate::db::trim::trim_db(&mut conn)?;
     }
 
-    let manifest = update_manifest(
+    // Delegate the manifest-build + zip-rebuild + atomic-replace to the shared
+    // session-untouching writer, reading the DB from `session.db_path` (already
+    // trimmed above). This is the ONLY divergence from `save_v14_copy`: the
+    // normal save path additionally trims the session DB and syncs the fresh
+    // manifest back into `session.temp_dir` (below).
+    let manifest = write_archive_from_db_source(
+        session,
         &session.db_path,
+        target_path,
+        app_name,
+        device_name,
+        now_iso8601,
+    )?;
+
+    // Keep the extracted working copy's manifest.json in sync so a subsequent
+    // save (without reopening) reads the fresh manifest back. This is a
+    // NORMAL-SAVE-ONLY step — `write_archive_from_db_source` never writes into
+    // `session.temp_dir` (MED-5), so `save_v14_copy` leaves the session's
+    // manifest.json untouched.
+    let manifest_bytes = manifest.to_compact_string()?.into_bytes();
+    fs::write(session.temp_dir.path().join("manifest.json"), &manifest_bytes)?;
+
+    Ok(manifest)
+}
+
+/// Session-untouching archive writer (MED-5): builds the manifest from
+/// `db_source`, rebuilds the full zip streaming every non-`userData.db` entry
+/// read-only from `session.temp_dir`, and atomically replaces `target_path`.
+///
+/// Unlike `save_archive_to`, this helper:
+///   (a) reads the userData.db bytes from `db_source` (may be a throwaway v14
+///       copy), NEVER `session.db_path` directly beyond what the caller passes;
+///   (b) does NOT trim (`db_source` is expected already-trimmed by the caller);
+///   (c) does NOT write manifest.json into `session.temp_dir` — the manifest
+///       bytes are held in memory and streamed straight into the output zip;
+///   (d) never mutates `session.db_path` / `session.temp_dir`.
+///
+/// Used by both the normal save (delegating with `session.db_path`) and
+/// `save_v14_copy` (delegating with the downgraded throwaway copy).
+pub(crate) fn write_archive_from_db_source(
+    session: &ArchiveSession,
+    db_source: &Path,
+    target_path: &Path,
+    app_name: &str,
+    device_name: &str,
+    now_iso8601: &str,
+) -> Result<Manifest, ArchiveError> {
+    // Read the existing manifest (if this session already has one on disk)
+    // so unknown/forward-compat top-level keys are preserved read->write.
+    // Read-only — never written back here.
+    let manifest_path = session.temp_dir.path().join("manifest.json");
+    let existing_manifest = if manifest_path.exists() {
+        let bytes = fs::read(&manifest_path)?;
+        Manifest::parse(&bytes).ok()
+    } else {
+        None
+    };
+
+    // Manifest built off `db_source` — schema_version + hash reflect the COPY
+    // (14 for a v14 export), never the live session.
+    let manifest = update_manifest(
+        db_source,
         existing_manifest.as_ref(),
         app_name,
         device_name,
@@ -217,16 +272,11 @@ pub fn save_archive_to(
     )?;
     let manifest_bytes = manifest.to_compact_string()?.into_bytes();
 
-    // Keep the extracted working copy's manifest.json in sync so a
-    // subsequent save (without reopening) reads the fresh manifest back, and
-    // so rebuild_zip's "every entry from temp_dir" logic works uniformly.
-    fs::write(&manifest_path, &manifest_bytes)?;
-
     let temp_zip_path = same_dir_temp_path(target_path);
     // Any failure between here and the atomic_replace call below leaves
     // `target_path` completely untouched — the interruption-safety
     // invariant (old-or-new, never truncated).
-    let rebuild_result = rebuild_zip(session, &manifest_bytes, &temp_zip_path);
+    let rebuild_result = rebuild_zip(session, db_source, &manifest_bytes, &temp_zip_path);
     if let Err(err) = rebuild_result {
         let _ = fs::remove_file(&temp_zip_path);
         return Err(err);
