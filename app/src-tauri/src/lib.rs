@@ -258,6 +258,56 @@ fn save_v14_copy(path: String, state: tauri::State<SessionState>) -> Result<(), 
     Ok(())
 }
 
+/// Previews merging the archive at `source_path` INTO the open session WITHOUT
+/// mutating the live session (MERGE-01/02): runs the REAL jwlCore merge on a
+/// throwaway `fs::copy` of the session DB and content-signature-diffs it,
+/// returning the semantic [`DryRunReport`] (`overwritten` reflects in-place row
+/// UPDATEs, not mere PK membership). The FFI + `getLastResult` read happen under
+/// this single lock critical section (D5-06 serialization). A missing/wrong-arch
+/// jwlCore binary maps to the `merge_unavailable` code.
+#[tauri::command]
+fn merge_dry_run(
+    source_path: String,
+    app: tauri::AppHandle,
+    state: tauri::State<SessionState>,
+) -> Result<DryRunReport, ErrorDto> {
+    let source = PathBuf::from(&source_path);
+    let guard = state.lock().map_err(|_| {
+        error::ArchiveError::StatePoisoned.to_dto("merge_dry_run", Some(source.as_path()))
+    })?;
+    let session = guard.as_ref().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("merge_dry_run", Some(source.as_path()))
+    })?;
+
+    archive::merge::dry_run_merge(&app, session, &source)
+        .map_err(|err| err.to_dto("merge_dry_run", Some(source.as_path())))
+}
+
+/// Commits merging the archive at `source_path` INTO the open session: runs the
+/// merge on a staging copy, folds any new staging media into `session.entries`,
+/// and ATOMICALLY promotes the merged DB onto `session.db_path`
+/// (rename-with-replace, never a byte copy — Core Value). Marks the session
+/// dirty; the source archive is only READ. Serialized under the SessionState
+/// mutex (D5-06). A missing/wrong-arch binary maps to `merge_unavailable`.
+#[tauri::command]
+fn merge_commit(
+    source_path: String,
+    app: tauri::AppHandle,
+    state: tauri::State<SessionState>,
+) -> Result<(), ErrorDto> {
+    let source = PathBuf::from(&source_path);
+    let mut guard = state.lock().map_err(|_| {
+        error::ArchiveError::StatePoisoned.to_dto("merge_commit", Some(source.as_path()))
+    })?;
+    let session = guard.as_mut().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("merge_commit", Some(source.as_path()))
+    })?;
+
+    archive::merge::merge_commit(&app, session, &source)
+        .map_err(|err| err.to_dto("merge_commit", Some(source.as_path())))?;
+    Ok(())
+}
+
 /// Tauri builder wiring for the Walking Skeleton.
 ///
 /// `open_archive` (01-07) and `check_jwlcore` (01-03) are registered here.
@@ -279,7 +329,9 @@ pub fn run() {
             delete_notes_dry_run,
             delete_notes_apply,
             downgrade_dry_run,
-            save_v14_copy
+            save_v14_copy,
+            merge_dry_run,
+            merge_commit
         ])
         .run(tauri::generate_context!())
     {
