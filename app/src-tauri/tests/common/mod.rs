@@ -445,6 +445,267 @@ pub fn generate_v16_fixture() -> (TempDir, PathBuf) {
 }
 
 // ---------------------------------------------------------------------------
+// Schema-downgrade (v16 -> v14) fixture generators (04-01-PLAN.md)
+// ---------------------------------------------------------------------------
+//
+// Each generator seeds a fresh `res/blank` v16 `userData.db` into a tempdir
+// and returns `(TempDir, db_path)` — `downgrade_to_v14` operates on a
+// `Connection` over that db, so no `.jwlibrary` wrapper is needed. All rows
+// are synthetic. Inserts run with FK enforcement OFF (as the real
+// delete/downgrade paths do), so a fixture may carry cross-table references
+// without ordering constraints.
+//
+// The canonical colliding-group key shape (all six v14-U2 columns non-null,
+// so the merge is genuinely required — without it U2 would not even fire):
+//   BookNumber=NULL, ChapterNumber=NULL, DocumentId=1001, Track=5,
+//   IssueTagNumber=0, KeySymbol='pub-x', MepsLanguage=0, Type=0.
+
+/// Seeds a fresh `res/blank` v16 `userData.db` into a tempdir; returns the dir
+/// handle (keep alive) and the path to the `userData.db`.
+pub fn fresh_v16_db() -> (TempDir, PathBuf) {
+    let work_dir = TempDir::new().expect("failed to create downgrade fixture dir");
+    seed_from_res_blank(work_dir.path());
+    let db_path = work_dir.path().join("userData.db");
+    (work_dir, db_path)
+}
+
+/// Inserts a colliding `Location` group at the canonical key shape. `ids[0]`
+/// is the intended (lowest) survivor when `ids` is ascending.
+///
+/// Each row carries a DISTINCT `Specialty` (`s<id>`). This is the load-bearing
+/// real-world scenario: in v16 the `IX_Location_Media` UNIQUE index covers
+/// `Specialty`/`Edition`, so rows sharing the six v14-U2 columns are legal in
+/// v16 ONLY when they differ by Specialty/Edition — which v14 drops, collapsing
+/// them into a single U2 group that the merge must reconcile.
+fn insert_collision_group(conn: &Connection, ids: &[i64]) {
+    for &id in ids {
+        conn.execute(
+            "INSERT INTO Location (LocationId, BookNumber, ChapterNumber, DocumentId, Track, \
+             IssueTagNumber, KeySymbol, MepsLanguage, Type, Title, Specialty, Edition) \
+             VALUES (?1, NULL, NULL, 1001, 5, 0, 'pub-x', 0, 0, ?2, ?3, NULL)",
+            rusqlite::params![id, format!("Collision Location {id}"), format!("s{id}")],
+        )
+        .expect("insert collision-group Location");
+    }
+}
+
+/// Main collision fixture: a 3-way colliding group (50/20/90, survivor 20) with
+/// a dependent row across ALL 7 FK columns pointing at a NON-survivor id, plus
+/// a scripture Location (non-null Book/Chapter) that must NOT be remapped.
+pub fn generate_v16_collision_db() -> (TempDir, PathBuf) {
+    let (dir, db_path) = fresh_v16_db();
+    let conn = Connection::open(&db_path).expect("open seeded db");
+    conn.execute_batch("PRAGMA foreign_keys = OFF")
+        .expect("fk off");
+
+    insert_collision_group(&conn, &[50, 20, 90]);
+
+    // Scripture Location (non-null Book/Chapter) — excluded from the merge.
+    conn.execute(
+        "INSERT INTO Location (LocationId, BookNumber, ChapterNumber, DocumentId, Track, \
+         IssueTagNumber, KeySymbol, MepsLanguage, Type, Title, Specialty, Edition) \
+         VALUES (100, 1, 1, NULL, NULL, 0, 'nwt', 0, 0, 'Genesis 1:1', NULL, NULL)",
+        [],
+    )
+    .expect("insert scripture Location");
+
+    conn.execute(
+        "INSERT INTO Tag (TagId, Type, Name) VALUES (700, 1, 'DG Tag')",
+        [],
+    )
+    .expect("insert Tag");
+
+    // Bookmark: LocationId -> 50, PublicationLocationId -> 90 (both non-survivor).
+    conn.execute(
+        "INSERT INTO Bookmark (BookmarkId, LocationId, PublicationLocationId, Slot, Title, \
+         Snippet, BlockType, BlockIdentifier) VALUES (1, 50, 90, 0, 'DG Bookmark', NULL, 0, NULL)",
+        [],
+    )
+    .expect("insert Bookmark");
+    // Note -> 50.
+    conn.execute(
+        "INSERT INTO Note (NoteId, Guid, UserMarkId, LocationId, Title, Content, LastModified, \
+         Created, BlockType, BlockIdentifier) VALUES (10, 'dg-note-guid-0010', NULL, 50, \
+         'DG Note', 'content', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 0, NULL)",
+        [],
+    )
+    .expect("insert Note");
+    // UserMark -> 90.
+    conn.execute(
+        "INSERT INTO UserMark (UserMarkId, ColorIndex, LocationId, StyleIndex, UserMarkGuid, Version) \
+         VALUES (10, 1, 90, 0, 'dg-usermark-guid-0010', 1)",
+        [],
+    )
+    .expect("insert UserMark");
+    // InputField -> 50.
+    conn.execute(
+        "INSERT INTO InputField (LocationId, TextTag, Value) VALUES (50, 't1', 'v1')",
+        [],
+    )
+    .expect("insert InputField");
+    // TagMap -> 90 (LocationId form: NoteId/PlaylistItemId NULL).
+    conn.execute(
+        "INSERT INTO TagMap (TagMapId, PlaylistItemId, LocationId, NoteId, TagId, Position) \
+         VALUES (700, NULL, 90, NULL, 700, 0)",
+        [],
+    )
+    .expect("insert TagMap");
+    // PlaylistItemLocationMap -> 50.
+    conn.execute(
+        "INSERT INTO PlaylistItemLocationMap (PlaylistItemId, LocationId, MajorMultimediaType, \
+         BaseDurationTicks) VALUES (1, 50, 1, NULL)",
+        [],
+    )
+    .expect("insert PlaylistItemLocationMap");
+
+    (dir, db_path)
+}
+
+/// Composite-collision fixture builders. Each seeds the 2-way group (20/90,
+/// survivor 20) plus a survivor + merged-away row that SHARE the secondary key
+/// on one composite-key target — proving dedup-then-repoint.
+pub fn generate_composite_tagmap_db() -> (TempDir, PathBuf) {
+    let (dir, db_path) = fresh_v16_db();
+    let conn = Connection::open(&db_path).expect("open seeded db");
+    conn.execute_batch("PRAGMA foreign_keys = OFF")
+        .expect("fk off");
+    insert_collision_group(&conn, &[20, 90]);
+    conn.execute(
+        "INSERT INTO Tag (TagId, Type, Name) VALUES (700, 1, 'DG Tag')",
+        [],
+    )
+    .expect("insert Tag");
+    // Survivor (TagId 700, LocationId 20) + merged-away (TagId 700, LocationId 90).
+    conn.execute(
+        "INSERT INTO TagMap (TagMapId, PlaylistItemId, LocationId, NoteId, TagId, Position) \
+         VALUES (1, NULL, 20, NULL, 700, 0)",
+        [],
+    )
+    .expect("insert survivor TagMap");
+    conn.execute(
+        "INSERT INTO TagMap (TagMapId, PlaylistItemId, LocationId, NoteId, TagId, Position) \
+         VALUES (2, NULL, 90, NULL, 700, 1)",
+        [],
+    )
+    .expect("insert merged-away TagMap");
+    (dir, db_path)
+}
+
+pub fn generate_composite_bookmark_slot_db() -> (TempDir, PathBuf) {
+    let (dir, db_path) = fresh_v16_db();
+    let conn = Connection::open(&db_path).expect("open seeded db");
+    conn.execute_batch("PRAGMA foreign_keys = OFF")
+        .expect("fk off");
+    insert_collision_group(&conn, &[20, 90]);
+    // Survivor (PublicationLocationId 20, Slot 0) + merged-away (90, Slot 0).
+    conn.execute(
+        "INSERT INTO Bookmark (BookmarkId, LocationId, PublicationLocationId, Slot, Title, \
+         Snippet, BlockType, BlockIdentifier) VALUES (1, 20, 20, 0, 'Survivor', NULL, 0, NULL)",
+        [],
+    )
+    .expect("insert survivor Bookmark");
+    conn.execute(
+        "INSERT INTO Bookmark (BookmarkId, LocationId, PublicationLocationId, Slot, Title, \
+         Snippet, BlockType, BlockIdentifier) VALUES (2, 90, 90, 0, 'Merged', NULL, 0, NULL)",
+        [],
+    )
+    .expect("insert merged-away Bookmark");
+    (dir, db_path)
+}
+
+pub fn generate_composite_inputfield_db() -> (TempDir, PathBuf) {
+    let (dir, db_path) = fresh_v16_db();
+    let conn = Connection::open(&db_path).expect("open seeded db");
+    conn.execute_batch("PRAGMA foreign_keys = OFF")
+        .expect("fk off");
+    insert_collision_group(&conn, &[20, 90]);
+    // Survivor (LocationId 20, TextTag 'x') + merged-away (90, 'x').
+    conn.execute(
+        "INSERT INTO InputField (LocationId, TextTag, Value) VALUES (20, 'x', 'survivor')",
+        [],
+    )
+    .expect("insert survivor InputField");
+    conn.execute(
+        "INSERT INTO InputField (LocationId, TextTag, Value) VALUES (90, 'x', 'merged')",
+        [],
+    )
+    .expect("insert merged-away InputField");
+    (dir, db_path)
+}
+
+pub fn generate_composite_playlist_db() -> (TempDir, PathBuf) {
+    let (dir, db_path) = fresh_v16_db();
+    let conn = Connection::open(&db_path).expect("open seeded db");
+    conn.execute_batch("PRAGMA foreign_keys = OFF")
+        .expect("fk off");
+    insert_collision_group(&conn, &[20, 90]);
+    // Survivor (PlaylistItemId 1, LocationId 20) + merged-away (1, LocationId 90).
+    conn.execute(
+        "INSERT INTO PlaylistItemLocationMap (PlaylistItemId, LocationId, MajorMultimediaType, \
+         BaseDurationTicks) VALUES (1, 20, 1, NULL)",
+        [],
+    )
+    .expect("insert survivor PILM");
+    conn.execute(
+        "INSERT INTO PlaylistItemLocationMap (PlaylistItemId, LocationId, MajorMultimediaType, \
+         BaseDurationTicks) VALUES (1, 90, 1, NULL)",
+        [],
+    )
+    .expect("insert merged-away PILM");
+    (dir, db_path)
+}
+
+/// MED-4: a `KeySymbol='None'` Location (30) alongside a `KeySymbol IS NULL`
+/// Location (40) sharing the other five key columns — must NOT be merged
+/// (typed key distinguishes the literal string from SQL NULL).
+pub fn generate_med4_none_key_db() -> (TempDir, PathBuf) {
+    let (dir, db_path) = fresh_v16_db();
+    let conn = Connection::open(&db_path).expect("open seeded db");
+    conn.execute_batch("PRAGMA foreign_keys = OFF")
+        .expect("fk off");
+    conn.execute(
+        "INSERT INTO Location (LocationId, BookNumber, ChapterNumber, DocumentId, Track, \
+         IssueTagNumber, KeySymbol, MepsLanguage, Type, Title, Specialty, Edition) \
+         VALUES (30, NULL, NULL, 2001, 5, 0, 'None', 0, 0, 'Literal None key', NULL, NULL)",
+        [],
+    )
+    .expect("insert KeySymbol='None' Location");
+    conn.execute(
+        "INSERT INTO Location (LocationId, BookNumber, ChapterNumber, DocumentId, Track, \
+         IssueTagNumber, KeySymbol, MepsLanguage, Type, Title, Specialty, Edition) \
+         VALUES (40, NULL, NULL, 2001, 5, 0, NULL, 0, 0, 'NULL key', NULL, NULL)",
+        [],
+    )
+    .expect("insert KeySymbol IS NULL Location");
+    (dir, db_path)
+}
+
+/// HIGH-1: two EXCLUDED (non-null BookNumber) Locations sharing all six v14-U2
+/// columns, differing only by Specialty — legal in v16, un-downgradeable to v14
+/// (the merge never touches them, and the rebuild's U2 would be violated).
+pub fn generate_high1_undowngradeable_db() -> (TempDir, PathBuf) {
+    let (dir, db_path) = fresh_v16_db();
+    let conn = Connection::open(&db_path).expect("open seeded db");
+    conn.execute_batch("PRAGMA foreign_keys = OFF")
+        .expect("fk off");
+    conn.execute(
+        "INSERT INTO Location (LocationId, BookNumber, ChapterNumber, DocumentId, Track, \
+         IssueTagNumber, KeySymbol, MepsLanguage, Type, Title, Specialty, Edition) \
+         VALUES (60, 1, NULL, 3001, 5, 0, 'nwt', 0, 0, 'U2 collide A', 'spec-a', NULL)",
+        [],
+    )
+    .expect("insert U2-collide Location A");
+    conn.execute(
+        "INSERT INTO Location (LocationId, BookNumber, ChapterNumber, DocumentId, Track, \
+         IssueTagNumber, KeySymbol, MepsLanguage, Type, Title, Specialty, Edition) \
+         VALUES (61, 1, NULL, 3001, 5, 0, 'nwt', 0, 0, 'U2 collide B', 'spec-b', NULL)",
+        [],
+    )
+    .expect("insert U2-collide Location B");
+    (dir, db_path)
+}
+
+// ---------------------------------------------------------------------------
 // Trim (orphan sweep) fixture generator (02-01-PLAN.md Wave 0)
 // ---------------------------------------------------------------------------
 
