@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: verifying
-stopped_at: Completed 05-01-PLAN.md
-last_updated: "2026-07-22T20:33:02.690Z"
+stopped_at: Completed 05-02-PLAN.md
+last_updated: "2026-07-22T20:52:35.740Z"
 progress:
   total_phases: 11
   completed_phases: 4
   total_plans: 19
-  completed_plans: 17
+  completed_plans: 18
   percent: 36
 ---
 
@@ -27,7 +27,7 @@ Plan: 3 of 3 complete (delete preview/confirm UI)
 **Phase:** 1 of 11 — Open, View, Save (Foundation Slice)
 **Plan:** 7 of 7
 **Status:** Phase complete — ready for verification
-**Progress:** [█████████░] 89%
+**Progress:** [██████████] 95%
 
 ## Performance Metrics
 
@@ -68,6 +68,8 @@ Plan: 3 of 3 complete (delete preview/confirm UI)
 - [Phase 02]: 02-02: dry_run_delete_notes computes SEMANTIC per-table added/overwritten/deleted from before/after primary-key-set snapshots (never raw changes()), run inside a never-committed rusqlite::Transaction reusing Plan 01's VACUUM-free trim_sweep; overwritten is a PK-set-intersection simplification, sufficient for the TagMap re-densify's 0-false-deletion requirement
 - [Phase 02]: 02-02: NonEmptyNoteIds (serde try_from newtype) makes an empty delete selection unrepresentable at IPC deserialization, before either Tauri command body runs
 - [Phase ?]: 05-01: jwlCore mergeDatabase FFI wrapper (merge.rs) reuses Phase 1 load path; MergeUnavailable/MergeFailed typed errors, no crash; real DLL merged synthetic pair
+- [Phase ?]: D5-02: merge dry-run uses a CONTENT-signature diff (not PK-set) so in-place UPDATEs count as overwritten; commit promotes via atomic rename-with-replace, never fs::copy
+- [Phase ?]: jwlCore dir-pair merge wrote only userData.db (no loose media relocated); media fold-back is an empirically-verified no-op (branch a)
 
 ### Todos
 
@@ -81,6 +83,6 @@ Plan: 3 of 3 complete (delete preview/confirm UI)
 
 ## Session Continuity
 
-**Last session:** 2026-07-22T20:32:52.803Z
-**Stopped at:** Completed 05-01-PLAN.md
+**Last session:** 2026-07-22T20:52:25.222Z
+**Stopped at:** Completed 05-02-PLAN.md
 **Next action:** Execute 03-03-PLAN.md (Python differential test against real v14 owner archives), then Phase 3 verification.

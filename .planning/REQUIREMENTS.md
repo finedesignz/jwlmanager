@@ -31,7 +31,7 @@
 ### Merge (MERGE)
 
 - [x] **MERGE-01**: App loads the `jwlCore` native library, selecting the correct binary for the host OS **and CPU architecture**
-- [ ] **MERGE-02**: User can merge two archives via `jwlCore` and the result matches what the Python app produces for the same inputs
+- [x] **MERGE-02**: User can merge two archives via `jwlCore` and the result matches what the Python app produces for the same inputs
 - [ ] **MERGE-03**: User can merge N archives in one operation (ordered fold)
 - [ ] **MERGE-04**: App surfaces a clear, actionable error when the native library is missing or fails to load
 
