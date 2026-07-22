@@ -223,7 +223,10 @@ pub fn save_archive_to(
     // `session.temp_dir` (MED-5), so `save_v14_copy` leaves the session's
     // manifest.json untouched.
     let manifest_bytes = manifest.to_compact_string()?.into_bytes();
-    fs::write(session.temp_dir.path().join("manifest.json"), &manifest_bytes)?;
+    fs::write(
+        session.temp_dir.path().join("manifest.json"),
+        &manifest_bytes,
+    )?;
 
     Ok(manifest)
 }

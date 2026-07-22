@@ -240,9 +240,9 @@ fn downgrade_dry_run(state: tauri::State<SessionState>) -> Result<DryRunReport, 
 #[tauri::command]
 fn save_v14_copy(path: String, state: tauri::State<SessionState>) -> Result<(), ErrorDto> {
     let target = PathBuf::from(&path);
-    let guard = state
-        .lock()
-        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("save_v14_copy", Some(target.as_path())))?;
+    let guard = state.lock().map_err(|_| {
+        error::ArchiveError::StatePoisoned.to_dto("save_v14_copy", Some(target.as_path()))
+    })?;
     let session = guard.as_ref().ok_or_else(|| {
         error::ArchiveError::MissingUserDataBackup.to_dto("save_v14_copy", Some(target.as_path()))
     })?;

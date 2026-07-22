@@ -403,7 +403,12 @@ fn test_dry_run_exact_repoint_counts_and_location_deleted() {
     // Two merged-away Locations (50, 90) surface as data loss.
     assert_eq!(report.deleted.get("Location"), Some(&2));
     // No dedup collisions here -> the ONLY deleted rows are the two Locations.
-    assert_eq!(report.deleted.len(), 1, "report.deleted = {:?}", report.deleted);
+    assert_eq!(
+        report.deleted.len(),
+        1,
+        "report.deleted = {:?}",
+        report.deleted
+    );
     assert_eq!(report.total_deleted, 2);
 
     // Exact per-target repointed-row counts (rows that MOVED onto the survivor).
@@ -430,7 +435,11 @@ fn test_dry_run_dedup_deleted_surfaced_in_deleted_not_overwritten() {
 
     // The merged-away TagMap row (shared TagId with the survivor) is DELETED —
     // real study-data loss — and must appear in `deleted`, never `overwritten`.
-    assert_eq!(report.deleted.get("TagMap"), Some(&1), "dedup-deleted TagMap row");
+    assert_eq!(
+        report.deleted.get("TagMap"),
+        Some(&1),
+        "dedup-deleted TagMap row"
+    );
     assert!(
         !report.overwritten.contains_key("TagMap"),
         "dedup-deleted rows must NOT be hidden in overwritten: {:?}",

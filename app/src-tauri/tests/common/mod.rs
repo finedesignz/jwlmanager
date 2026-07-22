@@ -640,6 +640,22 @@ pub fn generate_v16_dryrun_collision_db() -> (TempDir, PathBuf) {
     (dir, db_path)
 }
 
+/// Full `.jwlibrary` archive wrapping [`insert_dryrun_collision_graph`]: the
+/// survivor (20) is trim-stable, so a trim-first v14 save merges the group to
+/// LocationId 20 deterministically. Used by the session-stays-v16 orchestration
+/// test where a clean "merged to lowest id 20" output assertion is wanted.
+pub fn generate_v16_dryrun_collision_archive() -> (TempDir, PathBuf) {
+    let work_dir = TempDir::new().expect("failed to create fixture work dir");
+    seed_from_res_blank(work_dir.path());
+    let db_path = work_dir.path().join("userData.db");
+    let conn = Connection::open(&db_path).expect("open seeded db");
+    conn.execute_batch("PRAGMA foreign_keys = OFF")
+        .expect("fk off");
+    insert_dryrun_collision_graph(&conn);
+    drop(conn);
+    build_fixture_archive(work_dir.path(), &synthetic_manifest_json())
+}
+
 /// Full `.jwlibrary` archive wrapping [`generate_v16_collision_db`]'s graph:
 /// the collision group's lowest-id survivor (20) is UNREFERENCED and thus
 /// trim-eligible, so a trim-FIRST v14 save shifts the survivor to 50 (HIGH-2).
@@ -687,6 +703,24 @@ pub fn generate_high1_undowngradeable_archive() -> (TempDir, PathBuf) {
         [],
     )
     .expect("insert U2-collide Location B");
+    // Reference BOTH colliding Locations with content-bearing Notes so the
+    // trim-first pass (save_v14_copy trims before downgrading) does NOT sweep
+    // them as unused — the un-downgradeable U2 collision must PERSIST past trim
+    // so the downgrade preflight actually fails (HIGH-1 end-to-end).
+    conn.execute(
+        "INSERT INTO Note (NoteId, Guid, UserMarkId, LocationId, Title, Content, LastModified, \
+         Created, BlockType, BlockIdentifier) VALUES (60, 'high1-note-0060', NULL, 60, 'A', \
+         'keep 60', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 0, NULL)",
+        [],
+    )
+    .expect("insert Note keeping Location 60");
+    conn.execute(
+        "INSERT INTO Note (NoteId, Guid, UserMarkId, LocationId, Title, Content, LastModified, \
+         Created, BlockType, BlockIdentifier) VALUES (61, 'high1-note-0061', NULL, 61, 'B', \
+         'keep 61', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 0, NULL)",
+        [],
+    )
+    .expect("insert Note keeping Location 61");
     drop(conn);
     build_fixture_archive(work_dir.path(), &synthetic_manifest_json())
 }

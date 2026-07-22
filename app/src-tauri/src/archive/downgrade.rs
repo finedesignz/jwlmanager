@@ -442,7 +442,12 @@ fn map_downgrade_insert_err(err: rusqlite::Error) -> ArchiveError {
 /// integer parameters (SAFE-02 — only the placeholder count is dynamic).
 /// `table`/`col` are compile-time constants from [`REMAP_TARGETS`], never user
 /// input. An empty `ids` slice yields 0 without touching the DB.
-fn count_in_ids(tx: &Transaction, table: &str, col: &str, ids: &[i64]) -> Result<i64, ArchiveError> {
+fn count_in_ids(
+    tx: &Transaction,
+    table: &str,
+    col: &str,
+    ids: &[i64],
+) -> Result<i64, ArchiveError> {
     if ids.is_empty() {
         return Ok(0);
     }
@@ -549,10 +554,12 @@ pub fn dry_run_downgrade(conn: &mut Connection) -> Result<DryRunReport, ArchiveE
         report.overwritten.remove(*table);
     }
     for (table, _col) in REMAP_TARGETS {
-        let moved = repoint.get(table).copied().unwrap_or(0)
-            - dedup.get(table).copied().unwrap_or(0);
+        let moved =
+            repoint.get(table).copied().unwrap_or(0) - dedup.get(table).copied().unwrap_or(0);
         if moved > 0 {
-            report.overwritten.insert((*table).to_string(), moved as usize);
+            report
+                .overwritten
+                .insert((*table).to_string(), moved as usize);
         }
     }
     for (table, _col, _secondary) in DEDUP_TARGETS {
