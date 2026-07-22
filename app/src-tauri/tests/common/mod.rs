@@ -494,7 +494,29 @@ fn insert_collision_group(conn: &Connection, ids: &[i64]) {
 /// a scripture Location (non-null Book/Chapter) that must NOT be remapped.
 pub fn generate_v16_collision_db() -> (TempDir, PathBuf) {
     let (dir, db_path) = fresh_v16_db();
-    let conn = Connection::open(&db_path).expect("open seeded db");
+    populate_collision_graph(&db_path);
+    (dir, db_path)
+}
+
+/// Full `.jwlibrary` variant of [`generate_v16_collision_db`] for the
+/// differential downgrade oracle (04-03): the SAME colliding-group +
+/// cross-table dependent graph, but wrapped in a real archive (manifest +
+/// media entries) so `open_and_validate` yields a session and `save_v14_copy`
+/// can run end-to-end and the result can be handed to the Python oracle.
+pub fn generate_v16_collision_fixture() -> (TempDir, PathBuf) {
+    let work_dir = TempDir::new().expect("failed to create collision fixture work dir");
+    seed_from_res_blank(work_dir.path());
+    populate_collision_graph(&work_dir.path().join("userData.db"));
+    build_fixture_archive(work_dir.path(), &synthetic_manifest_json())
+}
+
+/// Seeds the canonical 3-way colliding `Location` group (50/20/90, survivor 20)
+/// with a dependent row across ALL 7 FK columns pointing at NON-survivor ids,
+/// plus a scripture Location (non-null Book/Chapter) that must NOT be remapped.
+/// Shared by [`generate_v16_collision_db`] (bare db) and
+/// [`generate_v16_collision_fixture`] (full archive).
+fn populate_collision_graph(db_path: &Path) {
+    let conn = Connection::open(db_path).expect("open seeded db");
     conn.execute_batch("PRAGMA foreign_keys = OFF")
         .expect("fk off");
 
@@ -557,8 +579,6 @@ pub fn generate_v16_collision_db() -> (TempDir, PathBuf) {
         [],
     )
     .expect("insert PlaylistItemLocationMap");
-
-    (dir, db_path)
 }
 
 /// Inserts a 3-way colliding group (20/50/90, survivor 20) whose SURVIVOR is
