@@ -128,9 +128,7 @@ impl ArchiveError {
             // A missing/wrong-arch jwlCore binary degrades to a typed error
             // (never the Python `crash_box + sys.exit()` defect) — the DTO
             // exposes only the stable code + generic message_key.
-            ArchiveError::MergeUnavailable => {
-                ("merge_unavailable", "error.merge.unavailable")
-            }
+            ArchiveError::MergeUnavailable => ("merge_unavailable", "error.merge.unavailable"),
             // `reason` carries getLastResult() detail (internal path/SQL
             // fragments) and MUST NOT leak into the DTO (module docs / D-14) —
             // the DTO exposes only the stable code + generic message_key.

@@ -1105,6 +1105,244 @@ pub fn generate_trim_fixture() -> (TempDir, PathBuf) {
 }
 
 // ---------------------------------------------------------------------------
+// Two-archive merge fixture pair (05-01-PLAN.md Wave 1, Task 3)
+// ---------------------------------------------------------------------------
+//
+// Builds TWO independent synthetic v16 `userData.db`s — a merge DESTINATION
+// and a merge SOURCE — seeded from `res/blank`. Records span the
+// merge-affected single-PK tables (Location, Note, UserMark, BlockRange,
+// Bookmark, Tag, TagMap, InputField) with a deliberate mix of
+// (PlaylistItem/PlaylistItemMarker are omitted — see the fixture-validity note
+// in `insert_merge_dest_rows`):
+//   - OVERLAPPING identities present in BOTH (shared Note.Guid,
+//     UserMark.UserMarkGuid, Tag (Type,Name), a shared scripture Location
+//     identity) — jwlCore must NOT duplicate these on merge; and
+//   - DISJOINT identities present ONLY in the source — jwlCore must carry
+//     these into the destination.
+// SYNTHETIC ONLY — never a real `.jwlibrary` (GDPR Art. 9 bright line).
+//
+// The stable, cross-implementation identities the merge_ffi test asserts on:
+pub const MERGE_SHARED_NOTE_GUID: &str = "merge-note-shared-0001";
+pub const MERGE_DEST_ONLY_NOTE_GUID: &str = "merge-note-dest-0002";
+pub const MERGE_SRC_ONLY_NOTE_GUID: &str = "merge-note-src-0003";
+pub const MERGE_SHARED_USERMARK_GUID: &str = "merge-usermark-shared-0001";
+pub const MERGE_SRC_ONLY_USERMARK_GUID: &str = "merge-usermark-src-0002";
+pub const MERGE_SHARED_TAG_NAME: &str = "Merge Shared Tag";
+pub const MERGE_SRC_ONLY_TAG_NAME: &str = "Merge Source Tag";
+
+/// Seeds the merge DESTINATION db: a shared scripture Location + shared
+/// UserMark/Note (overlap with the source) plus a dest-only independent Note,
+/// the shared Tag, a Bookmark, an InputField, a BlockRange highlight, and a
+/// PlaylistItem + marker. FK enforcement is OFF for inserts (repo convention),
+/// but every reference is internally valid so a post-merge
+/// `PRAGMA foreign_key_check` is a meaningful assertion.
+fn insert_merge_dest_rows(db_path: &Path) {
+    let conn = Connection::open(db_path).expect("open dest userData.db");
+    conn.execute_batch("PRAGMA foreign_keys = OFF")
+        .expect("fk off");
+
+    // Shared scripture Location (identity: Book1/Ch1/nwt/Type0).
+    conn.execute(
+        "INSERT INTO Location (LocationId, BookNumber, ChapterNumber, DocumentId, Track, \
+         IssueTagNumber, KeySymbol, MepsLanguage, Type, Title, Specialty, Edition) \
+         VALUES (1, 1, 1, NULL, NULL, 0, 'nwt', 0, 0, 'Genesis 1:1', NULL, NULL)",
+        [],
+    )
+    .expect("dest scripture Location");
+    // Shared UserMark (by guid) on the shared Location.
+    conn.execute(
+        "INSERT INTO UserMark (UserMarkId, ColorIndex, LocationId, StyleIndex, UserMarkGuid, Version) \
+         VALUES (1, 1, 1, 0, ?1, 1)",
+        rusqlite::params![MERGE_SHARED_USERMARK_GUID],
+    )
+    .expect("dest shared UserMark");
+    // BlockRange keeping the shared highlight durable.
+    conn.execute(
+        "INSERT INTO BlockRange (BlockRangeId, BlockType, Identifier, StartToken, EndToken, UserMarkId) \
+         VALUES (1, 1, 1, 0, 5, 1)",
+        [],
+    )
+    .expect("dest BlockRange");
+    // Shared Note (by guid), located on the shared Location + UserMark.
+    conn.execute(
+        "INSERT INTO Note (NoteId, Guid, UserMarkId, LocationId, Title, Content, LastModified, \
+         Created, BlockType, BlockIdentifier) VALUES (1, ?1, 1, 1, 'Shared note', \
+         'Shared note content', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 2, 1)",
+        rusqlite::params![MERGE_SHARED_NOTE_GUID],
+    )
+    .expect("dest shared Note");
+    // Dest-only independent Note.
+    conn.execute(
+        "INSERT INTO Note (NoteId, Guid, UserMarkId, LocationId, Title, Content, LastModified, \
+         Created, BlockType, BlockIdentifier) VALUES (2, ?1, NULL, NULL, 'Dest-only note', \
+         'Dest-only content', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 0, NULL)",
+        rusqlite::params![MERGE_DEST_ONLY_NOTE_GUID],
+    )
+    .expect("dest-only Note");
+    // Shared Tag (by Type+Name) + TagMap onto the shared Note.
+    conn.execute(
+        "INSERT INTO Tag (TagId, Type, Name) VALUES (100, 1, ?1)",
+        rusqlite::params![MERGE_SHARED_TAG_NAME],
+    )
+    .expect("dest shared Tag");
+    conn.execute(
+        "INSERT INTO TagMap (TagMapId, PlaylistItemId, LocationId, NoteId, TagId, Position) \
+         VALUES (100, NULL, NULL, 1, 100, 0)",
+        [],
+    )
+    .expect("dest TagMap");
+    // Bookmark + InputField on the shared Location.
+    conn.execute(
+        "INSERT INTO Bookmark (BookmarkId, LocationId, PublicationLocationId, Slot, Title, \
+         Snippet, BlockType, BlockIdentifier) VALUES (1, 1, 1, 0, 'Dest Bookmark', NULL, 0, NULL)",
+        [],
+    )
+    .expect("dest Bookmark");
+    conn.execute(
+        "INSERT INTO InputField (LocationId, TextTag, Value) VALUES (1, 'dest-tag', 'dest-val')",
+        [],
+    )
+    .expect("dest InputField");
+    // NOTE (fixture-validity limit, NOT a wrapper defect): PlaylistItem /
+    // PlaylistItemMarker are intentionally OMITTED from this synthetic pair.
+    // jwlCore's PlaylistItem merge requires a fuller playlist graph than a
+    // minimal synthetic fixture reproduces — with an orphaned or
+    // membership-only playlist item it aborts the whole merge with
+    // "Exception merging PlaylistItem table failed: key not found: 0". That
+    // failure path is itself proof the FFI wrapper reads getLastResult()
+    // correctly; the merge-CORRECTNESS assertions here stand on the fully
+    // reproducible single-PK tables (Location/Note/UserMark/BlockRange/
+    // Bookmark/Tag/TagMap/InputField). See 05-01-SUMMARY.md.
+
+    conn.execute(
+        "UPDATE LastModified SET LastModified = '2026-01-01T00:00:00Z'",
+        [],
+    )
+    .expect("dest LastModified");
+}
+
+/// Seeds the merge SOURCE db: the SAME shared scripture Location + shared
+/// UserMark/Note/Tag as the destination (overlap), PLUS a source-only
+/// publication Location and a source-only Note/UserMark/Tag/Bookmark/
+/// PlaylistItem graph that the merge must carry into the destination.
+fn insert_merge_source_rows(db_path: &Path) {
+    let conn = Connection::open(db_path).expect("open source userData.db");
+    conn.execute_batch("PRAGMA foreign_keys = OFF")
+        .expect("fk off");
+
+    // Shared scripture Location — SAME identity as the destination's.
+    conn.execute(
+        "INSERT INTO Location (LocationId, BookNumber, ChapterNumber, DocumentId, Track, \
+         IssueTagNumber, KeySymbol, MepsLanguage, Type, Title, Specialty, Edition) \
+         VALUES (1, 1, 1, NULL, NULL, 0, 'nwt', 0, 0, 'Genesis 1:1', NULL, NULL)",
+        [],
+    )
+    .expect("source shared scripture Location");
+    // Source-only publication Location (distinct identity: DocumentId 500).
+    conn.execute(
+        "INSERT INTO Location (LocationId, BookNumber, ChapterNumber, DocumentId, Track, \
+         IssueTagNumber, KeySymbol, MepsLanguage, Type, Title, Specialty, Edition) \
+         VALUES (2, NULL, NULL, 500, NULL, 0, NULL, 0, 0, 'Source Publication', NULL, NULL)",
+        [],
+    )
+    .expect("source-only publication Location");
+    // Shared UserMark (same guid) on the shared Location.
+    conn.execute(
+        "INSERT INTO UserMark (UserMarkId, ColorIndex, LocationId, StyleIndex, UserMarkGuid, Version) \
+         VALUES (1, 1, 1, 0, ?1, 1)",
+        rusqlite::params![MERGE_SHARED_USERMARK_GUID],
+    )
+    .expect("source shared UserMark");
+    // Source-only UserMark on the source-only Location.
+    conn.execute(
+        "INSERT INTO UserMark (UserMarkId, ColorIndex, LocationId, StyleIndex, UserMarkGuid, Version) \
+         VALUES (2, 2, 2, 0, ?1, 1)",
+        rusqlite::params![MERGE_SRC_ONLY_USERMARK_GUID],
+    )
+    .expect("source-only UserMark");
+    // Source-only BlockRange keeping the source-only highlight durable.
+    conn.execute(
+        "INSERT INTO BlockRange (BlockRangeId, BlockType, Identifier, StartToken, EndToken, UserMarkId) \
+         VALUES (2, 1, 1, 0, 7, 2)",
+        [],
+    )
+    .expect("source-only BlockRange");
+    // Shared Note (same guid).
+    conn.execute(
+        "INSERT INTO Note (NoteId, Guid, UserMarkId, LocationId, Title, Content, LastModified, \
+         Created, BlockType, BlockIdentifier) VALUES (1, ?1, 1, 1, 'Shared note', \
+         'Shared note content', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 2, 1)",
+        rusqlite::params![MERGE_SHARED_NOTE_GUID],
+    )
+    .expect("source shared Note");
+    // Source-only Note located on the source-only Location + UserMark.
+    conn.execute(
+        "INSERT INTO Note (NoteId, Guid, UserMarkId, LocationId, Title, Content, LastModified, \
+         Created, BlockType, BlockIdentifier) VALUES (2, ?1, 2, 2, 'Source-only note', \
+         'Source-only content', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 2, 1)",
+        rusqlite::params![MERGE_SRC_ONLY_NOTE_GUID],
+    )
+    .expect("source-only Note");
+    // Shared Tag (same Type+Name) + source-only Tag.
+    conn.execute(
+        "INSERT INTO Tag (TagId, Type, Name) VALUES (100, 1, ?1)",
+        rusqlite::params![MERGE_SHARED_TAG_NAME],
+    )
+    .expect("source shared Tag");
+    conn.execute(
+        "INSERT INTO Tag (TagId, Type, Name) VALUES (101, 1, ?1)",
+        rusqlite::params![MERGE_SRC_ONLY_TAG_NAME],
+    )
+    .expect("source-only Tag");
+    // TagMap: source-only Tag onto the source-only Note.
+    conn.execute(
+        "INSERT INTO TagMap (TagMapId, PlaylistItemId, LocationId, NoteId, TagId, Position) \
+         VALUES (101, NULL, NULL, 2, 101, 0)",
+        [],
+    )
+    .expect("source-only TagMap");
+    // Source-only Bookmark + InputField on the source-only Location.
+    conn.execute(
+        "INSERT INTO Bookmark (BookmarkId, LocationId, PublicationLocationId, Slot, Title, \
+         Snippet, BlockType, BlockIdentifier) VALUES (1, 2, 2, 1, 'Source Bookmark', NULL, 0, NULL)",
+        [],
+    )
+    .expect("source-only Bookmark");
+    conn.execute(
+        "INSERT INTO InputField (LocationId, TextTag, Value) VALUES (2, 'src-tag', 'src-val')",
+        [],
+    )
+    .expect("source-only InputField");
+    // PlaylistItem / PlaylistItemMarker intentionally OMITTED — see the
+    // fixture-validity note in `insert_merge_dest_rows`.
+
+    conn.execute(
+        "UPDATE LastModified SET LastModified = '2026-01-01T00:00:00Z'",
+        [],
+    )
+    .expect("source LastModified");
+}
+
+/// Builds the synthetic merge fixture PAIR. Returns `(dest, source)` where each
+/// is `(TempDir, PathBuf)` and the `PathBuf` is `<tempdir>/userData.db` — so
+/// each `TempDir` doubles as a jwlCore merge ROOT directory (jwlCore opens
+/// `<dir>/userData.db`). The FFI test materializes the two-directory layout
+/// (`dest_root` + `dest_root/merge`) from these (D5-03).
+pub fn generate_merge_pair() -> ((TempDir, PathBuf), (TempDir, PathBuf)) {
+    let dest_dir = TempDir::new().expect("create merge dest dir");
+    seed_from_res_blank(dest_dir.path());
+    let dest_db = dest_dir.path().join("userData.db");
+    insert_merge_dest_rows(&dest_db);
+
+    let src_dir = TempDir::new().expect("create merge source dir");
+    seed_from_res_blank(src_dir.path());
+    let src_db = src_dir.path().join("userData.db");
+    insert_merge_source_rows(&src_db);
+
+    ((dest_dir, dest_db), (src_dir, src_db))
+}
+
+// ---------------------------------------------------------------------------
 // Zip-slip fixture generator (6 variants, D-08)
 // ---------------------------------------------------------------------------
 

@@ -19,7 +19,7 @@
 //! (JWLManager.py:2670-2672, jwlcore.py:64-68).
 
 use crate::error::ArchiveError;
-use crate::jwlcore::loader::{load_library, resolve_lib_name, resolve_lib_path};
+use crate::jwlcore::loader::{dev_libs_dir, load_library, resolve_lib_name, resolve_lib_path};
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::path::{Path, PathBuf};
@@ -84,6 +84,17 @@ pub(crate) fn merge_availability(app: &tauri::AppHandle) -> Result<PathBuf, Arch
     let arch = std::env::consts::ARCH;
     let name = availability_name(os, arch)?;
     resolve_lib_path(app, name).map_err(|_| ArchiveError::MergeUnavailable)
+}
+
+/// Dev-tree (`libs/`) path to the jwlCore binary for the CURRENT host, or
+/// `None` when this `(OS, ARCH)` has no shipped binary. Lets the FFI
+/// integration test (`tests/merge_ffi.rs`, a separate crate that cannot reach
+/// the `pub(crate)` loader helpers) resolve the real DLL and skip-as-pass
+/// off-host WITHOUT re-implementing arch selection — arch logic stays in the
+/// one place (`loader::resolve_lib_name`). Existence is NOT checked here.
+pub fn host_dev_lib_path() -> Option<PathBuf> {
+    let name = resolve_lib_name(std::env::consts::OS, std::env::consts::ARCH).ok()?;
+    Some(dev_libs_dir().join(name))
 }
 
 /// Invokes `mergeDatabase` from the vendored lib at `lib_path`, merging the
@@ -175,7 +186,10 @@ mod tests {
         let bad = Path::new("bad\0dir");
         match dir_cstring(bad) {
             Err(ArchiveError::MergeFailed { reason }) => {
-                assert!(reason.contains("NUL"), "reason should mention the NUL: {reason}");
+                assert!(
+                    reason.contains("NUL"),
+                    "reason should mention the NUL: {reason}"
+                );
             }
             other => panic!("expected MergeFailed, got {other:?}"),
         }
