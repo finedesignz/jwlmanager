@@ -46,10 +46,54 @@
 //! SQLite NULL-distinctness semantics) and fails with a named
 //! `SchemaDowngradeFailed` + full rollback rather than a partial write (T-04-13).
 
+use crate::db::delete::{diff_snapshots, snapshot_tables, DryRunReport};
 use crate::db::pragma_guard::PragmaGuard;
+use crate::db::trim::trim_sweep;
 use crate::error::ArchiveError;
 use rusqlite::{Connection, Transaction};
 use std::collections::BTreeMap;
+use std::path::Path;
+
+/// The single-column-PK tables snapshotted for the dry-run before/after diff.
+/// `Location` carries the merged-away deletions; `Bookmark`/`TagMap` carry the
+/// dedup deletions on their composite-key targets (their PK vanishes when a row
+/// is deduped, so the diff surfaces it as `deleted`, HIGH-3). `InputField` and
+/// `PlaylistItemLocationMap` have NO single-column PK — their dedup deletions
+/// are surfaced from the directly-computed dedup counts instead (see
+/// [`dry_run_downgrade`]). `Note`/`UserMark`/`Tag` are plain-repoint / untouched
+/// but snapshotted for completeness.
+const DOWNGRADE_SNAPSHOT_TABLES: &[(&str, &str)] = &[
+    ("Location", "LocationId"),
+    ("Bookmark", "BookmarkId"),
+    ("Note", "NoteId"),
+    ("UserMark", "UserMarkId"),
+    ("TagMap", "TagMapId"),
+    ("Tag", "TagId"),
+];
+
+/// Each LocationId FK column the merge repoints, `(table, column)`. `Bookmark`
+/// appears TWICE (its two independent LocationId columns) — the plan requires a
+/// SEPARATE repoint count for `Bookmark.PublicationLocationId`.
+const REMAP_TARGETS: &[(&str, &str)] = &[
+    ("Bookmark", "LocationId"),
+    ("Bookmark", "PublicationLocationId"),
+    ("Note", "LocationId"),
+    ("UserMark", "LocationId"),
+    ("InputField", "LocationId"),
+    ("TagMap", "LocationId"),
+    ("PlaylistItemLocationMap", "LocationId"),
+];
+
+/// The four composite-key remap targets, `(table, remapped_col, secondary_key)`
+/// — the merge DELETEs a merged-away row that would collide with the survivor on
+/// the secondary key (see module docs). These deletions are real study-data
+/// loss and MUST surface in `deleted`, never `overwritten` (HIGH-3).
+const DEDUP_TARGETS: &[(&str, &str, &str)] = &[
+    ("Bookmark", "PublicationLocationId", "Slot"),
+    ("InputField", "LocationId", "TextTag"),
+    ("TagMap", "LocationId", "TagId"),
+    ("PlaylistItemLocationMap", "LocationId", "PlaylistItemId"),
+];
 
 /// The literal v14 `Location_new` DDL from `JWLManager.py:1194-1229`,
 /// byte-exact: this is the v16 `CREATE_LOCATION_NEW` in `upgrade.rs` MINUS the
@@ -161,10 +205,13 @@ pub fn downgrade_to_v14(conn: &mut Connection) -> Result<(), ArchiveError> {
     Ok(())
 }
 
-/// Runs the merge + preflight + rebuild inside an already-open transaction.
-/// Any error propagates up and rolls the transaction back on drop.
-fn run_downgrade_ddl(tx: &Transaction) -> Result<(), ArchiveError> {
-    // a. Grouping — typed tuple key (MED-4), ordered by LocationId (D4-01).
+/// Computes the colliding merge groups exactly as the real downgrade does:
+/// null-Book/Chapter Locations, typed-tuple keyed (MED-4), ordered by
+/// LocationId so `ids[0]` is the deterministic lowest-id survivor (D4-01).
+/// Returns only the groups that actually merge (len >= 2) as
+/// `(keep_id, merged_old_ids)`. Shared by [`run_downgrade_ddl`] and the dry-run
+/// so the preview's survivor selection can NEVER diverge from the save's.
+fn compute_merge_groups(tx: &Transaction) -> Result<Vec<(i64, Vec<i64>)>, ArchiveError> {
     let mut order: Vec<GroupKey> = Vec::new();
     let mut groups: BTreeMap<GroupKey, Vec<i64>> = BTreeMap::new();
     {
@@ -207,14 +254,24 @@ fn run_downgrade_ddl(tx: &Transaction) -> Result<(), ArchiveError> {
         }
     }
 
-    // b/c. Remap each colliding group onto its lowest-id survivor.
+    let mut merges = Vec::new();
     for key in &order {
         let ids = &groups[key];
         if ids.len() < 2 {
             continue;
         }
-        let keep_id = ids[0];
-        for &old_id in &ids[1..] {
+        merges.push((ids[0], ids[1..].to_vec()));
+    }
+    Ok(merges)
+}
+
+/// Runs the merge + preflight + rebuild inside an already-open transaction.
+/// Any error propagates up and rolls the transaction back on drop.
+fn run_downgrade_ddl(tx: &Transaction) -> Result<(), ArchiveError> {
+    // a/b/c. Group (typed key, lowest-id survivor) and remap each colliding
+    // group onto its survivor.
+    for (keep_id, old_ids) in compute_merge_groups(tx)? {
+        for old_id in old_ids {
             remap_location(tx, keep_id, old_id)?;
             tx.execute("DELETE FROM Location WHERE LocationId = ?1", [old_id])
                 .map_err(|e| map_sqlite_err(e, "deleting merged-away Location"))?;
@@ -379,4 +436,188 @@ fn map_downgrade_insert_err(err: rusqlite::Error) -> ArchiveError {
         };
     }
     map_sqlite_err(err, "rebuilding Location rows (v14)")
+}
+
+/// `SELECT COUNT(*) FROM <table> WHERE <col> IN (<ids>)`, ids bound as typed
+/// integer parameters (SAFE-02 — only the placeholder count is dynamic).
+/// `table`/`col` are compile-time constants from [`REMAP_TARGETS`], never user
+/// input. An empty `ids` slice yields 0 without touching the DB.
+fn count_in_ids(tx: &Transaction, table: &str, col: &str, ids: &[i64]) -> Result<i64, ArchiveError> {
+    if ids.is_empty() {
+        return Ok(0);
+    }
+    let placeholders = std::iter::repeat_n("?", ids.len())
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!("SELECT COUNT(*) FROM {table} WHERE {col} IN ({placeholders})");
+    tx.query_row(&sql, rusqlite::params_from_iter(ids.iter()), |r| r.get(0))
+        .map_err(|e| map_sqlite_err(e, "counting repointed rows"))
+}
+
+/// Counts the rows a composite-key dedup DELETE will remove for one merged
+/// group: `<col> = <old> AND <secondary> IN (SELECT <secondary> ... WHERE
+/// <col> = <keep>)`. These are DELETED study rows — real data loss (HIGH-3).
+fn count_dedup(
+    tx: &Transaction,
+    table: &str,
+    col: &str,
+    secondary: &str,
+    keep: i64,
+    old: i64,
+) -> Result<i64, ArchiveError> {
+    let sql = format!(
+        "SELECT COUNT(*) FROM {table} WHERE {col} = ?1 AND {secondary} IN \
+         (SELECT {secondary} FROM {table} WHERE {col} = ?2)"
+    );
+    tx.query_row(&sql, [old, keep], |r| r.get(0))
+        .map_err(|e| map_sqlite_err(e, "counting dedup-deleted rows"))
+}
+
+/// Semantic dry-run preview of a v16->v14 downgrade that leaves the working copy
+/// byte-unchanged (rolled-back transaction, no VACUUM), reusing Phase 2's
+/// [`DryRunReport`].
+///
+/// Ordering inside the tx is IDENTICAL to `save_v14_copy` (HIGH-2): `trim_sweep`
+/// runs FIRST (VACUUM-free counterpart of the real save's `trim_db`), so an
+/// unused lowest-id Location is swept BEFORE grouping and can never be wrongly
+/// chosen as the survivor — the preview's survivor always matches the save's.
+///
+/// The report distinguishes rows that MOVED (kept, repointed onto the survivor)
+/// from rows that were LOST (dedup-deleted on a composite-key target, or the
+/// merged-away Location rows): `overwritten[target]` = repointed - dedup-deleted;
+/// dedup-deleted + merged-away rows surface in `deleted` (HIGH-3), never hidden
+/// in `overwritten`.
+pub fn dry_run_downgrade(conn: &mut Connection) -> Result<DryRunReport, ArchiveError> {
+    let guard = PragmaGuard::new(conn).map_err(|e| map_sqlite_err(e, "snapshotting pragmas"))?;
+    conn.execute_batch(
+        "PRAGMA temp_store = 'MEMORY'; \
+         PRAGMA synchronous = 'OFF'; \
+         PRAGMA journal_mode = 'MEMORY'; \
+         PRAGMA foreign_keys = 'OFF';",
+    )
+    .map_err(|e| map_sqlite_err(e, "setting dry-run pragmas"))?;
+
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| map_sqlite_err(e, "opening dry-run transaction"))?;
+
+    // 1. Trim FIRST — identical order to the real save (HIGH-2).
+    trim_sweep(&tx)?;
+
+    // 2. Snapshot the single-PK tables AFTER trim, so `deleted` reflects ONLY
+    //    the downgrade's effect (merged-away Locations + dedup deletions), not
+    //    trim orphans.
+    let before = snapshot_tables(&tx, DOWNGRADE_SNAPSHOT_TABLES)?;
+
+    // 3/4. Compute exact per-target repoint + dedup counts on the post-trim
+    //      state, keyed the SAME way the real merge groups.
+    let groups = compute_merge_groups(&tx)?;
+    let merged_old: Vec<i64> = groups
+        .iter()
+        .flat_map(|(_, olds)| olds.iter().copied())
+        .collect();
+
+    let mut repoint: BTreeMap<&str, i64> = BTreeMap::new();
+    for (table, col) in REMAP_TARGETS {
+        *repoint.entry(table).or_insert(0) += count_in_ids(&tx, table, col, &merged_old)?;
+    }
+
+    let mut dedup: BTreeMap<&str, i64> = BTreeMap::new();
+    for (table, col, secondary) in DEDUP_TARGETS {
+        let mut sum = 0;
+        for (keep, olds) in &groups {
+            for &old in olds {
+                sum += count_dedup(&tx, table, col, secondary, *keep, old)?;
+            }
+        }
+        *dedup.entry(table).or_insert(0) += sum;
+    }
+
+    // 5. Run the REAL merge/remap/preflight/rebuild.
+    run_downgrade_ddl(&tx)?;
+
+    // 6. Re-snapshot + genuine diff (Location merges + composite dedup rows
+    //    whose single PK vanished, e.g. TagMap/Bookmark).
+    let after = snapshot_tables(&tx, DOWNGRADE_SNAPSHOT_TABLES)?;
+    let mut report = diff_snapshots(&before, &after);
+
+    // 7. Override `overwritten` for every remap target with rows-that-MOVED
+    //    (repointed minus dedup-deleted); surface dedup-deleted rows of the
+    //    non-single-PK targets (InputField, PlaylistItemLocationMap) in
+    //    `deleted` (the single-PK targets are already covered by the diff).
+    for (table, _col) in REMAP_TARGETS {
+        report.overwritten.remove(*table);
+    }
+    for (table, _col) in REMAP_TARGETS {
+        let moved = repoint.get(table).copied().unwrap_or(0)
+            - dedup.get(table).copied().unwrap_or(0);
+        if moved > 0 {
+            report.overwritten.insert((*table).to_string(), moved as usize);
+        }
+    }
+    for (table, _col, _secondary) in DEDUP_TARGETS {
+        let is_single_pk = DOWNGRADE_SNAPSHOT_TABLES.iter().any(|(t, _)| t == table);
+        if is_single_pk {
+            continue;
+        }
+        let lost = dedup.get(table).copied().unwrap_or(0);
+        if lost > 0 {
+            *report.deleted.entry((*table).to_string()).or_insert(0) += lost as usize;
+        }
+    }
+    report.total_deleted = report.deleted.values().sum();
+
+    // Rolled back on drop (never committed); pragmas restored by the guard.
+    drop(tx);
+    drop(guard);
+    Ok(report)
+}
+
+/// Writes a v14-compatible archive to `target` WITHOUT touching the live v16
+/// session (SCHEMA-05, D4-06, MED-5). The downgrade is lossy (merges Locations,
+/// deletes dedup rows), so it MUST run on a throwaway `std::fs::copy` of the
+/// working DB — never `session.db_path`:
+///
+/// 1. Copy `session.db_path` to a throwaway file inside `session.temp_dir`.
+/// 2. On the COPY only: `trim_db` (VACUUM) THEN `downgrade_to_v14` — trim-first,
+///    identical order to [`dry_run_downgrade`]. An un-downgradeable archive
+///    (HIGH-1) fails here with `SchemaDowngradeFailed`; `target` is never
+///    written and the session is untouched.
+/// 3. Write the v14 bytes to `target` through the session-untouching
+///    [`crate::archive::save::write_archive_from_db_source`] (atomic replace, no
+///    re-trim, output-side manifest only — schema_version read off the copy = 14).
+/// 4. Best-effort delete the throwaway copy.
+///
+/// Does NOT set `session.dirty` / `session.target_path` — a v14 save is a side
+/// export (D4-07); the user keeps editing at v16.
+pub fn save_v14_copy(
+    session: &crate::session::ArchiveSession,
+    target: &Path,
+    app_name: &str,
+    device_name: &str,
+    now_iso8601: &str,
+) -> Result<(), ArchiveError> {
+    let copy_path = session.temp_dir.path().join("userData_v14.db");
+
+    let result = (|| {
+        std::fs::copy(&session.db_path, &copy_path)?;
+        {
+            let mut conn = Connection::open(&copy_path)?;
+            crate::db::trim::trim_db(&mut conn)?;
+            downgrade_to_v14(&mut conn)?;
+        }
+        crate::archive::save::write_archive_from_db_source(
+            session,
+            &copy_path,
+            target,
+            app_name,
+            device_name,
+            now_iso8601,
+        )
+        .map(|_| ())
+    })();
+
+    // Best-effort cleanup on every path — the copy is a throwaway.
+    let _ = std::fs::remove_file(&copy_path);
+    result
 }

@@ -561,6 +561,136 @@ pub fn generate_v16_collision_db() -> (TempDir, PathBuf) {
     (dir, db_path)
 }
 
+/// Inserts a 3-way colliding group (20/50/90, survivor 20) whose SURVIVOR is
+/// kept trim-stable (a content-bearing Note references it) and where every FK
+/// remap target (except the composite PlaylistItemLocationMap) carries exactly
+/// one trim-stable dependent pointing at a NON-survivor id — so the dry-run's
+/// per-target repoint count is a clean, asserted-by-value `1` and no dependent
+/// is swept out from under the count by trim-first. No dedup collisions (the
+/// survivor carries none of the composite-key dependents), so all repointed
+/// rows are `overwritten`, and only the two merged-away Locations are `deleted`.
+fn insert_dryrun_collision_graph(conn: &Connection) {
+    insert_collision_group(conn, &[20, 50, 90]);
+    conn.execute(
+        "INSERT INTO Tag (TagId, Type, Name) VALUES (700, 1, 'DG Tag')",
+        [],
+    )
+    .expect("insert Tag");
+
+    // Survivor 20 kept alive by a content-bearing Note (trim-stable).
+    conn.execute(
+        "INSERT INTO Note (NoteId, Guid, UserMarkId, LocationId, Title, Content, LastModified, \
+         Created, BlockType, BlockIdentifier) VALUES (11, 'dg-note-guid-0011', NULL, 20, \
+         'Survivor note', 'survivor content', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 0, NULL)",
+        [],
+    )
+    .expect("insert survivor Note");
+
+    // Bookmark: LocationId -> 50, PublicationLocationId -> 90 (both non-survivor).
+    conn.execute(
+        "INSERT INTO Bookmark (BookmarkId, LocationId, PublicationLocationId, Slot, Title, \
+         Snippet, BlockType, BlockIdentifier) VALUES (1, 50, 90, 0, 'DG Bookmark', NULL, 0, NULL)",
+        [],
+    )
+    .expect("insert Bookmark");
+    // Note -> 50 (content-bearing, trim-stable).
+    conn.execute(
+        "INSERT INTO Note (NoteId, Guid, UserMarkId, LocationId, Title, Content, LastModified, \
+         Created, BlockType, BlockIdentifier) VALUES (10, 'dg-note-guid-0010', NULL, 50, \
+         'DG Note', 'content', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 0, NULL)",
+        [],
+    )
+    .expect("insert Note");
+    // UserMark -> 90, kept trim-stable by a BlockRange.
+    conn.execute(
+        "INSERT INTO UserMark (UserMarkId, ColorIndex, LocationId, StyleIndex, UserMarkGuid, Version) \
+         VALUES (10, 1, 90, 0, 'dg-usermark-guid-0010', 1)",
+        [],
+    )
+    .expect("insert UserMark");
+    conn.execute(
+        "INSERT INTO BlockRange (BlockRangeId, BlockType, Identifier, StartToken, EndToken, UserMarkId) \
+         VALUES (10, 1, 1, 0, 5, 10)",
+        [],
+    )
+    .expect("insert BlockRange keeping UserMark trim-stable");
+    // InputField -> 50 (non-empty Value, trim-stable).
+    conn.execute(
+        "INSERT INTO InputField (LocationId, TextTag, Value) VALUES (50, 't1', 'v1')",
+        [],
+    )
+    .expect("insert InputField");
+    // TagMap -> 90 (LocationId form: NoteId/PlaylistItemId NULL -> trim-stable).
+    conn.execute(
+        "INSERT INTO TagMap (TagMapId, PlaylistItemId, LocationId, NoteId, TagId, Position) \
+         VALUES (700, NULL, 90, NULL, 700, 0)",
+        [],
+    )
+    .expect("insert TagMap");
+}
+
+/// Bare-db dedicated dry-run fixture (see [`insert_dryrun_collision_graph`]).
+/// Survivor 20 stable under trim-first; deterministic per-target repoint counts.
+pub fn generate_v16_dryrun_collision_db() -> (TempDir, PathBuf) {
+    let (dir, db_path) = fresh_v16_db();
+    let conn = Connection::open(&db_path).expect("open seeded db");
+    conn.execute_batch("PRAGMA foreign_keys = OFF")
+        .expect("fk off");
+    insert_dryrun_collision_graph(&conn);
+    (dir, db_path)
+}
+
+/// Full `.jwlibrary` archive wrapping [`generate_v16_collision_db`]'s graph:
+/// the collision group's lowest-id survivor (20) is UNREFERENCED and thus
+/// trim-eligible, so a trim-FIRST v14 save shifts the survivor to 50 (HIGH-2).
+/// Used by the orchestration tests that need a real `ArchiveSession` via
+/// `open_and_validate`.
+pub fn generate_v16_collision_archive() -> (TempDir, PathBuf) {
+    let work_dir = TempDir::new().expect("failed to create fixture work dir");
+    seed_from_res_blank(work_dir.path());
+    let db_path = work_dir.path().join("userData.db");
+    let conn = Connection::open(&db_path).expect("open seeded db");
+    conn.execute_batch("PRAGMA foreign_keys = OFF")
+        .expect("fk off");
+    insert_collision_group(&conn, &[50, 20, 90]);
+    conn.execute(
+        "INSERT INTO Bookmark (BookmarkId, LocationId, PublicationLocationId, Slot, Title, \
+         Snippet, BlockType, BlockIdentifier) VALUES (1, 50, 90, 0, 'DG Bookmark', NULL, 0, NULL)",
+        [],
+    )
+    .expect("insert Bookmark");
+    drop(conn);
+    build_fixture_archive(work_dir.path(), &synthetic_manifest_json())
+}
+
+/// Full `.jwlibrary` archive wrapping the HIGH-1 un-downgradeable graph — a
+/// real `ArchiveSession` whose v14 save must fail with `SchemaDowngradeFailed`
+/// and write nothing.
+pub fn generate_high1_undowngradeable_archive() -> (TempDir, PathBuf) {
+    let work_dir = TempDir::new().expect("failed to create fixture work dir");
+    seed_from_res_blank(work_dir.path());
+    let db_path = work_dir.path().join("userData.db");
+    let conn = Connection::open(&db_path).expect("open seeded db");
+    conn.execute_batch("PRAGMA foreign_keys = OFF")
+        .expect("fk off");
+    conn.execute(
+        "INSERT INTO Location (LocationId, BookNumber, ChapterNumber, DocumentId, Track, \
+         IssueTagNumber, KeySymbol, MepsLanguage, Type, Title, Specialty, Edition) \
+         VALUES (60, 1, NULL, 3001, 5, 0, 'nwt', 0, 0, 'U2 collide A', 'spec-a', NULL)",
+        [],
+    )
+    .expect("insert U2-collide Location A");
+    conn.execute(
+        "INSERT INTO Location (LocationId, BookNumber, ChapterNumber, DocumentId, Track, \
+         IssueTagNumber, KeySymbol, MepsLanguage, Type, Title, Specialty, Edition) \
+         VALUES (61, 1, NULL, 3001, 5, 0, 'nwt', 0, 0, 'U2 collide B', 'spec-b', NULL)",
+        [],
+    )
+    .expect("insert U2-collide Location B");
+    drop(conn);
+    build_fixture_archive(work_dir.path(), &synthetic_manifest_json())
+}
+
 /// Composite-collision fixture builders. Each seeds the 2-way group (20/90,
 /// survivor 20) plus a survivor + merged-away row that SHARE the secondary key
 /// on one composite-key target — proving dedup-then-repoint.

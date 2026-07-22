@@ -9,7 +9,7 @@
 
 mod common;
 
-use jwlmanager_lib::archive::downgrade::downgrade_to_v14;
+use jwlmanager_lib::archive::downgrade::{downgrade_to_v14, dry_run_downgrade};
 use jwlmanager_lib::error::ArchiveError;
 use rusqlite::Connection;
 
@@ -388,6 +388,61 @@ fn test_version_gate_noop_on_v14() {
     let mut conn = Connection::open(&db_path).unwrap();
     downgrade_to_v14(&mut conn).expect("v14 must be an idempotent no-op Ok");
     assert_eq!(user_version(&conn), 14);
+}
+
+// ---------------------------------------------------------------------------
+// 13. Dry-run preview: trim-first, exact repoint counts, dedup surfaced (04-02)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_dry_run_exact_repoint_counts_and_location_deleted() {
+    let (_dir, db_path) = common::generate_v16_dryrun_collision_db();
+    let mut conn = Connection::open(&db_path).unwrap();
+    let report = dry_run_downgrade(&mut conn).expect("dry run must succeed");
+
+    // Two merged-away Locations (50, 90) surface as data loss.
+    assert_eq!(report.deleted.get("Location"), Some(&2));
+    // No dedup collisions here -> the ONLY deleted rows are the two Locations.
+    assert_eq!(report.deleted.len(), 1, "report.deleted = {:?}", report.deleted);
+    assert_eq!(report.total_deleted, 2);
+
+    // Exact per-target repointed-row counts (rows that MOVED onto the survivor).
+    assert_eq!(
+        report.overwritten.get("Bookmark"),
+        Some(&2),
+        "Bookmark.LocationId + Bookmark.PublicationLocationId both repoint"
+    );
+    assert_eq!(report.overwritten.get("Note"), Some(&1));
+    assert_eq!(report.overwritten.get("UserMark"), Some(&1));
+    assert_eq!(report.overwritten.get("InputField"), Some(&1));
+    assert_eq!(report.overwritten.get("TagMap"), Some(&1));
+
+    // The working DB is byte-untouched: still v16, all 3 group Locations present.
+    assert_eq!(user_version(&conn), 16);
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM Location"), 3);
+}
+
+#[test]
+fn test_dry_run_dedup_deleted_surfaced_in_deleted_not_overwritten() {
+    let (_dir, db_path) = common::generate_composite_tagmap_db();
+    let mut conn = Connection::open(&db_path).unwrap();
+    let report = dry_run_downgrade(&mut conn).expect("dry run must succeed");
+
+    // The merged-away TagMap row (shared TagId with the survivor) is DELETED —
+    // real study-data loss — and must appear in `deleted`, never `overwritten`.
+    assert_eq!(report.deleted.get("TagMap"), Some(&1), "dedup-deleted TagMap row");
+    assert!(
+        !report.overwritten.contains_key("TagMap"),
+        "dedup-deleted rows must NOT be hidden in overwritten: {:?}",
+        report.overwritten
+    );
+    // One merged-away Location too.
+    assert_eq!(report.deleted.get("Location"), Some(&1));
+
+    // Working DB unchanged.
+    assert_eq!(user_version(&conn), 16);
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM TagMap"), 2);
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM Location"), 2);
 }
 
 #[test]

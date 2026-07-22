@@ -109,7 +109,7 @@ pub struct DryRunReport {
 /// are intentionally out of scope for row-identity diffing here — a Notes
 /// delete never touches playlist data directly, and `trim_sweep`'s sweep of
 /// those tables is already covered by `trim_tests.rs`.
-const TRACKED_TABLES: &[(&str, &str)] = &[
+pub(crate) const TRACKED_TABLES: &[(&str, &str)] = &[
     ("Note", "NoteId"),
     ("UserMark", "UserMarkId"),
     ("BlockRange", "BlockRangeId"),
@@ -120,7 +120,11 @@ const TRACKED_TABLES: &[(&str, &str)] = &[
     ("PlaylistItemMarker", "PlaylistItemMarkerId"),
 ];
 
-fn snapshot_pks(tx: &Transaction, table: &str, pk_col: &str) -> Result<HashSet<i64>, ArchiveError> {
+pub(crate) fn snapshot_pks(
+    tx: &Transaction,
+    table: &str,
+    pk_col: &str,
+) -> Result<HashSet<i64>, ArchiveError> {
     let sql = format!("SELECT {pk_col} FROM {table}");
     let mut stmt = tx
         .prepare(&sql)
@@ -135,12 +139,25 @@ fn snapshot_pks(tx: &Transaction, table: &str, pk_col: &str) -> Result<HashSet<i
     Ok(set)
 }
 
-fn snapshot_all(tx: &Transaction) -> Result<BTreeMap<String, HashSet<i64>>, ArchiveError> {
+/// Snapshots the single-column integer PKs of an arbitrary set of `tables`
+/// (each `(table, pk_col)`). Reused by the schema-downgrade dry-run
+/// (`archive::downgrade::dry_run_downgrade`) with its own table set — the diff
+/// logic must never be copy-pasted.
+pub(crate) fn snapshot_tables(
+    tx: &Transaction,
+    tables: &[(&str, &str)],
+) -> Result<BTreeMap<String, HashSet<i64>>, ArchiveError> {
     let mut snapshot = BTreeMap::new();
-    for (table, pk_col) in TRACKED_TABLES {
+    for (table, pk_col) in tables {
         snapshot.insert((*table).to_string(), snapshot_pks(tx, table, pk_col)?);
     }
     Ok(snapshot)
+}
+
+pub(crate) fn snapshot_all(
+    tx: &Transaction,
+) -> Result<BTreeMap<String, HashSet<i64>>, ArchiveError> {
+    snapshot_tables(tx, TRACKED_TABLES)
 }
 
 /// Diffs a before/after pair of per-table PK snapshots into a
@@ -149,7 +166,7 @@ fn snapshot_all(tx: &Transaction) -> Result<BTreeMap<String, HashSet<i64>>, Arch
 /// `Location.Title` normalization — SEMANTIC accounting per D2-07, never a
 /// false `deleted`); a PK present only before is genuinely `deleted`; a PK
 /// present only after is `added`.
-fn diff_snapshots(
+pub(crate) fn diff_snapshots(
     before: &BTreeMap<String, HashSet<i64>>,
     after: &BTreeMap<String, HashSet<i64>>,
 ) -> DryRunReport {
