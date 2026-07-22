@@ -5,5 +5,6 @@
 //! NEVER called here — that is Phase 5's job.
 
 pub mod loader;
+pub mod merge;
 
 pub use loader::{check_jwlcore, JwlCoreStatus};
