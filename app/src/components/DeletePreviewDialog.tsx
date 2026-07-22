@@ -1,10 +1,23 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import type { DryRunReport } from "../bindings/DryRunReport";
 
 interface DeletePreviewDialogProps {
   report: DryRunReport;
   onConfirm: () => Promise<void>;
   onCancel: () => void;
+  /** Dialog heading. Defaults to the Notes-delete copy. */
+  title?: string;
+  /** `aria-label` for the dialog role. Defaults to "Confirm delete". */
+  ariaLabel?: string;
+  /** Overrides the summary body entirely (caller-driven copy, e.g. the v14
+   * "N Locations will be merged" framing). Defaults to the Notes-delete
+   * summary derived from `report.deleted`. */
+  summary?: ReactNode;
+  /** Confirm button label at rest. Defaults to "Delete". */
+  confirmLabel?: string;
+  /** Confirm button label while the confirm handler is in flight. Defaults to
+   * "Deleting…". */
+  confirmPendingLabel?: string;
 }
 
 /**
@@ -26,6 +39,11 @@ export default function DeletePreviewDialog({
   report,
   onConfirm,
   onCancel,
+  title = "Delete these Notes?",
+  ariaLabel = "Confirm delete",
+  summary,
+  confirmLabel = "Delete",
+  confirmPendingLabel = "Deleting…",
 }: DeletePreviewDialogProps) {
   const [pending, setPending] = useState(false);
   const busyRef = useRef(false);
@@ -52,7 +70,7 @@ export default function DeletePreviewDialog({
   }, [pending, onCancel]);
 
   const entries = Object.entries(report.deleted).filter(([, count]) => count > 0);
-  const summary =
+  const defaultSummary =
     entries.length > 0
       ? entries.map(([table, count]) => `${count} ${table}`).join(", ")
       : "nothing";
@@ -63,14 +81,18 @@ export default function DeletePreviewDialog({
         className="delete-preview-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="Confirm delete"
+        aria-label={ariaLabel}
         data-testid="delete-preview-dialog"
       >
-        <h2 className="delete-preview-title">Delete these Notes?</h2>
+        <h2 className="delete-preview-title">{title}</h2>
         <p className="delete-preview-summary" data-testid="delete-preview-summary">
-          This will remove {summary} ({report.total_deleted} row
-          {report.total_deleted === 1 ? "" : "s"} total). This can't be undone once you
-          save.
+          {summary ?? (
+            <>
+              This will remove {defaultSummary} ({report.total_deleted} row
+              {report.total_deleted === 1 ? "" : "s"} total). This can't be undone once
+              you save.
+            </>
+          )}
         </p>
         <div className="delete-preview-actions">
           <button
@@ -90,7 +112,7 @@ export default function DeletePreviewDialog({
             aria-busy={pending}
             data-testid="delete-preview-confirm"
           >
-            {pending ? "Deleting…" : "Delete"}
+            {pending ? confirmPendingLabel : confirmLabel}
           </button>
         </div>
       </div>
