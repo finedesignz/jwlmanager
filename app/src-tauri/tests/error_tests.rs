@@ -62,6 +62,20 @@ fn schema_upgrade_failed_never_leaks_reason_into_dto() {
     );
 }
 
+#[test]
+fn schema_downgrade_failed_never_leaks_reason_into_dto() {
+    let err = ArchiveError::SchemaDowngradeFailed {
+        reason: "internal SQL detail that must not cross IPC".to_string(),
+    };
+    let dto = err.to_dto("downgrade_archive", None);
+    assert_eq!(dto.code, "schema_downgrade_failed");
+    let json = serde_json::to_string(&dto).expect("ErrorDto must serialize");
+    assert!(
+        !json.contains("internal SQL detail"),
+        "the internal reason must never leak into the DTO"
+    );
+}
+
 /// End-to-end: opening a genuinely non-zip file must surface as a typed
 /// `ArchiveError` (never panic), and that error must map cleanly to a
 /// sanitized DTO with no path/source leakage.

@@ -33,6 +33,8 @@ pub enum ArchiveError {
     SchemaTooNew { version: i64 },
     #[error("schema upgrade failed: {reason}")]
     SchemaUpgradeFailed { reason: String },
+    #[error("schema downgrade failed: {reason}")]
+    SchemaDowngradeFailed { reason: String },
     #[error("orphan sweep / trim failed: {reason}")]
     TrimFailed { reason: String },
     #[error("note delete failed: {reason}")]
@@ -104,6 +106,14 @@ impl ArchiveError {
             ArchiveError::SchemaUpgradeFailed { .. } => (
                 "schema_upgrade_failed",
                 "error.archive.schema_upgrade_failed",
+            ),
+            // `reason` is an internal detail and MUST NOT leak into the DTO
+            // (module docs above) — only the stable code + message_key cross
+            // IPC; the frontend copy is generic (some archives cannot be
+            // downgraded to the older format).
+            ArchiveError::SchemaDowngradeFailed { .. } => (
+                "schema_downgrade_failed",
+                "error.archive.schema_downgrade_failed",
             ),
             // `reason` is internal-only (module docs) — the DTO exposes only
             // the stable code + message_key; the frontend copy is generic.

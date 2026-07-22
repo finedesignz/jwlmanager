@@ -17,6 +17,7 @@
 //! from the FINAL post-upgrade `PRAGMA user_version`, not the manifest's
 //! original claim.
 
+pub mod downgrade;
 pub mod extract;
 pub mod manifest;
 pub mod new;

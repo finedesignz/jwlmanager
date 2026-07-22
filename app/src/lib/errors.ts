@@ -26,6 +26,8 @@ export function describeError(err: ErrorDto): string {
       return "Couldn't open this archive — it was created by a newer version of JW Library than this app supports. Update this app to the latest version, or choose a different file.";
     case "schema_upgrade_failed":
       return "Couldn't open this archive — upgrading its internal database format failed. The original file is unchanged. Choose a different file or try again.";
+    case "schema_downgrade_failed":
+      return "Couldn't downgrade this archive to the older format — some archives can't be converted without losing or conflicting data. Your original session is unchanged. Choose a different file or keep the current format.";
     case "zip_slip_rejected":
       return "This archive can't be opened — it contains files that try to write outside the extraction folder, which isn't safe. This file may be corrupted or tampered with.";
     case "state_poisoned":
