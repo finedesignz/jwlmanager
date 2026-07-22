@@ -153,11 +153,8 @@ pub fn run_merge_with_lib_path(
 
 /// The ONE routine both the Wave 2 dry-run and commit paths call: resolves
 /// availability for the current host, then invokes the merge. Callers pass
-/// `downgrade = false` (D5-07).
-// `allow(dead_code)`: Wave 2 (`merge_dry_run`/`merge_commit` Tauri commands)
-// is the sole caller; it does not exist yet, so this is intentionally unused
-// in Wave 1 rather than dead. `merge_availability` is reached via this fn.
-#[allow(dead_code)]
+/// `downgrade = false` (D5-07). Now reached from
+/// `archive::merge::stage_and_merge` (Wave 2).
 pub(crate) fn run_merge(
     app: &tauri::AppHandle,
     dest_root: &Path,

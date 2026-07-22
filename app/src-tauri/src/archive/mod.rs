@@ -20,6 +20,7 @@
 pub mod downgrade;
 pub mod extract;
 pub mod manifest;
+pub mod merge;
 pub mod new;
 pub mod save;
 pub mod upgrade;

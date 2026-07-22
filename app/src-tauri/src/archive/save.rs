@@ -159,7 +159,14 @@ fn same_dir_temp_path(target: &Path) -> PathBuf {
 /// `target` are on the SAME filesystem/volume, which both platforms require
 /// for the rename to be atomic rather than falling back to a non-atomic
 /// copy+delete.
-fn atomic_replace(temp: &Path, target: &Path) -> Result<(), ArchiveError> {
+///
+/// `pub(crate)`: `archive::merge::merge_commit` reuses this exact primitive to
+/// promote a merged staging DB onto `session.db_path` (both under
+/// `session.temp_dir`, same filesystem) — a merge commit must NEVER `fs::copy`
+/// onto the live working DB (a crash mid-copy truncates it, Core Value
+/// violation); it promotes with the same rename-with-replace guarantee a save
+/// uses.
+pub(crate) fn atomic_replace(temp: &Path, target: &Path) -> Result<(), ArchiveError> {
     fs::rename(temp, target)?;
     Ok(())
 }
