@@ -11,7 +11,7 @@
 - [x] **Phase 2: Safe Delete (Dry-Run + Trim + Transactions)** - User can delete Notes with a dry-run preview, transactional safety, and correct post-save trim/VACUUM.
  (completed 2026-07-21)
 - [x] **Phase 3: Schema Upgrade** - Any accepted archive (v12–16) opens correctly, auto-upgraded to v16 in memory. (completed 2026-07-21)
-- [ ] **Phase 4: Schema Downgrade** - User can explicitly save a v14-compatible archive with the LocationId remap closure, previewed via dry-run, and the working copy stays v16.
+- [x] **Phase 4: Schema Downgrade** - User can explicitly save a v14-compatible archive with the LocationId remap closure, previewed via dry-run, and the working copy stays v16. (completed 2026-07-22)
 - [ ] **Phase 5: Two-Archive Merge** - User can merge two archives via jwlCore with a dry-run preview and matching results to the Python app.
 - [ ] **Phase 6: Full Data Browsing** - User can view, browse, and select (single + bulk) across all 6 categories, with valid operations surfaced per selection.
 - [ ] **Phase 7: Full Editing** - User can edit colors, tags, order, favorites, cleaning/masking, and raw records across all categories.
@@ -85,7 +85,7 @@
 **Plans**: 3 plans
 - [x] 04-01-PLAN.md — Core downgrade transform: remap closure (deterministic ORDER BY LocationId) + v14 DDL rebuild + SchemaDowngradeFailed + tests
 - [x] 04-02-PLAN.md — dry_run_downgrade (reuse DryRunReport) + throwaway-copy save_v14_copy (session stays v16) + Tauri commands
-- [ ] 04-03-PLAN.md — Frontend "Save v14-compatible copy…" action + preview + Python differential oracle
+- [x] 04-03-PLAN.md — Frontend "Save v14-compatible copy…" action + preview + Python differential oracle
 
 ### Phase 5: Two-Archive Merge
 **Goal**: User can merge two archives via the jwlCore native engine with the same safety net as any other destructive operation, and trust the result matches the proven Python app.
@@ -176,7 +176,7 @@
 | 1. Open, View, Save | 7/7 | Complete   | 2026-07-20 |
 | 2. Safe Delete | 3/3 | Complete   | 2026-07-21 |
 | 3. Schema Upgrade | 3/3 | Complete   | 2026-07-21 |
-| 4. Schema Downgrade | 2/3 | In Progress|  |
+| 4. Schema Downgrade | 3/3 | Complete   | 2026-07-22 |
 | 5. Two-Archive Merge | 0/TBD | Not started | - |
 | 6. Full Data Browsing | 0/TBD | Not started | - |
 | 7. Full Editing | 0/TBD | Not started | - |
