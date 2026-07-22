@@ -165,4 +165,79 @@ describe("CommandBar", () => {
     expect(screen.getByRole("button", { name: /^save$/i })).toBeDisabled();
     expect(screen.getByRole("button", { name: /save as/i })).toBeDisabled();
   });
+
+  const V14_REPORT = {
+    added: {},
+    overwritten: {},
+    deleted: { Location: 2 },
+    total_deleted: 2,
+  };
+
+  it("Save v14 runs downgrade_dry_run then shows the preview dialog", async () => {
+    saveMock.mockResolvedValue("C:/archives/copy-v14.jwlibrary");
+    invokeMock.mockResolvedValue(V14_REPORT);
+    renderBar({ archiveOpen: true });
+
+    fireEvent.click(screen.getByTestId("save-v14-button"));
+
+    await vi.waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("downgrade_dry_run"),
+    );
+    expect(await screen.findByTestId("delete-preview-dialog")).toBeInTheDocument();
+    expect(screen.getByTestId("delete-preview-summary")).toHaveTextContent(
+      "2 Locations will be merged",
+    );
+    // Preview only — no write yet.
+    expect(invokeMock).not.toHaveBeenCalledWith("save_v14_copy", expect.anything());
+  });
+
+  it("Confirm in the v14 preview invokes save_v14_copy with the chosen path", async () => {
+    saveMock.mockResolvedValue("C:/archives/copy-v14.jwlibrary");
+    invokeMock.mockResolvedValue(V14_REPORT);
+    const handlers = renderBar({ archiveOpen: true });
+
+    fireEvent.click(screen.getByTestId("save-v14-button"));
+    const confirm = await screen.findByTestId("delete-preview-confirm");
+    invokeMock.mockResolvedValue(undefined);
+    fireEvent.click(confirm);
+
+    await vi.waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("save_v14_copy", {
+        path: "C:/archives/copy-v14.jwlibrary",
+      }),
+    );
+    await vi.waitFor(() => expect(handlers.onSaved).toHaveBeenCalledTimes(1));
+  });
+
+  it("Cancel in the v14 preview never invokes save_v14_copy", async () => {
+    saveMock.mockResolvedValue("C:/archives/copy-v14.jwlibrary");
+    invokeMock.mockResolvedValue(V14_REPORT);
+    renderBar({ archiveOpen: true });
+
+    fireEvent.click(screen.getByTestId("save-v14-button"));
+    const cancel = await screen.findByTestId("delete-preview-cancel");
+    fireEvent.click(cancel);
+
+    await vi.waitFor(() =>
+      expect(screen.queryByTestId("delete-preview-dialog")).not.toBeInTheDocument(),
+    );
+    expect(invokeMock).not.toHaveBeenCalledWith("save_v14_copy", expect.anything());
+  });
+
+  it("dismissed v14 save dialog produces no invoke and no error", async () => {
+    saveMock.mockResolvedValue(null); // user dismissed the OS save picker
+    const handlers = renderBar({ archiveOpen: true });
+
+    fireEvent.click(screen.getByTestId("save-v14-button"));
+    await vi.waitFor(() => expect(handlers.onCancelled).toHaveBeenCalledTimes(1));
+
+    expect(invokeMock).not.toHaveBeenCalled();
+    expect(handlers.onError).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("delete-preview-dialog")).not.toBeInTheDocument();
+  });
+
+  it("disables the Save v14 action when no archive is open", () => {
+    renderBar({ archiveOpen: false });
+    expect(screen.getByTestId("save-v14-button")).toBeDisabled();
+  });
 });
