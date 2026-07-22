@@ -39,6 +39,10 @@ pub enum ArchiveError {
     TrimFailed { reason: String },
     #[error("note delete failed: {reason}")]
     DeleteFailed { reason: String },
+    #[error("jwlCore merge engine is unavailable on this platform")]
+    MergeUnavailable,
+    #[error("archive merge failed: {reason}")]
+    MergeFailed { reason: String },
     #[error("archive entry rejected: possible path traversal (zip-slip)")]
     ZipSlipRejected,
     #[error("session state lock was poisoned")]
@@ -121,6 +125,16 @@ impl ArchiveError {
             // `reason` is internal-only (module docs) — the DTO exposes only
             // the stable code + message_key; the frontend copy is generic.
             ArchiveError::DeleteFailed { .. } => ("delete_failed", "error.archive.delete_failed"),
+            // A missing/wrong-arch jwlCore binary degrades to a typed error
+            // (never the Python `crash_box + sys.exit()` defect) — the DTO
+            // exposes only the stable code + generic message_key.
+            ArchiveError::MergeUnavailable => {
+                ("merge_unavailable", "error.merge.unavailable")
+            }
+            // `reason` carries getLastResult() detail (internal path/SQL
+            // fragments) and MUST NOT leak into the DTO (module docs / D-14) —
+            // the DTO exposes only the stable code + generic message_key.
+            ArchiveError::MergeFailed { .. } => ("merge_failed", "error.merge.failed"),
             ArchiveError::ZipSlipRejected => {
                 ("zip_slip_rejected", "error.archive.zip_slip_rejected")
             }

@@ -29,13 +29,13 @@ pub struct JwlCoreStatus {
 
 /// Reasons a `(OS, ARCH)` combination has no loadable binary. Distinct from
 /// `JwlCoreError`: these feed a non-loaded `JwlCoreStatus`, not an `Err`.
-enum NoBinaryReason {
+pub(crate) enum NoBinaryReason {
     Arm64Windows,
     Unsupported,
 }
 
 impl NoBinaryReason {
-    fn message(&self) -> &'static str {
+    pub(crate) fn message(&self) -> &'static str {
         match self {
             NoBinaryReason::Arm64Windows => "no binary for aarch64-windows",
             NoBinaryReason::Unsupported => "unsupported platform/architecture",
@@ -47,7 +47,7 @@ impl NoBinaryReason {
 /// `(env::consts::OS, env::consts::ARCH)`. Returns `Err(NoBinaryReason)` for
 /// combinations with no shipped binary — the arm64-windows gap (D-13a) is a
 /// first-class case here, not an afterthought.
-fn resolve_lib_name(os: &str, arch: &str) -> Result<&'static str, NoBinaryReason> {
+pub(crate) fn resolve_lib_name(os: &str, arch: &str) -> Result<&'static str, NoBinaryReason> {
     match (os, arch) {
         ("windows", "x86_64") => Ok("jwlCore-amd64.dll"),
         ("windows", "aarch64") => Err(NoBinaryReason::Arm64Windows),
@@ -61,7 +61,7 @@ fn resolve_lib_name(os: &str, arch: &str) -> Result<&'static str, NoBinaryReason
 /// Repo-root `libs/` dir when running from source (dev / `cargo test`).
 /// `CARGO_MANIFEST_DIR` is `<repo>/app/src-tauri` at compile time, so `libs/`
 /// lives two levels up.
-fn dev_libs_dir() -> PathBuf {
+pub(crate) fn dev_libs_dir() -> PathBuf {
     PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../libs"))
 }
 
@@ -69,7 +69,10 @@ fn dev_libs_dir() -> PathBuf {
 /// checkout, `cargo test`/`cargo tauri dev`); falls back to the Tauri
 /// bundled resource directory (`libs/<name>`, declared in `tauri.conf.json`)
 /// when running from a packaged build and the dev path doesn't exist.
-fn resolve_lib_path(app: &tauri::AppHandle, name: &str) -> Result<PathBuf, JwlCoreError> {
+pub(crate) fn resolve_lib_path(
+    app: &tauri::AppHandle,
+    name: &str,
+) -> Result<PathBuf, JwlCoreError> {
     let dev_path = dev_libs_dir().join(name);
     if dev_path.exists() {
         return Ok(dev_path);
@@ -98,7 +101,9 @@ fn resolve_lib_path(app: &tauri::AppHandle, name: &str) -> Result<PathBuf, JwlCo
 /// directories are part of the standard DLL search order and this covers
 /// jwlCore's statically-imported dependency correctly.
 #[cfg(target_os = "windows")]
-fn load_library(path: &std::path::Path) -> Result<libloading::Library, libloading::Error> {
+pub(crate) fn load_library(
+    path: &std::path::Path,
+) -> Result<libloading::Library, libloading::Error> {
     let dir = path.parent().map(|p| p.to_path_buf());
     let original_path = std::env::var_os("PATH");
 
@@ -123,7 +128,9 @@ fn load_library(path: &std::path::Path) -> Result<libloading::Library, libloadin
 }
 
 #[cfg(not(target_os = "windows"))]
-fn load_library(path: &std::path::Path) -> Result<libloading::Library, libloading::Error> {
+pub(crate) fn load_library(
+    path: &std::path::Path,
+) -> Result<libloading::Library, libloading::Error> {
     // SAFETY: loading a vendored, trusted binary shipped in this repo's
     // libs/ (see the top-level SAFETY note on `check_jwlcore`'s call site).
     unsafe { libloading::Library::new(path) }
@@ -132,7 +139,7 @@ fn load_library(path: &std::path::Path) -> Result<libloading::Library, libloadin
 /// Four jwlCore FFI symbols the loader resolves to prove ABI compatibility.
 /// Only `getCoreVersion` is ever CALLED here (D-12) — `mergeDatabase` is
 /// resolved-but-not-invoked, mirroring `jwlcore.py:64-71`'s declared surface.
-const EXPECTED_SYMBOLS: [&str; 4] = [
+pub(crate) const EXPECTED_SYMBOLS: [&str; 4] = [
     "setProgressCallback",
     "mergeDatabase",
     "getLastResult",
