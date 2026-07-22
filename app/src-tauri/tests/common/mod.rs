@@ -1343,6 +1343,225 @@ pub fn generate_merge_pair() -> ((TempDir, PathBuf), (TempDir, PathBuf)) {
 }
 
 // ---------------------------------------------------------------------------
+// Merge ORCHESTRATION fixtures (05-02-PLAN.md Wave 2, Task 3)
+// ---------------------------------------------------------------------------
+//
+// The Wave 1 `generate_merge_pair` returns bare `userData.db` dirs (for the
+// direct FFI test). Wave 2's dry_run_merge/merge_commit take a full source
+// `.jwlibrary` ARCHIVE (they `extract_zip_slip_safe` it), and build the DEST
+// session via `open_and_validate`, which also needs a full archive. These
+// helpers wrap the Wave 1 row-seeders in real `.jwlibrary` archives (manifest +
+// loose media entries via `build_fixture_archive`). SYNTHETIC only.
+
+/// Full `.jwlibrary` merge DESTINATION archive (Wave 1's `insert_merge_dest_rows`
+/// graph). Opened via `open_and_validate` to build the live session.
+pub fn generate_merge_dest_archive() -> (TempDir, PathBuf) {
+    let work_dir = TempDir::new().expect("create merge dest work dir");
+    seed_from_res_blank(work_dir.path());
+    insert_merge_dest_rows(&work_dir.path().join("userData.db"));
+    build_fixture_archive(work_dir.path(), &synthetic_manifest_json())
+}
+
+/// Full `.jwlibrary` merge SOURCE archive (Wave 1's `insert_merge_source_rows`
+/// graph) — carries the shared overlap plus the source-only Location/Note/
+/// UserMark/Tag/Bookmark records the merge must carry into the destination.
+pub fn generate_merge_source_archive() -> (TempDir, PathBuf) {
+    let work_dir = TempDir::new().expect("create merge source work dir");
+    seed_from_res_blank(work_dir.path());
+    insert_merge_source_rows(&work_dir.path().join("userData.db"));
+    build_fixture_archive(work_dir.path(), &synthetic_manifest_json())
+}
+
+// Stable identities for the CONTENT-OVERWRITE pair: the dest and source share
+// these identities but the source carries CHANGED content at a NEWER
+// LastModified, so a correct merge UPDATES the matched dest rows in place —
+// which the content-signature diff must count as `overwritten` (a PK-set diff
+// would report 0).
+pub const MERGE_OVERWRITE_NOTE_GUID: &str = "merge-overwrite-note-0001";
+pub const MERGE_OVERWRITE_USERMARK_GUID: &str = "merge-overwrite-usermark-0001";
+
+fn insert_overwrite_dest_rows(db_path: &Path) {
+    let conn = Connection::open(db_path).expect("open overwrite dest db");
+    conn.execute_batch("PRAGMA foreign_keys = OFF")
+        .expect("fk off");
+    conn.execute(
+        "INSERT INTO Location (LocationId, BookNumber, ChapterNumber, DocumentId, Track, \
+         IssueTagNumber, KeySymbol, MepsLanguage, Type, Title, Specialty, Edition) \
+         VALUES (1, 1, 1, NULL, NULL, 0, 'nwt', 0, 0, 'Genesis 1:1', NULL, NULL)",
+        [],
+    )
+    .expect("dest overwrite Location");
+    conn.execute(
+        "INSERT INTO UserMark (UserMarkId, ColorIndex, LocationId, StyleIndex, UserMarkGuid, Version) \
+         VALUES (1, 1, 1, 0, ?1, 1)",
+        rusqlite::params![MERGE_OVERWRITE_USERMARK_GUID],
+    )
+    .expect("dest overwrite UserMark");
+    conn.execute(
+        "INSERT INTO BlockRange (BlockRangeId, BlockType, Identifier, StartToken, EndToken, UserMarkId) \
+         VALUES (1, 1, 1, 0, 5, 1)",
+        [],
+    )
+    .expect("dest overwrite BlockRange");
+    conn.execute(
+        "INSERT INTO Note (NoteId, Guid, UserMarkId, LocationId, Title, Content, LastModified, \
+         Created, BlockType, BlockIdentifier) VALUES (1, ?1, 1, 1, 'Shared note', \
+         'ORIGINAL dest content', '2020-01-01T00:00:00Z', '2020-01-01T00:00:00Z', 2, 1)",
+        rusqlite::params![MERGE_OVERWRITE_NOTE_GUID],
+    )
+    .expect("dest overwrite Note");
+    conn.execute(
+        "UPDATE LastModified SET LastModified = '2020-01-01T00:00:00Z'",
+        [],
+    )
+    .expect("dest overwrite LastModified");
+}
+
+fn insert_overwrite_source_rows(db_path: &Path) {
+    let conn = Connection::open(db_path).expect("open overwrite source db");
+    conn.execute_batch("PRAGMA foreign_keys = OFF")
+        .expect("fk off");
+    // SAME scripture identity, EDITED Title.
+    conn.execute(
+        "INSERT INTO Location (LocationId, BookNumber, ChapterNumber, DocumentId, Track, \
+         IssueTagNumber, KeySymbol, MepsLanguage, Type, Title, Specialty, Edition) \
+         VALUES (1, 1, 1, NULL, NULL, 0, 'nwt', 0, 0, 'Genesis 1:1 -- EDITED', NULL, NULL)",
+        [],
+    )
+    .expect("source overwrite Location");
+    // SAME UserMark identity (Guid), CHANGED ColorIndex.
+    conn.execute(
+        "INSERT INTO UserMark (UserMarkId, ColorIndex, LocationId, StyleIndex, UserMarkGuid, Version) \
+         VALUES (1, 4, 1, 0, ?1, 1)",
+        rusqlite::params![MERGE_OVERWRITE_USERMARK_GUID],
+    )
+    .expect("source overwrite UserMark");
+    conn.execute(
+        "INSERT INTO BlockRange (BlockRangeId, BlockType, Identifier, StartToken, EndToken, UserMarkId) \
+         VALUES (1, 1, 1, 0, 5, 1)",
+        [],
+    )
+    .expect("source overwrite BlockRange");
+    // SAME Note identity (Guid), CHANGED content, NEWER LastModified.
+    conn.execute(
+        "INSERT INTO Note (NoteId, Guid, UserMarkId, LocationId, Title, Content, LastModified, \
+         Created, BlockType, BlockIdentifier) VALUES (1, ?1, 1, 1, 'Shared note EDITED', \
+         'UPDATED source content', '2030-01-01T00:00:00Z', '2020-01-01T00:00:00Z', 2, 1)",
+        rusqlite::params![MERGE_OVERWRITE_NOTE_GUID],
+    )
+    .expect("source overwrite Note");
+    conn.execute(
+        "UPDATE LastModified SET LastModified = '2030-01-01T00:00:00Z'",
+        [],
+    )
+    .expect("source overwrite LastModified");
+}
+
+/// CONTENT-OVERWRITE pair of full `.jwlibrary` archives — `(dest, source)`. The
+/// source shares the dest's Note/UserMark/Location identities but with CHANGED
+/// content at a NEWER LastModified, so a correct merge updates the matched dest
+/// rows in place (proving `overwritten` counts in-place UPDATEs).
+pub fn generate_merge_overwrite_pair_archives() -> ((TempDir, PathBuf), (TempDir, PathBuf)) {
+    let dest_work = TempDir::new().expect("create overwrite dest work dir");
+    seed_from_res_blank(dest_work.path());
+    insert_overwrite_dest_rows(&dest_work.path().join("userData.db"));
+    let dest = build_fixture_archive(dest_work.path(), &synthetic_manifest_json());
+
+    let src_work = TempDir::new().expect("create overwrite source work dir");
+    seed_from_res_blank(src_work.path());
+    insert_overwrite_source_rows(&src_work.path().join("userData.db"));
+    let source = build_fixture_archive(src_work.path(), &synthetic_manifest_json());
+
+    (dest, source)
+}
+
+/// The distinctively-named loose media blob the media-bearing source carries at
+/// the archive ROOT (referenced by an IndependentMedia row). The media
+/// fold-back test looks for this name being (or not being) relocated by jwlCore
+/// into the destination staging dir.
+pub const MERGE_SOURCE_MEDIA_NAME: &str = "src_blob.bin";
+pub const MERGE_SOURCE_MEDIA_BYTES: &[u8] = b"synthetic-source-media-blob-0001";
+
+/// Full `.jwlibrary` merge SOURCE archive that additionally carries an
+/// `IndependentMedia` row plus a matching loose media blob
+/// ([`MERGE_SOURCE_MEDIA_NAME`]) at the archive root — the shape that would
+/// force jwlCore to relocate a referenced media file IF it does so. PlaylistItem
+/// rows are deliberately OMITTED (a minimal synthetic PlaylistItem aborts
+/// jwlCore's playlist merge — 05-01-SUMMARY.md); playlist-table merge coverage
+/// stays DEFERRED, documented honestly rather than falsely claimed.
+pub fn generate_media_bearing_merge_source() -> (TempDir, PathBuf) {
+    let work_dir = TempDir::new().expect("create media-bearing source work dir");
+    seed_from_res_blank(work_dir.path());
+    let db_path = work_dir.path().join("userData.db");
+    insert_merge_source_rows(&db_path);
+    {
+        let conn = Connection::open(&db_path).expect("open media source db");
+        conn.execute_batch("PRAGMA foreign_keys = OFF")
+            .expect("fk off");
+        conn.execute(
+            "INSERT INTO IndependentMedia (IndependentMediaId, OriginalFilename, FilePath, \
+             MimeType, Hash) VALUES (1, ?1, ?1, 'application/octet-stream', \
+             'deadbeefdeadbeefdeadbeefdeadbeef')",
+            rusqlite::params![MERGE_SOURCE_MEDIA_NAME],
+        )
+        .expect("insert source IndependentMedia");
+    }
+
+    // Build a bespoke archive that ALSO carries the loose media blob at root.
+    let archive_dir = TempDir::new().expect("create media source archive dir");
+    let archive_path = archive_dir.path().join("fixture.jwlibrary");
+    let zip_file = fs::File::create(&archive_path).expect("create media source archive");
+    let mut writer = ZipWriter::new(zip_file);
+    let options = SimpleFileOptions::default();
+
+    writer
+        .start_file("manifest.json", options)
+        .expect("start manifest");
+    writer
+        .write_all(synthetic_manifest_json().as_bytes())
+        .expect("write manifest");
+    for name in ["userData.db", "default_thumbnail.png"] {
+        writer.start_file(name, options).expect("start entry");
+        let bytes = fs::read(work_dir.path().join(name)).expect("read seeded entry");
+        writer.write_all(&bytes).expect("write entry");
+    }
+    writer
+        .start_file(MERGE_SOURCE_MEDIA_NAME, options)
+        .expect("start source media blob");
+    writer
+        .write_all(MERGE_SOURCE_MEDIA_BYTES)
+        .expect("write source media blob");
+    writer.finish().expect("finish media source archive");
+
+    (archive_dir, archive_path)
+}
+
+/// Full `.jwlibrary` merge SOURCE archive engineered to make jwlCore's merge
+/// FAIL (non-zero return -> `MergeFailed`) — a lone PlaylistItem row with no
+/// backing playlist graph, which jwlCore aborts with "key not found: 0"
+/// (05-01-SUMMARY.md). Used to prove a FAILED commit leaves the live session
+/// pristine (never truncated), pre-promote.
+pub fn generate_merge_failing_source_archive() -> (TempDir, PathBuf) {
+    let work_dir = TempDir::new().expect("create failing source work dir");
+    seed_from_res_blank(work_dir.path());
+    let db_path = work_dir.path().join("userData.db");
+    insert_merge_source_rows(&db_path);
+    {
+        let conn = Connection::open(&db_path).expect("open failing source db");
+        conn.execute_batch("PRAGMA foreign_keys = OFF")
+            .expect("fk off");
+        conn.execute(
+            "INSERT INTO PlaylistItem (PlaylistItemId, Label, StartTrimOffsetTicks, \
+             EndTrimOffsetTicks, Accuracy, EndAction, ThumbnailFilePath) \
+             VALUES (1, 'Orphan Playlist Item', NULL, NULL, 0, 0, NULL)",
+            [],
+        )
+        .expect("insert aborting PlaylistItem");
+    }
+    build_fixture_archive(work_dir.path(), &synthetic_manifest_json())
+}
+
+// ---------------------------------------------------------------------------
 // Zip-slip fixture generator (6 variants, D-08)
 // ---------------------------------------------------------------------------
 

@@ -151,19 +151,13 @@ pub fn run_merge_with_lib_path(
     Err(ArchiveError::MergeFailed { reason })
 }
 
-/// The ONE routine both the Wave 2 dry-run and commit paths call: resolves
-/// availability for the current host, then invokes the merge. Callers pass
-/// `downgrade = false` (D5-07). Now reached from
-/// `archive::merge::stage_and_merge` (Wave 2).
-pub(crate) fn run_merge(
-    app: &tauri::AppHandle,
-    dest_root: &Path,
-    source_root: &Path,
-    downgrade: bool,
-) -> Result<(), ArchiveError> {
-    let lib_path = merge_availability(app)?;
-    run_merge_with_lib_path(&lib_path, dest_root, source_root, downgrade)
-}
+// Wave 1 shipped a `run_merge(app, ...)` convenience wrapper (merge_availability
+// + run_merge_with_lib_path). Wave 2 SPLIT those two steps at the call site
+// (`archive::merge` resolves `merge_availability(app)` once, then drives the
+// lib-path core `run_merge_with_lib_path` — which the orchestration integration
+// test can call without an AppHandle). The combined wrapper is therefore no
+// longer used and was removed; `merge_availability` + `run_merge_with_lib_path`
+// remain the two building blocks.
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]

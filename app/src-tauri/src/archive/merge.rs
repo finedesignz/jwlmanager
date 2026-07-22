@@ -1,14 +1,14 @@
 //! Two-archive merge orchestration (MERGE-01/MERGE-02, 05-02-PLAN.md) — the
-//! dry-run + commit machinery layered on Wave 1's `jwlcore::merge::run_merge`
-//! FFI wrapper. The direct analogue of Phase 4's `dry_run_downgrade` +
-//! `save_v14_copy` throwaway-copy pattern.
+//! dry-run + commit machinery layered on Wave 1's
+//! `jwlcore::merge::run_merge_with_lib_path` FFI wrapper. The direct analogue of
+//! Phase 4's `dry_run_downgrade` + `save_v14_copy` throwaway-copy pattern.
 //!
 //! jwlCore has NO preview mode: the ONLY way to know what a merge does is to
 //! run the REAL merge. So the dry-run runs `mergeDatabase` on a `fs::copy` of
 //! the live session DB inside a throwaway directory and snapshot-diffs the
 //! before/after, then discards the copy — the live session is never touched.
 //! Because both the preview and the commit run the IDENTICAL operation
-//! (`run_merge` on a bit-identical `fs::copy` of `session.db_path`, over an
+//! (the same merge on a bit-identical `fs::copy` of `session.db_path`, over an
 //! extraction of the SAME source archive), jwlCore's determinism guarantees the
 //! preview's after-state is byte-for-byte the commit's after-state — the
 //! preview provably equals the committed effect (criterion "Preview counts
@@ -191,16 +191,17 @@ fn diff_signatures(
 
 /// Copies the live session DB into `root/userData.db`, extracts the (untrusted,
 /// READ-ONLY) `source_archive` zip-slip-safely under `root/merge/`, then runs
-/// the REAL jwlCore merge of the source INTO the copy (in place, on the copy).
-/// Shared verbatim by both [`dry_run_merge`] (throwaway copy) and
-/// [`merge_commit`] (staging copy) so the two can never diverge — the whole
-/// preview==commit guarantee rests on this being the SAME operation.
+/// the REAL jwlCore merge (from the vendored lib at `lib_path`) of the source
+/// INTO the copy (in place, on the copy). Shared verbatim by both
+/// [`dry_run_merge_with_lib_path`] (throwaway copy) and
+/// [`merge_commit_with_lib_path`] (staging copy) so the two can never diverge —
+/// the whole preview==commit guarantee rests on this being the SAME operation.
 ///
 /// The `source_archive` file is only ever READ (extraction reads it; the merge
 /// reads `root/merge/userData.db`) — the source bytes are never mutated
 /// (MERGE-02, T-05-05).
 fn stage_and_merge(
-    app: &tauri::AppHandle,
+    lib_path: &Path,
     session: &ArchiveSession,
     source_archive: &Path,
     root: &Path,
@@ -210,8 +211,8 @@ fn stage_and_merge(
     // D5-03/D11 zip-slip-safe extraction of the untrusted source archive.
     extract_zip_slip_safe(source_archive, &merge_dir)?;
     // jwlCore merges `<merge_dir>/userData.db` INTO `<root>/userData.db`
-    // (downgrade = false, D5-07). MergeUnavailable / MergeFailed propagate.
-    crate::jwlcore::merge::run_merge(app, root, &merge_dir, false)
+    // (downgrade = false, D5-07). MergeFailed propagates.
+    crate::jwlcore::merge::run_merge_with_lib_path(lib_path, root, &merge_dir, false)
 }
 
 /// Opens `before_db` + `after_db` read-only, snapshots the content signatures
@@ -254,6 +255,26 @@ pub fn dry_run_merge(
     session: &ArchiveSession,
     source_archive: &Path,
 ) -> Result<DryRunReport, ArchiveError> {
+    // Resolve the vendored lib for THIS host first (T-05-02: arm64-windows /
+    // missing binary -> MergeUnavailable, never a crash), then delegate to the
+    // lib-path core.
+    let lib_path = crate::jwlcore::merge::merge_availability(app)?;
+    dry_run_merge_with_lib_path(&lib_path, session, source_archive)
+}
+
+/// Lib-path core of [`dry_run_merge`] (see it for the flow + safety rationale).
+///
+/// `pub` (not `pub(crate)`): the Task 3 orchestration integration test in
+/// `tests/merge_orchestration.rs` links this crate as an EXTERNAL crate and
+/// cannot obtain a `tauri::AppHandle` / a packaged resource dir, so it resolves
+/// the host DLL via `jwlcore::merge::host_dev_lib_path()` and drives this entry
+/// point — matching Wave 1's `run_merge_with_lib_path` deviation for exactly the
+/// same reason (05-01-SUMMARY.md, Rule 3).
+pub fn dry_run_merge_with_lib_path(
+    lib_path: &Path,
+    session: &ArchiveSession,
+    source_archive: &Path,
+) -> Result<DryRunReport, ArchiveError> {
     let root = session.temp_dir.path().join("merge_dryrun");
 
     let result = (|| {
@@ -266,7 +287,7 @@ pub fn dry_run_merge(
             snapshot_signatures(&conn, MERGE_SNAPSHOT_TABLES)?
         };
 
-        stage_and_merge(app, session, source_archive, &root)?;
+        stage_and_merge(lib_path, session, source_archive, &root)?;
 
         // AFTER: the merged throwaway copy. Do NOT trim between merge and this
         // snapshot (Pitfall 4) — trim runs on the next Save, not here.
@@ -307,6 +328,20 @@ pub fn merge_commit(
     session: &mut ArchiveSession,
     source_archive: &Path,
 ) -> Result<(), ArchiveError> {
+    // Resolve availability BEFORE staging (T-05-02), then delegate.
+    let lib_path = crate::jwlcore::merge::merge_availability(app)?;
+    merge_commit_with_lib_path(&lib_path, session, source_archive)
+}
+
+/// Lib-path core of [`merge_commit`] (see it for the atomic-promote rationale).
+///
+/// `pub`: driven by the Task 3 orchestration integration test — same rationale
+/// as [`dry_run_merge_with_lib_path`].
+pub fn merge_commit_with_lib_path(
+    lib_path: &Path,
+    session: &mut ArchiveSession,
+    source_archive: &Path,
+) -> Result<(), ArchiveError> {
     let staging = session.temp_dir.path().join("merge_staging");
     let staged_db = staging.join("userData.db");
 
@@ -314,7 +349,7 @@ pub fn merge_commit(
         let _ = fs::remove_dir_all(&staging);
         fs::create_dir_all(&staging)?;
 
-        stage_and_merge(app, session, source_archive, &staging)?;
+        stage_and_merge(lib_path, session, source_archive, &staging)?;
 
         // Fold any NEW media jwlCore wrote into the staging dir back into the
         // session inventory BEFORE the staging dir is cleaned (Pitfall 2).
@@ -445,8 +480,14 @@ mod tests {
 
         // Note: pk 1 unchanged, pk 2 content-changed (overwrite), pk 3 deleted,
         // pk 4 added.
-        before.insert("Note".to_string(), BTreeMap::from([(1, 10), (2, 20), (3, 30)]));
-        after.insert("Note".to_string(), BTreeMap::from([(1, 10), (2, 99), (4, 40)]));
+        before.insert(
+            "Note".to_string(),
+            BTreeMap::from([(1, 10), (2, 20), (3, 30)]),
+        );
+        after.insert(
+            "Note".to_string(),
+            BTreeMap::from([(1, 10), (2, 99), (4, 40)]),
+        );
 
         let report = diff_signatures(&before, &after);
         assert_eq!(report.added.get("Note"), Some(&1));
@@ -482,7 +523,9 @@ mod tests {
         // InputField (composite PK LocationId,TextTag) must never be in the
         // single-i64-PK snapshot set (feeding it a single-PK read would break
         // the dry-run at runtime).
-        assert!(!MERGE_SNAPSHOT_TABLES.iter().any(|(t, _)| *t == "InputField"));
+        assert!(!MERGE_SNAPSHOT_TABLES
+            .iter()
+            .any(|(t, _)| *t == "InputField"));
         assert!(MERGE_SNAPSHOT_TABLES.iter().any(|(t, _)| *t == "Note"));
     }
 }
