@@ -163,13 +163,16 @@ pub fn query_annotations(
     for raw in mapped {
         let raw = raw?;
         let language = resolve_language(catalog, raw.meps_language, true);
+        // Annotations port `get_annotations` (`JWLManager.py:648`) bare `code` —
+        // NO `* OTHER *`-on-empty (that rule is Python's for bookmarks/favorites
+        // only; annotations and highlights use bare code). other_on_empty = false.
         let label = synthesize_pub_label(
             catalog,
             raw.key_symbol.as_deref(),
             raw.issue,
             raw.book,
             raw.chapter,
-            true,
+            false,
         );
         rows.push(BrowseRow {
             id: raw.location_id,
