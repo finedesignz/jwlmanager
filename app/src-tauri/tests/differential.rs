@@ -474,3 +474,206 @@ fn extract_userdata_db(archive: &Path, dest_dir: &Path) -> std::path::PathBuf {
     std::io::copy(&mut entry, &mut writer).expect("extract userData.db");
     out
 }
+
+// ---------------------------------------------------------------------------
+// 05-03: Rust-FFI-vs-Python merge differential parity oracle (MERGE-04, D5-10)
+// ---------------------------------------------------------------------------
+
+/// The single-i64-PK snapshot tables the merge dry-run diffs
+/// (`archive::merge::MERGE_SNAPSHOT_TABLES`, mirrored here since it is a private
+/// const in the lib crate). Composite-PK tables (e.g. `InputField`) are
+/// EXCLUDED for the same reason the dry-run excludes them (05-02-SUMMARY.md).
+/// `normalized_table_rows` reads the FULL row tuple (`SELECT *`, sorted into a
+/// count map), so parity is compared on SEMANTIC row-sets, NEVER on the `.db`
+/// file bytes (VACUUM + page layout diverge legitimately, D5-10).
+const MERGE_PARITY_TABLES: &[&str] = &[
+    "Note",
+    "UserMark",
+    "BlockRange",
+    "Bookmark",
+    "Tag",
+    "TagMap",
+    "Location",
+    "PlaylistItem",
+    "PlaylistItemMarker",
+];
+
+/// Reads the normalized (sorted row -> count) state of every
+/// [`MERGE_PARITY_TABLES`] table from a merged `userData.db`.
+fn merge_normalized_state(
+    db_path: &Path,
+) -> std::collections::BTreeMap<String, std::collections::BTreeMap<String, usize>> {
+    let conn = Connection::open(db_path).expect("open merged db for normalized read");
+    MERGE_PARITY_TABLES
+        .iter()
+        .map(|t| ((*t).to_string(), common::normalized_table_rows(&conn, t)))
+        .collect()
+}
+
+/// Shells to `python3` and runs the Python app's own `jwlcore.merge_databases`
+/// (the SAME native `mergeDatabase` the Rust FFI leg calls) merging
+/// `<merge_dir>/userData.db` INTO `<dest_dir>/userData.db` in place. Mirrors
+/// [`run_python_check_validity`]'s Command shape: run from the repo root with
+/// the root PATH-prepended so the win32 static `sqlite3_64.dll` import resolves
+/// (jwlcore.py loads `jwlCore-amd64.dll` next to itself — the repo root in a
+/// source checkout). NOTE: imports `jwlcore` ONLY (no PySide6), so this leg
+/// needs just python3 + the two root-staged DLLs, not `res/requirements.txt`.
+/// Returns `(ok, stdout, stderr)`.
+fn run_python_merge(dest_dir: &Path, merge_dir: &Path) -> (bool, String, String) {
+    let root = repo_root();
+    let python_code = format!(
+        "import sys\n\
+         sys.path.insert(0, r'{root}')\n\
+         import jwlcore\n\
+         rc = jwlcore.merge_databases(sys.argv[1], sys.argv[2], False)\n\
+         print('MERGE_RC:' + str(rc))\n\
+         sys.exit(0 if rc == 0 else 1)\n",
+        root = root.display()
+    );
+
+    let path_var = std::env::var("PATH").unwrap_or_default();
+    let sep = if cfg!(windows) { ";" } else { ":" };
+    let patched_path = format!("{}{}{}", root.display(), sep, path_var);
+
+    let output = Command::new("python3")
+        .arg("-c")
+        .arg(&python_code)
+        .arg(dest_dir)
+        .arg(merge_dir)
+        .current_dir(&root)
+        .env("PATH", &patched_path)
+        .output()
+        .expect("failed to invoke python3 — is it on PATH?");
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    let ok = output.status.success() && stdout.contains("MERGE_RC:0");
+    (ok, stdout, stderr)
+}
+
+/// Stages `generate_merge_pair`'s source db under `<dest_root>/merge/userData.db`
+/// (the two-directory layout jwlCore wants, D5-03) and returns `(dest_dir,
+/// dest_db, merge_dir)`. The `TempDir` is returned so the caller keeps it alive.
+fn stage_merge_pair() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
+    let ((dest_dir, dest_db), (_src_dir, src_db)) = common::generate_merge_pair();
+    let merge_dir = dest_dir.path().join("merge");
+    std::fs::create_dir_all(&merge_dir).expect("create <dest_root>/merge");
+    std::fs::copy(&src_db, merge_dir.join("userData.db")).expect("stage source userData.db");
+    (dest_dir, dest_db, merge_dir)
+}
+
+/// MERGE-04 differential parity oracle: merging the SAME two synthetic v16
+/// fixtures via the Rust FFI (`run_merge_with_lib_path`) and via the Python
+/// app's own `jwlcore.merge_databases` yields SEMANTICALLY equivalent merged
+/// state — identical normalized row-sets across [`MERGE_PARITY_TABLES`] — even
+/// though the two `.db` files diverge byte-for-byte (VACUUM + page layout,
+/// D5-10). We NEVER byte-diff the databases.
+///
+/// `#[ignore]`d as a RECORDED MANUAL GATE (mirrors the other differential
+/// oracles): the Python leg needs the win32 root-staged `jwlCore-amd64.dll` +
+/// `sqlite3_64.dll` next to `jwlcore.py` (both gitignored), and CI
+/// (`app-ci.yml`) is a Rust-only matrix with no DLL staging. It also
+/// skip-as-passes off-host (no shipped binary for this `(OS, ARCH)`), never a
+/// silent false pass. Run explicitly with:
+///   `cargo test --test differential -- --ignored`
+///
+/// STATUS: **VERIFIED PASSING** on 2026-07-22 (Windows x64, Python 3.13.3,
+/// root-staged jwlCore-amd64.dll + sqlite3_64.dll). Rust-FFI and Python merges
+/// of the synthetic pair produced identical normalized MERGE_SNAPSHOT_TABLES
+/// state.
+#[test]
+#[ignore = "requires python3 + the win32 root-staged jwlCore-amd64.dll/sqlite3_64.dll next \
+            to jwlcore.py (both gitignored); CI is a Rust-only matrix with no DLL staging. \
+            VERIFIED PASSING locally 2026-07-22 — see this test's doc comment. Run with \
+            `cargo test --test differential -- --ignored`."]
+fn rust_ffi_merge_matches_python_merge() {
+    // Skip-as-pass off-host: no shipped jwlCore binary for this (OS, ARCH).
+    let Some(lib_path) = jwlmanager_lib::jwlcore::merge::host_dev_lib_path() else {
+        eprintln!(
+            "no jwlCore binary for this (OS, ARCH) — skipping the Rust/Python merge parity leg \
+             (would only fire on e.g. an aarch64-windows runner)."
+        );
+        return;
+    };
+    assert!(
+        lib_path.exists(),
+        "expected vendored jwlCore binary at {lib_path:?} for this host"
+    );
+
+    // RUST leg: merge a fresh pair via the FFI, read normalized merged state.
+    let rust_state = {
+        let (dest_dir, dest_db, merge_dir) = stage_merge_pair();
+        jwlmanager_lib::jwlcore::merge::run_merge_with_lib_path(
+            &lib_path,
+            dest_dir.path(),
+            &merge_dir,
+            false,
+        )
+        .expect("Rust FFI jwlCore merge must succeed on the synthetic pair");
+        merge_normalized_state(&dest_db)
+    };
+
+    // PYTHON leg: merge an independently-generated IDENTICAL pair via the app's
+    // own jwlcore.merge_databases, read the same normalized merged state.
+    let py_state = {
+        let (dest_dir, dest_db, merge_dir) = stage_merge_pair();
+        let (ok, stdout, stderr) = run_python_merge(dest_dir.path(), &merge_dir);
+        assert!(
+            ok,
+            "python jwlcore.merge_databases did not report success on the synthetic pair.\n\
+             stdout: {stdout}\nstderr: {stderr}"
+        );
+        merge_normalized_state(&dest_db)
+    };
+
+    // Sanity: the merge actually produced content (non-empty Note table).
+    assert!(
+        rust_state
+            .get("Note")
+            .map(|rows| !rows.is_empty())
+            .unwrap_or(false),
+        "merged Note table must be non-empty (fixture seeds shared + source-only notes)"
+    );
+
+    // The parity assertion: semantic row-sets EQUAL across both engines' output,
+    // table by table — never a byte-diff of the `.db` files.
+    assert_eq!(
+        rust_state, py_state,
+        "Rust-FFI and Python merges of the SAME synthetic pair must yield identical \
+         NORMALIZED table state across MERGE_SNAPSHOT_TABLES (sorted semantic row-sets), \
+         independent of physical `.db` byte layout."
+    );
+}
+
+/// Criterion 4 (T-05-10): an arm64 / missing-binary host must degrade to a
+/// TYPED, actionable error — never a crash or `sys.exit()` (the Python
+/// `crash_box` defect this rewrite refuses to port). Tests the mapping directly
+/// (NO DLL / AppHandle required): the `(OS, ARCH)` availability check for an
+/// unsupported host returns `ArchiveError::MergeUnavailable`, whose sanitized
+/// boundary DTO carries the stable `merge_unavailable` code +
+/// `error.merge.unavailable` message_key the frontend renders as actionable
+/// copy. Non-ignored: passes by default in every environment.
+#[test]
+fn merge_unavailable_is_actionable_not_a_crash() {
+    use jwlmanager_lib::error::ArchiveError;
+    use jwlmanager_lib::jwlcore::merge::availability_name;
+
+    // arm64-windows: a real shipped-binary gap (Windows on Arm has no build yet).
+    let err = availability_name("windows", "aarch64")
+        .expect_err("arm64-windows must have no shipped jwlCore binary");
+    assert!(
+        matches!(err, ArchiveError::MergeUnavailable),
+        "arm64-windows must map to MergeUnavailable, got {err:?}"
+    );
+    let dto = err.to_dto("merge_dry_run", None);
+    assert_eq!(dto.code, "merge_unavailable");
+    assert_eq!(dto.message_key, "error.merge.unavailable");
+
+    // An entirely unsupported OS is likewise unavailable — a typed error, not a panic.
+    let err2 = availability_name("freebsd", "x86_64")
+        .expect_err("an unsupported OS must have no shipped jwlCore binary");
+    assert!(
+        matches!(err2, ArchiveError::MergeUnavailable),
+        "unsupported OS must map to MergeUnavailable, got {err2:?}"
+    );
+}

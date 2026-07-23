@@ -240,4 +240,106 @@ describe("CommandBar", () => {
     renderBar({ archiveOpen: false });
     expect(screen.getByTestId("save-v14-button")).toBeDisabled();
   });
+
+  const MERGE_REPORT = {
+    added: { Note: 1, UserMark: 1, Tag: 1 },
+    overwritten: { Note: 2 },
+    deleted: {},
+    total_deleted: 0,
+  };
+
+  it("disables the Merge action when no archive is open", () => {
+    renderBar({ archiveOpen: false });
+    expect(screen.getByTestId("merge-button")).toBeDisabled();
+  });
+
+  it("Merge runs merge_dry_run on the chosen source then shows the preview with counts", async () => {
+    openMock.mockResolvedValue("C:/archives/source.jwlibrary");
+    invokeMock.mockResolvedValue(MERGE_REPORT);
+    renderBar({ archiveOpen: true });
+
+    fireEvent.click(screen.getByTestId("merge-button"));
+
+    await vi.waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("merge_dry_run", {
+        sourcePath: "C:/archives/source.jwlibrary",
+      }),
+    );
+    expect(await screen.findByTestId("delete-preview-dialog")).toBeInTheDocument();
+    // 3 added (1+1+1), 2 overwritten, base file name of the source.
+    expect(screen.getByTestId("delete-preview-summary")).toHaveTextContent(
+      "3 records added, 2 updated from source.jwlibrary",
+    );
+    // Preview only — no commit yet.
+    expect(invokeMock).not.toHaveBeenCalledWith("merge_commit", expect.anything());
+  });
+
+  it("Confirm in the merge preview invokes merge_commit then reloads notes via list_notes", async () => {
+    openMock.mockResolvedValue("C:/archives/source.jwlibrary");
+    invokeMock.mockResolvedValue(MERGE_REPORT);
+    const handlers = renderBar({ archiveOpen: true });
+
+    fireEvent.click(screen.getByTestId("merge-button"));
+    const confirm = await screen.findByTestId("delete-preview-confirm");
+    // After commit, list_notes returns the merged Notes list.
+    const mergedNotes: NotesRow[] = [];
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "merge_commit") return Promise.resolve(undefined);
+      if (cmd === "list_notes") return Promise.resolve(mergedNotes);
+      return Promise.resolve(MERGE_REPORT);
+    });
+    fireEvent.click(confirm);
+
+    await vi.waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("merge_commit", {
+        sourcePath: "C:/archives/source.jwlibrary",
+      }),
+    );
+    await vi.waitFor(() => expect(invokeMock).toHaveBeenCalledWith("list_notes"));
+    // The merged list re-renders through the existing open refresh path.
+    await vi.waitFor(() => expect(handlers.onOpened).toHaveBeenCalledWith(mergedNotes));
+  });
+
+  it("Cancel in the merge preview never invokes merge_commit", async () => {
+    openMock.mockResolvedValue("C:/archives/source.jwlibrary");
+    invokeMock.mockResolvedValue(MERGE_REPORT);
+    renderBar({ archiveOpen: true });
+
+    fireEvent.click(screen.getByTestId("merge-button"));
+    const cancel = await screen.findByTestId("delete-preview-cancel");
+    fireEvent.click(cancel);
+
+    await vi.waitFor(() =>
+      expect(screen.queryByTestId("delete-preview-dialog")).not.toBeInTheDocument(),
+    );
+    expect(invokeMock).not.toHaveBeenCalledWith("merge_commit", expect.anything());
+  });
+
+  it("dismissed merge source dialog produces no invoke and no error", async () => {
+    openMock.mockResolvedValue(null); // user dismissed the OS file picker
+    const handlers = renderBar({ archiveOpen: true });
+
+    fireEvent.click(screen.getByTestId("merge-button"));
+    await vi.waitFor(() => expect(handlers.onCancelled).toHaveBeenCalledTimes(1));
+
+    expect(invokeMock).not.toHaveBeenCalled();
+    expect(handlers.onError).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("delete-preview-dialog")).not.toBeInTheDocument();
+  });
+
+  it("surfaces a merge_unavailable ErrorDto via onError when merge_dry_run rejects", async () => {
+    openMock.mockResolvedValue("C:/archives/source.jwlibrary");
+    const dto: ErrorDto = {
+      code: "merge_unavailable",
+      operation: "merge_dry_run",
+      safe_file_name: "source.jwlibrary",
+      message_key: "error.merge.unavailable",
+    };
+    invokeMock.mockRejectedValue(dto);
+    const handlers = renderBar({ archiveOpen: true });
+
+    fireEvent.click(screen.getByTestId("merge-button"));
+    await vi.waitFor(() => expect(handlers.onError).toHaveBeenCalledWith(dto));
+    expect(screen.queryByTestId("delete-preview-dialog")).not.toBeInTheDocument();
+  });
 });
