@@ -13,7 +13,7 @@
 - [x] **Phase 3: Schema Upgrade** - Any accepted archive (v12–16) opens correctly, auto-upgraded to v16 in memory. (completed 2026-07-21)
 - [x] **Phase 4: Schema Downgrade** - User can explicitly save a v14-compatible archive with the LocationId remap closure, previewed via dry-run, and the working copy stays v16.
  (completed 2026-07-22)
-- [ ] **Phase 5: Two-Archive Merge** - User can merge two archives via jwlCore with a dry-run preview and matching results to the Python app.
+- [x] **Phase 5: Two-Archive Merge** - User can merge two archives via jwlCore with a dry-run preview and matching results to the Python app.
 - [ ] **Phase 6: Full Data Browsing** - User can view, browse, and select (single + bulk) across all 6 categories, with valid operations surfaced per selection.
 - [ ] **Phase 7: Full Editing** - User can edit colors, tags, order, favorites, cleaning/masking, and raw records across all categories.
 - [ ] **Phase 8: Import / Export Parity** - User can export/import any category in the Python app's exact wire format, with ID-gap recycling.
@@ -181,7 +181,7 @@
 | 2. Safe Delete | 3/3 | Complete   | 2026-07-21 |
 | 3. Schema Upgrade | 3/3 | Complete   | 2026-07-21 |
 | 4. Schema Downgrade | 3/3 | Complete   | 2026-07-22 |
-| 5. Two-Archive Merge | 2/3 | In Progress|  |
+| 5. Two-Archive Merge | 3/3 | Complete | SHIP |
 | 6. Full Data Browsing | 0/TBD | Not started | - |
 | 7. Full Editing | 0/TBD | Not started | - |
 | 8. Import / Export Parity | 0/TBD | Not started | - |
