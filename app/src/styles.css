@@ -228,6 +228,21 @@ body {
   border-bottom: 1px solid var(--border-hairline);
 }
 
+.category-switcher {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+  padding: var(--space-sm) var(--space-lg);
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-hairline);
+}
+
+.category-switcher-option[aria-pressed="true"] {
+  border-color: var(--brand-primary);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
 .notes-list-row-checkbox {
   flex-shrink: 0;
   width: 16px;
