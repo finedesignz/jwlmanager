@@ -444,6 +444,144 @@ pub fn generate_v16_fixture() -> (TempDir, PathBuf) {
     build_fixture_archive(work_dir.path(), &synthetic_manifest_json())
 }
 
+/// Seeds exactly one browse-fixture row per NEW category (06-02) on a single
+/// shared scripture `Location` (500: Genesis 1:1, `MepsLanguage 0` = English)
+/// so label synthesis resolves `detail1 = "01: Genesis"` / `language =
+/// "English"`, EXACTLY like the Notes fixture. Each category's identity PK is
+/// chosen DISTINCT from `LocationId 500` so an identity/join mix-up FAILS the
+/// per-category test loudly (Pitfall 1, the load-bearing check):
+///
+/// - Bookmark: `BookmarkId 611`.
+/// - Favorite: `TagMapId 622` (`NoteId NULL`, on Location 500) — INCLUDED; plus a real note-tag `TagMap 623` (`NoteId 700`, `LocationId NULL` per the TagMap one-of CHECK) that must be EXCLUDED from favorites.
+/// - Highlight: `UserMark 650` over Location 500 with TWO `BlockRange`s (`633`, `644`) — the one-row-per-BlockRange multiplicity.
+/// - Annotation: an `InputField` on Location 500 (identity IS `LocationId`).
+/// - Playlist: `PlaylistItem 5000` + `Tag 5001` (`Type 2`) + linking `TagMap 5002` — label synthesized with NO resources lookup.
+///
+/// Inserts run with `PRAGMA foreign_keys = OFF`, exactly as the other fixtures.
+/// Every row respects the v16 CHECK/UNIQUE constraints (a violation would
+/// refuse to insert into a valid v16 DB and is therefore a fixture bug, not a
+/// getter bug).
+fn insert_all_categories_rows(db_path: &Path) {
+    let conn = Connection::open(db_path).expect("failed to open seeded userData.db");
+    conn.execute_batch("PRAGMA foreign_keys = OFF")
+        .expect("disable foreign_keys for all-categories fixture inserts");
+
+    // Shared scripture Location (Genesis 1:1, English). Book/Chapter drive
+    // `detail1 = "01: Genesis"` for the categories that SELECT Book/Chapter.
+    conn.execute(
+        "INSERT INTO Location (LocationId, BookNumber, ChapterNumber, DocumentId, Track, \
+         IssueTagNumber, KeySymbol, MepsLanguage, Type, Title, Specialty, Edition) \
+         VALUES (500, 1, 1, NULL, NULL, 0, 'nwt', 0, 0, 'Genesis 1:1', NULL, NULL)",
+        [],
+    )
+    .expect("insert shared Location 500");
+
+    // Annotation: InputField on Location 500. Identity = LocationId (500).
+    conn.execute(
+        "INSERT INTO InputField (LocationId, TextTag, Value) \
+         VALUES (500, 'annot-tag', 'annotation value')",
+        [],
+    )
+    .expect("insert annotation InputField");
+
+    // Bookmark: BookmarkId 611, DISTINCT from LocationId 500 (the pitfall).
+    conn.execute(
+        "INSERT INTO Bookmark (BookmarkId, LocationId, PublicationLocationId, Slot, Title, \
+         Snippet, BlockType, BlockIdentifier) \
+         VALUES (611, 500, 500, 0, 'Fixture Bookmark', NULL, 0, NULL)",
+        [],
+    )
+    .expect("insert Bookmark");
+
+    // A non-playlist Tag (Type 1) for the favorite + excluded note-tag TagMaps.
+    conn.execute(
+        "INSERT INTO Tag (TagId, Type, Name) VALUES (600, 1, 'Favorites Fixture Tag')",
+        [],
+    )
+    .expect("insert favorites Tag");
+
+    // Favorite: TagMapId 622, NoteId NULL, on Location 500 — the INCLUDED row.
+    conn.execute(
+        "INSERT INTO TagMap (TagMapId, PlaylistItemId, LocationId, NoteId, TagId, Position) \
+         VALUES (622, NULL, 500, NULL, 600, 0)",
+        [],
+    )
+    .expect("insert favorite TagMap");
+
+    // A Note so the excluded note-tag mapping references a real NoteId.
+    conn.execute(
+        "INSERT INTO Note (NoteId, Guid, UserMarkId, LocationId, Title, Content, LastModified, \
+         Created, BlockType, BlockIdentifier) \
+         VALUES (700, 'fixture-fav-note-0700', NULL, 500, 'Excluded note-tag note', 'content', \
+         '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 0, NULL)",
+        [],
+    )
+    .expect("insert note for excluded note-tag mapping");
+
+    // EXCLUDED note-tag TagMap: NoteId 700 NOT NULL (and LocationId NULL, per
+    // the TagMap one-of CHECK) — a genuine note-tag mapping the favorites getter
+    // must NOT surface. TagMapId 623 is also distinct from LocationId 500.
+    conn.execute(
+        "INSERT INTO TagMap (TagMapId, PlaylistItemId, LocationId, NoteId, TagId, Position) \
+         VALUES (623, NULL, NULL, 700, 600, 1)",
+        [],
+    )
+    .expect("insert excluded note-tag TagMap");
+
+    // Highlight: one UserMark (650) over Location 500 with TWO BlockRanges
+    // (633, 644) — proves one-row-per-BlockRange. ColorIndex 2 -> "Green".
+    conn.execute(
+        "INSERT INTO UserMark (UserMarkId, ColorIndex, LocationId, StyleIndex, UserMarkGuid, Version) \
+         VALUES (650, 2, 500, 0, 'fixture-highlight-usermark-0650', 1)",
+        [],
+    )
+    .expect("insert highlight UserMark");
+    conn.execute(
+        "INSERT INTO BlockRange (BlockRangeId, BlockType, Identifier, StartToken, EndToken, UserMarkId) \
+         VALUES (633, 1, 1, 0, 5, 650)",
+        [],
+    )
+    .expect("insert highlight BlockRange 633");
+    conn.execute(
+        "INSERT INTO BlockRange (BlockRangeId, BlockType, Identifier, StartToken, EndToken, UserMarkId) \
+         VALUES (644, 1, 2, 6, 10, 650)",
+        [],
+    )
+    .expect("insert highlight BlockRange 644");
+
+    // Playlist: PlaylistItem 5000 + Tag 5001 (Type 2) + linking TagMap 5002.
+    conn.execute(
+        "INSERT INTO PlaylistItem (PlaylistItemId, Label, StartTrimOffsetTicks, EndTrimOffsetTicks, \
+         Accuracy, EndAction, ThumbnailFilePath) \
+         VALUES (5000, 'Fixture Song Label', NULL, NULL, 1, 1, NULL)",
+        [],
+    )
+    .expect("insert PlaylistItem");
+    conn.execute(
+        "INSERT INTO Tag (TagId, Type, Name) VALUES (5001, 2, 'Fixture Playlist')",
+        [],
+    )
+    .expect("insert playlist Tag");
+    conn.execute(
+        "INSERT INTO TagMap (TagMapId, PlaylistItemId, LocationId, NoteId, TagId, Position) \
+         VALUES (5002, 5000, NULL, NULL, 5001, 0)",
+        [],
+    )
+    .expect("insert playlist TagMap");
+}
+
+/// Builds a full synthetic v16 `.jwlibrary` fixture (as [`generate_v16_fixture`])
+/// but seeded with one row per NEW browse category (06-02) instead of the
+/// located/independent Notes — see [`insert_all_categories_rows`] for the exact
+/// seeded IDs and the identity-PK distinctness rationale.
+pub fn generate_v16_all_categories_fixture() -> (TempDir, PathBuf) {
+    let work_dir = TempDir::new().expect("failed to create fixture work dir");
+    seed_from_res_blank(work_dir.path());
+    insert_all_categories_rows(&work_dir.path().join("userData.db"));
+
+    build_fixture_archive(work_dir.path(), &synthetic_manifest_json())
+}
+
 // ---------------------------------------------------------------------------
 // Schema-downgrade (v16 -> v14) fixture generators (04-01-PLAN.md)
 // ---------------------------------------------------------------------------

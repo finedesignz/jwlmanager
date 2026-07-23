@@ -114,7 +114,11 @@ fn synthesize_pub_label(
 /// the per-category miss sentinel: Annotations uses `"* NO LANGUAGE *"`
 /// (`lang_name.get(row[2], _('* NO LANGUAGE *'))`); Bookmarks/Favorites/
 /// Highlights use `f'#{row[2]}'` (`lang_name.get(row[2], f'#{row[2]}')`).
-fn resolve_language(catalog: &ResourceCatalog, meps_language: i64, no_language_fallback: bool) -> String {
+fn resolve_language(
+    catalog: &ResourceCatalog,
+    meps_language: i64,
+    no_language_fallback: bool,
+) -> String {
     catalog
         .lang_name(meps_language)
         .map(str::to_string)
@@ -159,8 +163,14 @@ pub fn query_annotations(
     for raw in mapped {
         let raw = raw?;
         let language = resolve_language(catalog, raw.meps_language, true);
-        let label =
-            synthesize_pub_label(catalog, raw.key_symbol.as_deref(), raw.issue, raw.book, raw.chapter, true);
+        let label = synthesize_pub_label(
+            catalog,
+            raw.key_symbol.as_deref(),
+            raw.issue,
+            raw.book,
+            raw.chapter,
+            true,
+        );
         rows.push(BrowseRow {
             id: raw.location_id,
             language: Some(language),
@@ -213,8 +223,14 @@ pub fn query_bookmarks(
     for raw in mapped {
         let raw = raw?;
         let language = resolve_language(catalog, raw.meps_language, false);
-        let label =
-            synthesize_pub_label(catalog, raw.key_symbol.as_deref(), raw.issue, raw.book, raw.chapter, true);
+        let label = synthesize_pub_label(
+            catalog,
+            raw.key_symbol.as_deref(),
+            raw.issue,
+            raw.book,
+            raw.chapter,
+            true,
+        );
         rows.push(BrowseRow {
             id: raw.bookmark_id,
             language: Some(language),
@@ -263,8 +279,14 @@ pub fn query_favorites(
     for raw in mapped {
         let raw = raw?;
         let language = resolve_language(catalog, raw.meps_language, false);
-        let label =
-            synthesize_pub_label(catalog, raw.key_symbol.as_deref(), raw.issue, None, None, true);
+        let label = synthesize_pub_label(
+            catalog,
+            raw.key_symbol.as_deref(),
+            raw.issue,
+            None,
+            None,
+            true,
+        );
         rows.push(BrowseRow {
             id: raw.tag_map_id,
             language: Some(language),
@@ -321,8 +343,14 @@ pub fn query_highlights(
         let language = resolve_language(catalog, raw.meps_language, false);
         // Highlights ports the bare `code` (`JWLManager.py:688`) — no
         // `* OTHER *`-on-empty fallback (other_on_empty = false).
-        let label =
-            synthesize_pub_label(catalog, raw.key_symbol.as_deref(), raw.issue, raw.book, raw.chapter, false);
+        let label = synthesize_pub_label(
+            catalog,
+            raw.key_symbol.as_deref(),
+            raw.issue,
+            raw.book,
+            raw.chapter,
+            false,
+        );
         rows.push(BrowseRow {
             id: raw.block_range_id,
             language: Some(language),
