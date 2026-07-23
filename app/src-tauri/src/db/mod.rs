@@ -1,5 +1,6 @@
 //! Read-side database access over the extracted `userData.db`.
 
+pub mod browse;
 pub mod delete;
 pub mod labels;
 pub mod notes;
