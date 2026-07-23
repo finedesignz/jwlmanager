@@ -46,6 +46,10 @@ export function describeError(err: ErrorDto): string {
       return "Couldn't read this archive's manifest — it isn't valid JSON. Choose a different file or restore from an earlier backup.";
     case "delete_failed":
       return "Couldn't delete the selected notes — the archive is unchanged. Try again, or close and reopen the archive if the problem continues.";
+    case "merge_unavailable":
+      return "Couldn't merge — the merge engine isn't available on this device (for example on Windows on Arm, which has no merge build yet). Your open archive is unchanged.";
+    case "merge_failed":
+      return "Couldn't merge these archives — the merge could not be completed and your open archive is unchanged. Choose a different source archive or try again.";
     default:
       return `Couldn't complete this operation (${err.operation}). Choose a different file or try again.`;
   }

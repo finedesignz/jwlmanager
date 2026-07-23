@@ -71,7 +71,14 @@ unsafe fn reason_from_ptr(ptr: *const c_char) -> String {
 /// `AppHandle`. A host with no shipped binary (arm64-windows, unsupported
 /// combos) maps `resolve_lib_name`'s `Err` to `MergeUnavailable` (Pitfall 3:
 /// check availability BEFORE ever invoking into an unloaded lib).
-fn availability_name(os: &str, arch: &str) -> Result<&'static str, ArchiveError> {
+///
+/// `pub` (not `pub(crate)`): the criterion-4 actionable-error integration test
+/// in `tests/differential.rs` links this crate as an EXTERNAL crate and drives
+/// this `(os, arch)` → `MergeUnavailable` mapping directly (no DLL / AppHandle
+/// required) to prove an arm64/missing-lib host degrades to a typed error, not
+/// a crash — matching the repo convention for test-visible core routines
+/// (`run_merge_with_lib_path`, `host_dev_lib_path`).
+pub fn availability_name(os: &str, arch: &str) -> Result<&'static str, ArchiveError> {
     resolve_lib_name(os, arch).map_err(|_| ArchiveError::MergeUnavailable)
 }
 

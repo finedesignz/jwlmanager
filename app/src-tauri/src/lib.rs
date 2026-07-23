@@ -53,6 +53,27 @@ fn open_archive(
     Ok(notes)
 }
 
+/// Re-queries the Notes rows for the currently open session WITHOUT reopening
+/// a file. Used after `merge_commit` mutates the session DB in place so the
+/// frontend can re-render the merged Notes list (MERGE-02, "Confirm ...
+/// refreshes"). Requires an archive to already be open.
+#[tauri::command]
+fn list_notes(
+    app: tauri::AppHandle,
+    state: tauri::State<SessionState>,
+) -> Result<Vec<NotesRow>, ErrorDto> {
+    let resources_db_path = db::resources::resolve_resources_db_path(&app)
+        .map_err(|err| err.to_dto("list_notes", None))?;
+    let guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("list_notes", None))?;
+    let session = guard
+        .as_ref()
+        .ok_or_else(|| error::ArchiveError::MissingUserDataBackup.to_dto("list_notes", None))?;
+
+    archive::reload_notes(session, &resources_db_path).map_err(|err| err.to_dto("list_notes", None))
+}
+
 /// Saves the currently open session back to its own `target_path` (D-04:
 /// same-directory temp + atomic replace, full-inventory rebuild, hash-last
 /// manifest). Requires an archive to already be open (`open_archive` or
@@ -331,7 +352,8 @@ pub fn run() {
             downgrade_dry_run,
             save_v14_copy,
             merge_dry_run,
-            merge_commit
+            merge_commit,
+            list_notes
         ])
         .run(tauri::generate_context!())
     {

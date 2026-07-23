@@ -68,6 +68,21 @@ struct UserDataBackup {
 /// and the fully labeled Notes rows (located + independent) for the
 /// frontend's first render. `resources_db_path` is the bundled resources.db
 /// used to synthesize human-readable labels (`db::resources`).
+/// Re-queries the Notes rows for an ALREADY-open session WITHOUT re-extracting
+/// or re-validating — used after an in-place mutation of the session DB (e.g.
+/// `merge::merge_commit`) so the frontend can re-render the changed Notes list
+/// (MERGE-02, "Confirm ... refreshes"). Mirrors ONLY the notes step of
+/// [`open_and_validate`] (lines below): open the session DB, load the resource
+/// catalog, run `query_notes`. The read handle is dropped on return.
+pub fn reload_notes(
+    session: &ArchiveSession,
+    resources_db_path: &Path,
+) -> Result<Vec<NotesRow>, ArchiveError> {
+    let conn = rusqlite::Connection::open(&session.db_path)?;
+    let catalog = ResourceCatalog::load(resources_db_path, UI_LANG_CODE)?;
+    query_notes(&conn, &catalog)
+}
+
 pub fn open_and_validate(
     path: &Path,
     resources_db_path: &Path,
