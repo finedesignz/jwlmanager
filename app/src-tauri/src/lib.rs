@@ -12,7 +12,7 @@ pub mod session;
 pub mod time;
 
 use db::delete::{DryRunReport, NonEmptyNoteIds};
-use db::notes::NotesRow;
+use db::notes::BrowseRow;
 use error::ErrorDto;
 use session::{ArchiveSession, SessionState};
 use std::collections::BTreeMap;
@@ -38,7 +38,7 @@ fn open_archive(
     path: String,
     app: tauri::AppHandle,
     state: tauri::State<SessionState>,
-) -> Result<Vec<NotesRow>, ErrorDto> {
+) -> Result<Vec<BrowseRow>, ErrorDto> {
     let path_buf = PathBuf::from(&path);
     let resources_db_path = db::resources::resolve_resources_db_path(&app)
         .map_err(|err| err.to_dto("open_archive", Some(path_buf.as_path())))?;
@@ -61,7 +61,7 @@ fn open_archive(
 fn list_notes(
     app: tauri::AppHandle,
     state: tauri::State<SessionState>,
-) -> Result<Vec<NotesRow>, ErrorDto> {
+) -> Result<Vec<BrowseRow>, ErrorDto> {
     let resources_db_path = db::resources::resolve_resources_db_path(&app)
         .map_err(|err| err.to_dto("list_notes", None))?;
     let guard = state

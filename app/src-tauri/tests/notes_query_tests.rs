@@ -36,6 +36,6 @@ fn notes_query_includes_independent() {
         .iter()
         .find(|r| !r.independent)
         .expect("a located row must be present");
-    assert_eq!(located_row.language, "English");
+    assert_eq!(located_row.language.as_deref(), Some("English"));
     assert_eq!(located_row.detail1.as_deref(), Some("01: Genesis"));
 }

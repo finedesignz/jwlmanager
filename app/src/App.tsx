@@ -3,7 +3,7 @@ import NotesList from "./components/NotesList";
 import CommandBar from "./components/CommandBar";
 import ErrorBanner from "./components/ErrorBanner";
 import JwlCoreNotice from "./components/JwlCoreNotice";
-import type { NotesRow } from "./bindings/NotesRow";
+import type { BrowseRow } from "./bindings/BrowseRow";
 import type { ErrorDto } from "./bindings/ErrorDto";
 
 /**
@@ -14,12 +14,12 @@ import type { ErrorDto } from "./bindings/ErrorDto";
  * informational arm64 capability gap (D-13a) — never a red error.
  */
 export default function App() {
-  const [notes, setNotes] = useState<NotesRow[] | null>(null);
+  const [notes, setNotes] = useState<BrowseRow[] | null>(null);
   const [error, setError] = useState<ErrorDto | null>(null);
 
   const archiveOpen = notes !== null;
 
-  function handleOpened(result: NotesRow[]) {
+  function handleOpened(result: BrowseRow[]) {
     setError(null);
     setNotes(result);
   }
@@ -33,7 +33,7 @@ export default function App() {
     setError(null);
   }
 
-  function handleNotesChanged(result: NotesRow[]) {
+  function handleNotesChanged(result: BrowseRow[]) {
     setNotes(result);
   }
 

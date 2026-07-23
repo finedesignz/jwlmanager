@@ -25,7 +25,7 @@ pub mod new;
 pub mod save;
 pub mod upgrade;
 
-use crate::db::notes::{query_notes, NotesRow};
+use crate::db::notes::{query_notes, BrowseRow};
 use crate::db::resources::ResourceCatalog;
 use crate::error::ArchiveError;
 use crate::session::{ArchiveSession, ManifestMeta};
@@ -77,7 +77,7 @@ struct UserDataBackup {
 pub fn reload_notes(
     session: &ArchiveSession,
     resources_db_path: &Path,
-) -> Result<Vec<NotesRow>, ArchiveError> {
+) -> Result<Vec<BrowseRow>, ArchiveError> {
     let conn = rusqlite::Connection::open(&session.db_path)?;
     let catalog = ResourceCatalog::load(resources_db_path, UI_LANG_CODE)?;
     query_notes(&conn, &catalog)
@@ -86,7 +86,7 @@ pub fn reload_notes(
 pub fn open_and_validate(
     path: &Path,
     resources_db_path: &Path,
-) -> Result<(ArchiveSession, Vec<NotesRow>), ArchiveError> {
+) -> Result<(ArchiveSession, Vec<BrowseRow>), ArchiveError> {
     let temp_dir = tempfile::TempDir::new()?;
     let entries = extract::extract_zip_slip_safe(path, temp_dir.path())?;
 

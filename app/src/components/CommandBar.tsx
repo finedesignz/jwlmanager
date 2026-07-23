@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import type { NotesRow } from "../bindings/NotesRow";
+import type { BrowseRow } from "../bindings/BrowseRow";
 import type { ErrorDto } from "../bindings/ErrorDto";
 import type { DryRunReport } from "../bindings/DryRunReport";
 import DeletePreviewDialog from "./DeletePreviewDialog";
@@ -38,7 +38,7 @@ function baseName(path: string): string {
 interface CommandBarProps {
   /** Disables Save/Save As per UI-SPEC ("disable Save/Save As when no archive is open"). */
   archiveOpen: boolean;
-  onOpened: (notes: NotesRow[]) => void;
+  onOpened: (notes: BrowseRow[]) => void;
   onNewArchive: () => void;
   onSaved: () => void;
   onError: (err: ErrorDto) => void;
@@ -105,7 +105,7 @@ export default function CommandBar({
           return;
         }
         try {
-          const notes = await invoke<NotesRow[]>("open_archive", { path: selected });
+          const notes = await invoke<BrowseRow[]>("open_archive", { path: selected });
           onOpened(notes);
         } catch (err) {
           onError(err as ErrorDto);
@@ -255,7 +255,7 @@ export default function CommandBar({
       // re-query the merged Notes and push them through the existing open
       // refresh path (onOpened sets notes + clears any error) — this is the
       // "and refreshes" half of the merge slice.
-      const notes = await invoke<NotesRow[]>("list_notes");
+      const notes = await invoke<BrowseRow[]>("list_notes");
       onOpened(notes);
     } catch (err) {
       onError(err as ErrorDto);

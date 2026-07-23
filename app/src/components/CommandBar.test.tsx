@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import CommandBar from "./CommandBar";
-import type { NotesRow } from "../bindings/NotesRow";
+import type { BrowseRow } from "../bindings/BrowseRow";
 import type { ErrorDto } from "../bindings/ErrorDto";
 
 const invokeMock = vi.fn();
@@ -40,7 +40,7 @@ beforeEach(() => {
 describe("CommandBar", () => {
   it("invokes open_archive with the chosen path when Open Archive is clicked", async () => {
     openMock.mockResolvedValue("C:/archives/one.jwlibrary");
-    const notes: NotesRow[] = [];
+    const notes: BrowseRow[] = [];
     invokeMock.mockResolvedValue(notes);
     const handlers = renderBar();
 
@@ -282,7 +282,7 @@ describe("CommandBar", () => {
     fireEvent.click(screen.getByTestId("merge-button"));
     const confirm = await screen.findByTestId("delete-preview-confirm");
     // After commit, list_notes returns the merged Notes list.
-    const mergedNotes: NotesRow[] = [];
+    const mergedNotes: BrowseRow[] = [];
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === "merge_commit") return Promise.resolve(undefined);
       if (cmd === "list_notes") return Promise.resolve(mergedNotes);

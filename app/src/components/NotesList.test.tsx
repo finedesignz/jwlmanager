@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import NotesList from "./NotesList";
-import type { NotesRow } from "../bindings/NotesRow";
+import type { BrowseRow } from "../bindings/BrowseRow";
 
 const invokeMock = vi.fn();
 
@@ -9,7 +9,7 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
 }));
 
-function makeNote(id: number, overrides: Partial<NotesRow> = {}): NotesRow {
+function makeNote(id: number, overrides: Partial<BrowseRow> = {}): BrowseRow {
   return {
     id: BigInt(id),
     language: "English",

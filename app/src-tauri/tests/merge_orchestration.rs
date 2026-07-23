@@ -54,7 +54,7 @@ fn hash_file(path: &Path) -> String {
         .collect()
 }
 
-fn open_session(archive: &Path) -> (ArchiveSession, Vec<jwlmanager_lib::db::notes::NotesRow>) {
+fn open_session(archive: &Path) -> (ArchiveSession, Vec<jwlmanager_lib::db::notes::BrowseRow>) {
     open_and_validate(archive, &dev_resources_db_path()).expect("open dest archive must succeed")
 }
 

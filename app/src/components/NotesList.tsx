@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { invoke } from "@tauri-apps/api/core";
-import type { NotesRow } from "../bindings/NotesRow";
+import type { BrowseRow } from "../bindings/BrowseRow";
 import type { DryRunReport } from "../bindings/DryRunReport";
 import type { ErrorDto } from "../bindings/ErrorDto";
 import DeletePreviewDialog from "./DeletePreviewDialog";
@@ -23,12 +23,12 @@ const NO_WRAP_STYLE: React.CSSProperties = {
 };
 
 /**
- * Resolves the human-readable Notes-list label from a `NotesRow` synthesized
+ * Resolves the human-readable Notes-list label from a `BrowseRow` synthesized
  * by `db::notes::query_notes` (resources.db label synthesis, 01-04). Falls
  * back through publication full title -> Bible detail -> raw symbol, never
  * a raw ID.
  */
-function resolveLabel(note: NotesRow): string {
+function resolveLabel(note: BrowseRow): string {
   const parts = [note.full, note.detail1, note.detail2].filter(
     (part): part is string => Boolean(part),
   );
@@ -36,16 +36,16 @@ function resolveLabel(note: NotesRow): string {
 }
 
 interface NotesListProps {
-  notes: NotesRow[];
+  notes: BrowseRow[];
   /** Called after a successful delete apply with the post-delete list
    * (deleted rows filtered out locally — no full reload, finding 8). */
-  onNotesChanged?: (notes: NotesRow[]) => void;
+  onNotesChanged?: (notes: BrowseRow[]) => void;
   /** Routes a delete-flow `ErrorDto` to the app's existing error banner. */
   onError?: (err: ErrorDto) => void;
 }
 
 /**
- * Windowed (TanStack Virtual) render of `NotesRow[]` from the `open_archive`
+ * Windowed (TanStack Virtual) render of `BrowseRow[]` from the `open_archive`
  * IPC command. Renders only the rows in/near the visible viewport so a
  * 9,000+ row archive stays responsive (DATA-01), especially on Linux
  * WebKitGTK (RESEARCH.md D-10) where a naive full-DOM render is a perf

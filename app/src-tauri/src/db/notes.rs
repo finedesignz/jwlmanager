@@ -13,23 +13,36 @@ use rusqlite::Connection;
 use serde::Serialize;
 use ts_rs::TS;
 
-/// A single Notes-list row, over IPC to the frontend. Field shape mirrors
-/// the columns `get_notes`/`load_independent` produce after `merge_df`
-/// (`Id`, `Language`, `Symbol`, `Color`, `Tags`, `Modified`, `Year`,
-/// `Detail1`, `Detail2`, `Short`, `Full`, `Type`).
+/// A single browse-list row over IPC to the frontend — the ONE unified row
+/// type every category (Notes, Bookmarks, Annotations, Favorites, Highlights,
+/// Playlists) collapses to (D6-02). Field shape mirrors the columns the Python
+/// getters produce after `merge_df` (`Id`, `Language`, `Symbol`, `Color`,
+/// `Tags`, `Modified`, `Year`, `Detail1`, `Detail2`, `Short`, `Full`, `Type`).
+///
+/// The nullable columns are the `merge_df` `fill_null` analog: a category that
+/// does not produce a column leaves it `None` (Bookmarks/Annotations/Favorites
+/// have no color/tags/modified; Playlists has no language). Notes populates
+/// every column, so it wraps each value in `Some(...)` — byte-identical to the
+/// pre-refactor `NotesRow`. `short`/`full`/`type_group` are always filled by
+/// `merge_df` (even for Playlists), so they stay non-optional.
 #[derive(Debug, Clone, Serialize, TS)]
-#[ts(export, export_to = "../../src/bindings/NotesRow.ts")]
-pub struct NotesRow {
+#[ts(export, export_to = "../../src/bindings/BrowseRow.ts")]
+pub struct BrowseRow {
     pub id: i64,
-    pub language: String,
+    /// UI language name, or `None` for a category without a language column
+    /// (e.g. Playlists). Notes always sets `Some(...)`.
+    pub language: Option<String>,
     /// Processed publication code/symbol (`process_code` output), or
     /// `"* OTHER *"` when empty — never the raw `KeySymbol`.
     pub symbol: String,
-    /// English color name (`process_color`); i18n is out of scope for
+    /// English color name (`process_color`), or `None` for a category with no
+    /// color column (e.g. Bookmarks/Favorites). i18n is out of scope for
     /// Phase 1 (UI-SPEC defers locale switching to Phase 11).
-    pub color: String,
-    pub tags: String,
-    pub modified: String,
+    pub color: Option<String>,
+    /// Concatenated tag names, or `None` for a category that has no tags.
+    pub tags: Option<String>,
+    /// Last-modified date, or `None` for a category without a modified column.
+    pub modified: Option<String>,
     pub year: Option<String>,
     pub detail1: Option<String>,
     pub detail2: Option<String>,
@@ -38,7 +51,7 @@ pub struct NotesRow {
     pub type_group: String,
     /// True for independent notes (`LocationId IS NULL`) — surfaced so the
     /// frontend can render the `* INDEPENDENT *` affordance without
-    /// re-deriving it from `type_group`.
+    /// re-deriving it from `type_group`. Only Notes sets this true.
     pub independent: bool,
 }
 
@@ -83,7 +96,7 @@ struct LocatedRawRow {
 fn query_located_notes(
     conn: &Connection,
     catalog: &ResourceCatalog,
-) -> Result<Vec<NotesRow>, ArchiveError> {
+) -> Result<Vec<BrowseRow>, ArchiveError> {
     let mut stmt = conn.prepare(LOCATED_NOTES_SQL)?;
     let mapped = stmt.query_map([], |row| {
         Ok(LocatedRawRow {
@@ -117,13 +130,15 @@ fn query_located_notes(
         let (short, full, type_group, year) = resolve_publication(catalog, &symbol, year);
         let year = year.or(Some("* NO YEAR *".to_string()));
 
-        rows.push(NotesRow {
+        // Notes populates every column, so each optional field is `Some(...)`
+        // — byte-identical to the pre-BrowseRow `NotesRow` values (D6-02).
+        rows.push(BrowseRow {
             id: raw.id,
-            language,
+            language: Some(language),
             symbol,
-            color: process_color(raw.color),
-            tags: raw.tags.unwrap_or_else(|| "* NO TAG *".to_string()),
-            modified: raw.modified.unwrap_or_default(),
+            color: Some(process_color(raw.color)),
+            tags: Some(raw.tags.unwrap_or_else(|| "* NO TAG *".to_string())),
+            modified: Some(raw.modified.unwrap_or_default()),
             year,
             detail1,
             detail2,
@@ -146,7 +161,7 @@ struct IndependentRawRow {
 /// Queries the independent-Note rows (`LocationId IS NULL`). MUST run and be
 /// concatenated with `query_located_notes`'s result — see module docs and
 /// `INDEPENDENT_NOTES_SQL`.
-fn query_independent_notes(conn: &Connection) -> Result<Vec<NotesRow>, ArchiveError> {
+fn query_independent_notes(conn: &Connection) -> Result<Vec<BrowseRow>, ArchiveError> {
     let mut stmt = conn.prepare(INDEPENDENT_NOTES_SQL)?;
     let mapped = stmt.query_map([], |row| {
         Ok(IndependentRawRow {
@@ -166,13 +181,13 @@ fn query_independent_notes(conn: &Connection) -> Result<Vec<NotesRow>, ArchiveEr
         } else {
             None
         };
-        rows.push(NotesRow {
+        rows.push(BrowseRow {
             id: raw.id,
-            language: "* NO LANGUAGE *".to_string(),
+            language: Some("* NO LANGUAGE *".to_string()),
             symbol: "* OTHER *".to_string(),
-            color: process_color(raw.color),
-            tags: raw.tags.unwrap_or_else(|| "* NO TAG *".to_string()),
-            modified,
+            color: Some(process_color(raw.color)),
+            tags: Some(raw.tags.unwrap_or_else(|| "* NO TAG *".to_string())),
+            modified: Some(modified),
             year,
             detail1: None,
             detail2: None,
@@ -191,7 +206,7 @@ fn query_independent_notes(conn: &Connection) -> Result<Vec<NotesRow>, ArchiveEr
 pub fn query_notes(
     conn: &Connection,
     catalog: &ResourceCatalog,
-) -> Result<Vec<NotesRow>, ArchiveError> {
+) -> Result<Vec<BrowseRow>, ArchiveError> {
     let mut rows = query_independent_notes(conn)?;
     rows.extend(query_located_notes(conn, catalog)?);
     Ok(rows)
