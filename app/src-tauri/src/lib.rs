@@ -11,6 +11,7 @@ pub mod jwlcore;
 pub mod session;
 pub mod time;
 
+use category::Category;
 use db::delete::{DryRunReport, NonEmptyNoteIds};
 use db::notes::BrowseRow;
 use error::ErrorDto;
@@ -72,6 +73,47 @@ fn list_notes(
         .ok_or_else(|| error::ArchiveError::MissingUserDataBackup.to_dto("list_notes", None))?;
 
     archive::reload_notes(session, &resources_db_path).map_err(|err| err.to_dto("list_notes", None))
+}
+
+/// Re-queries the browse rows for the currently open session for ANY category,
+/// WITHOUT reopening a file — the single generic category-switch dispatch
+/// (D6-09). Keyed by the ts-rs-exported [`Category`] enum, NEVER a translated
+/// display string (the enum exists precisely to kill the Python
+/// `if category == _('Notes')` i18n control-flow bug class). Requires an
+/// archive to already be open. Mirrors `list_notes`'s session-lock +
+/// `resolve_resources_db_path` + `ResourceCatalog::load` + `ErrorDto` mapping.
+#[tauri::command]
+fn list_category(
+    category: Category,
+    app: tauri::AppHandle,
+    state: tauri::State<SessionState>,
+) -> Result<Vec<BrowseRow>, ErrorDto> {
+    let resources_db_path = db::resources::resolve_resources_db_path(&app)
+        .map_err(|err| err.to_dto("list_category", None))?;
+    let guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("list_category", None))?;
+    let session = guard
+        .as_ref()
+        .ok_or_else(|| error::ArchiveError::MissingUserDataBackup.to_dto("list_category", None))?;
+
+    // Same connection-acquisition as `archive::reload_notes`: open the session
+    // DB read handle, load the resource catalog, dispatch to the getter.
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err).to_dto("list_category", Some(session.target_path.as_path()))
+    })?;
+    let catalog = db::resources::ResourceCatalog::load(&resources_db_path, "en")
+        .map_err(|err| err.to_dto("list_category", None))?;
+
+    match category {
+        Category::Notes => db::notes::query_notes(&conn, &catalog),
+        Category::Bookmarks => db::browse::query_bookmarks(&conn, &catalog),
+        Category::Favorites => db::browse::query_favorites(&conn, &catalog),
+        Category::Highlights => db::browse::query_highlights(&conn, &catalog),
+        Category::Annotations => db::browse::query_annotations(&conn, &catalog),
+        Category::Playlists => db::browse::query_playlists(&conn, &catalog),
+    }
+    .map_err(|err| err.to_dto("list_category", None))
 }
 
 /// Saves the currently open session back to its own `target_path` (D-04:
@@ -353,7 +395,8 @@ pub fn run() {
             save_v14_copy,
             merge_dry_run,
             merge_commit,
-            list_notes
+            list_notes,
+            list_category
         ])
         .run(tauri::generate_context!())
     {
