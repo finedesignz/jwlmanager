@@ -243,6 +243,36 @@ body {
   color: var(--text-primary);
 }
 
+.category-list-toolbar {
+  align-items: center;
+  gap: var(--space-sm);
+  justify-content: flex-start;
+}
+
+.category-list-selection-count {
+  margin-right: auto;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Deferred operation affordance: surfaced but visibly parked ("coming soon")
+   so DATA-07 criterion 3 is demonstrable without a backend mutation. */
+.category-list-op-deferred[data-deferred="true"] {
+  opacity: 0.4;
+  font-style: italic;
+  cursor: not-allowed;
+}
+
+.notes-list-row-color {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 .notes-list-row-checkbox {
   flex-shrink: 0;
   width: 16px;
