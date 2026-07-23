@@ -112,7 +112,11 @@
   1. User can browse Highlights, Bookmarks, Annotations, Favorites, and Playlists, each rendering real archive data
   2. User can select one or many items in any category
   3. The set of valid operations shown updates based on the current selection (e.g., bulk delete only appears when items are selected)
-**Plans**: TBD
+**Plans**: 4 plans (3 waves)
+- [ ] 06-01-PLAN.md — Extract db/labels.rs + unify NotesRow into BrowseRow (enabling refactor, Notes stays green) (Wave 1)
+- [ ] 06-02-PLAN.md — Five verbatim category getters (browse.rs) + list_category command + identity-PK query tests (Wave 2)
+- [ ] 06-03-PLAN.md — Frontend: operations descriptor + CategorySwitcher + virtualized CategoryList + vitest (Wave 2)
+- [ ] 06-04-PLAN.md — Wire switcher + list_category into App shell, retire NotesList, DATA-07 end-to-end (Wave 3)
 **UI hint**: yes
 
 ### Phase 7: Full Editing
@@ -182,7 +186,7 @@
 | 3. Schema Upgrade | 3/3 | Complete   | 2026-07-21 |
 | 4. Schema Downgrade | 3/3 | Complete   | 2026-07-22 |
 | 5. Two-Archive Merge | 3/3 | Complete | SHIP |
-| 6. Full Data Browsing | 0/TBD | Not started | - |
+| 6. Full Data Browsing | 0/4 | Planned | - |
 | 7. Full Editing | 0/TBD | Not started | - |
 | 8. Import / Export Parity | 0/TBD | Not started | - |
 | 9. Incremental Export | 0/TBD | Not started | - |
