@@ -43,7 +43,7 @@
 - [x] **DATA-04**: User can view and browse Annotations
 - [x] **DATA-05**: User can view and browse Favorites
 - [x] **DATA-06**: User can view and browse Playlists
-- [ ] **DATA-07**: User can select items (individually and in bulk) and see the valid operations for that selection
+- [x] **DATA-07**: User can select items (individually and in bulk) and see the valid operations for that selection
 - [x] **DATA-08**: App identifies categories by stable enums, never by translated display strings
 
 ### Editing (EDIT)
