@@ -38,11 +38,11 @@
 ### Data Views (DATA)
 
 - [x] **DATA-01**: User can view and browse Notes, with the list staying responsive at 9,000+ rows (virtualized)
-- [ ] **DATA-02**: User can view and browse Highlights
-- [ ] **DATA-03**: User can view and browse Bookmarks
-- [ ] **DATA-04**: User can view and browse Annotations
-- [ ] **DATA-05**: User can view and browse Favorites
-- [ ] **DATA-06**: User can view and browse Playlists
+- [x] **DATA-02**: User can view and browse Highlights
+- [x] **DATA-03**: User can view and browse Bookmarks
+- [x] **DATA-04**: User can view and browse Annotations
+- [x] **DATA-05**: User can view and browse Favorites
+- [x] **DATA-06**: User can view and browse Playlists
 - [ ] **DATA-07**: User can select items (individually and in bulk) and see the valid operations for that selection
 - [x] **DATA-08**: App identifies categories by stable enums, never by translated display strings
 

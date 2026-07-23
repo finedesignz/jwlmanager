@@ -2,16 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 1
-current_phase_name: Foundation Slice
 status: verifying
-stopped_at: Completed 06-01-PLAN.md
-last_updated: "2026-07-23T17:17:49.296Z"
+stopped_at: Completed 06-02-PLAN.md
+last_updated: "2026-07-23T17:35:27.418Z"
 progress:
-  total_phases: 6
+  total_phases: 11
   completed_phases: 5
   total_plans: 23
-  completed_plans: 20
+  completed_plans: 21
+  percent: 45
 ---
 
 # Project State — JWL Manager (Tauri)
@@ -28,7 +27,7 @@ Plan: 3 of 3 complete (delete preview/confirm UI)
 **Phase:** 1 of 11 — Open, View, Save (Foundation Slice)
 **Plan:** 7 of 7
 **Status:** Phase complete — ready for verification
-**Progress:** [█████████░] 87%
+**Progress:** [█████████░] 91%
 
 ## Performance Metrics
 
@@ -40,6 +39,7 @@ Plan: 3 of 3 complete (delete preview/confirm UI)
 | Plan | Duration | Tasks | Files |
 |------|----------|-------|-------|
 | Phase 06 P01 | 35m | 2 tasks | 13 files |
+| Phase 6 P02 | 30m | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -77,6 +77,8 @@ Plan: 3 of 3 complete (delete preview/confirm UI)
 - [Phase ?]: 05-01: jwlCore mergeDatabase FFI wrapper (merge.rs) reuses Phase 1 load path; MergeUnavailable/MergeFailed typed errors, no crash; real DLL merged synthetic pair
 - [Phase ?]: D5-02: merge dry-run uses a CONTENT-signature diff (not PK-set) so in-place UPDATEs count as overwritten; commit promotes via atomic rename-with-replace, never fs::copy
 - [Phase ?]: jwlCore dir-pair merge wrote only userData.db (no loose media relocated); media fold-back is an empirically-verified no-op (branch a)
+- [Phase ?]: 06-02: five category getters (db/browse.rs) surface the correct identity PK as row.id (Bookmark=BookmarkId, Favorite=TagMapId, Highlight=BlockRangeId, Annotation=LocationId, Playlist=PlaylistItemId), never the join's LocationId
+- [Phase ?]: 06-02: one generic list_category(Category) command dispatches all six getters keyed by the ts-rs enum, not six commands nor a translated display string
 
 ### Todos
 
@@ -92,6 +94,6 @@ Plan: 3 of 3 complete (delete preview/confirm UI)
 
 **Resume file:** None
 
-**Last session:** 2026-07-23T17:17:49.277Z
-**Stopped at:** Completed 06-01-PLAN.md
+**Last session:** 2026-07-23T17:35:18.243Z
+**Stopped at:** Completed 06-02-PLAN.md
 **Next action:** Execute 03-03-PLAN.md (Python differential test against real v14 owner archives), then Phase 3 verification.
