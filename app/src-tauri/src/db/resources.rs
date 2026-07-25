@@ -8,8 +8,10 @@
 
 use crate::error::ArchiveError;
 use rusqlite::Connection;
+use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use ts_rs::TS;
 
 /// A single publication/extra lookup row (`Publications`/`Extras` JOIN
 /// `Types`), keyed by `Symbol` in `ResourceCatalog::publications`.
@@ -21,6 +23,29 @@ pub struct PublicationInfo {
     pub type_group: Option<String>,
 }
 
+/// One row of the bundled `Favorites` VIEW (columns `Language, Symbol,
+/// Short, Lang` — 07-RESEARCH.md Corrections item 1: there is no
+/// `favorites` table, only this VIEW over `Publications`/`Extras`). A
+/// Bible-edition catalog entry the Favorite Dialog's edition picker renders
+/// (07-01-PLAN.md Task 2/3, EDIT-05 mark).
+///
+/// `language` is the integer `MepsLanguage` id (goes into
+/// `Location.MepsLanguage` when marking) and `symbol` is the edition's
+/// `KeySymbol` (goes into `Location.KeySymbol` and the `TagMap` duplicate
+/// check) — both are what [`crate::db::favorites::apply_favorite_add`]
+/// actually needs. `short` and `lang` are DISPLAY-ONLY strings (`short` =
+/// edition short title shown in the edition list; `lang` = the display
+/// language name, e.g. `"English"` — what [`ResourceCatalog::load_favorite_editions`]
+/// filters by, NOT the integer `language` field despite the similar name).
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, export_to = "../../src/bindings/FavoriteEdition.ts")]
+pub struct FavoriteEdition {
+    pub language: i64,
+    pub symbol: String,
+    pub short: String,
+    pub lang: String,
+}
+
 /// Cached label-lookup maps loaded once from the bundled `resources.db`,
 /// mirroring `read_resources`'s module-global cache (`lang_name`,
 /// `bible_books`, `publications`) via a struct instead of Python globals.
@@ -29,6 +54,12 @@ pub struct ResourceCatalog {
     lang_name: HashMap<i64, String>,
     bible_books: HashMap<i64, String>,
     publications: HashMap<String, PublicationInfo>,
+    /// [`FavoriteEdition`] rows grouped by their DISPLAY language name
+    /// (`Favorites.Lang`), built eagerly here rather than queried on demand
+    /// per `load_favorite_editions` call — `ResourceCatalog` holds no live
+    /// connection after `load` returns (same reason `lang_name`/
+    /// `bible_books`/`publications` are eager maps too).
+    favorite_editions: HashMap<String, Vec<FavoriteEdition>>,
 }
 
 impl ResourceCatalog {
@@ -104,10 +135,31 @@ impl ResourceCatalog {
             }
         }
 
+        let mut favorite_editions: HashMap<String, Vec<FavoriteEdition>> = HashMap::new();
+        {
+            let mut stmt = conn.prepare("SELECT Language, Symbol, Short, Lang FROM Favorites")?;
+            let rows = stmt.query_map([], |row| {
+                Ok(FavoriteEdition {
+                    language: row.get(0)?,
+                    symbol: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
+                    short: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                    lang: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                })
+            })?;
+            for row in rows {
+                let row = row?;
+                favorite_editions
+                    .entry(row.lang.clone())
+                    .or_default()
+                    .push(row);
+            }
+        }
+
         Ok(Self {
             lang_name,
             bible_books,
             publications,
+            favorite_editions,
         })
     }
 
@@ -121,6 +173,39 @@ impl ResourceCatalog {
 
     pub fn publication(&self, symbol: &str) -> Option<&PublicationInfo> {
         self.publications.get(symbol)
+    }
+
+    /// Bible editions available to mark as a Favorite for a DISPLAY
+    /// `language` name (`Favorites.Lang`, e.g. `"English"` — NOT the
+    /// integer `MepsLanguage` id). Empty (never an error) when the language
+    /// has no favorite-eligible editions — most of [`Self::all_language_names`]'s
+    /// entries fall in this bucket (07-01-PLAN.md Task 2 behavior; the
+    /// bundled catalog has ~1400 known languages but favorite-eligible
+    /// editions in only a handful of them).
+    pub fn load_favorite_editions(&self, language: &str) -> Vec<FavoriteEdition> {
+        self.favorite_editions
+            .get(language)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Every DISPLAY language name the Favorite Dialog's Language `<select>`
+    /// can offer, sorted — the full bundled `Languages` catalog (~1400
+    /// entries), NOT narrowed to languages that currently have a
+    /// favorite-eligible edition (only 9 of them do). Deliberate deviation
+    /// from `JWLManager.py:3406-3410`, whose combo box is populated from
+    /// `favorites['Lang'].unique()` and so is ALWAYS narrowed to
+    /// non-empty choices: 07-UI-SPEC.md's "No editions found for
+    /// {Language}. Try a different language." empty state is listed as
+    /// reachable (`covered`, not `backstop`), which is only possible if
+    /// the language list includes languages with zero favorite-eligible
+    /// editions — a narrowed-to-Python's-set list could never produce that
+    /// state at all.
+    pub fn all_language_names(&self) -> Vec<&str> {
+        let mut names: Vec<&str> = self.lang_name.values().map(String::as_str).collect();
+        names.sort_unstable();
+        names.dedup();
+        names
     }
 }
 
@@ -185,5 +270,44 @@ mod tests {
             !info.full.is_empty() || !info.short.is_empty(),
             "publication lookup must resolve a non-empty title"
         );
+    }
+
+    #[test]
+    fn favorite_editions_lookup_and_language_breadth() {
+        let catalog = ResourceCatalog::load(&dev_resources_db_path(), "en")
+            .expect("resources.db must load for the English UI language");
+
+        // English has favorite-eligible editions, including the New World
+        // Translation under the "nwt" KeySymbol (confirmed against the real
+        // bundled resources.db, not assumed).
+        let english_editions = catalog.load_favorite_editions("English");
+        assert!(
+            !english_editions.is_empty(),
+            "English must have at least one favorite-eligible edition"
+        );
+        assert!(
+            english_editions
+                .iter()
+                .any(|e| e.symbol == "nwt" && e.short.contains("New World")),
+            "expected an 'nwt' New World Translation row for English"
+        );
+
+        // An unknown language name returns empty, not an error.
+        assert!(catalog.load_favorite_editions("Not A Real Language").is_empty());
+
+        // The language list is the FULL bundled catalog (~1400 entries),
+        // deliberately broader than the ~9 languages with favorite-eligible
+        // editions — see `all_language_names`'s doc comment for why.
+        let all_languages = catalog.all_language_names();
+        assert!(
+            all_languages.len() > 100,
+            "all_language_names should return the full Languages catalog, not just \
+             favorite-eligible languages"
+        );
+        assert!(all_languages.contains(&"English"));
+        // Sorted, per the method's contract.
+        let mut sorted_copy = all_languages.clone();
+        sorted_copy.sort_unstable();
+        assert_eq!(all_languages, sorted_copy);
     }
 }

@@ -9,7 +9,12 @@
 
 mod common;
 
-use jwlmanager_lib::db::favorites::{apply_favorite_remove, dry_run_favorite_remove, NonEmptyTagMapIds};
+use jwlmanager_lib::db::favorites::{
+    apply_favorite_add, apply_favorite_remove, dry_run_favorite_add, dry_run_favorite_remove,
+    FavoriteEditionRef, NonEmptyTagMapIds,
+};
+use jwlmanager_lib::db::resources::{dev_resources_db_path, ResourceCatalog};
+use jwlmanager_lib::error::ArchiveError;
 use rusqlite::Connection;
 
 /// The system `Favorite` tag's `TagId`. `res/blank` (the real v16
@@ -219,5 +224,258 @@ fn test_dry_run_favorite_remove_restores_pragmas() {
     assert_eq!(
         fk_before, fk_after,
         "dry-run must restore the connection's prior foreign_keys pragma"
+    );
+}
+
+// --- Task 2: Favorites mark (apply_favorite_add / dry_run_favorite_add) ---
+
+/// Adding a favorite to an archive lacking the system tag creates exactly
+/// one `Tag` row with `Type = 0` and `Name = 'Favorite'`.
+#[test]
+fn test_apply_favorite_add_creates_system_tag_when_absent() {
+    let (_dir, db_path) = common::fresh_v16_db_without_favorite_tag();
+    let conn = Connection::open(&db_path).expect("open db without system tag");
+    conn.execute_batch("PRAGMA foreign_keys = OFF")
+        .expect("fk off");
+
+    let before: i64 = conn
+        .query_row("SELECT COUNT(*) FROM Tag WHERE Type = 0", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(before, 0, "fixture must genuinely lack the system tag");
+
+    let edition = FavoriteEditionRef {
+        symbol: "nwt".to_string(),
+        language: 0,
+    };
+    let tx = conn.unchecked_transaction().expect("open tx");
+    apply_favorite_add(&tx, &edition).expect("apply must succeed");
+
+    let after: i64 = tx
+        .query_row(
+            "SELECT COUNT(*) FROM Tag WHERE Type = 0 AND Name = 'Favorite'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        after, 1,
+        "exactly one system Favorite tag must exist after apply"
+    );
+    tx.rollback().unwrap();
+}
+
+/// A second add of the same (edition, language) returns
+/// `ArchiveError::FavoriteDuplicate` and performs zero INSERTs — `SELECT
+/// COUNT(*) FROM TagMap` is unchanged.
+#[test]
+fn test_apply_favorite_add_duplicate_returns_error_and_tagmap_unchanged() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    let conn = Connection::open(&db_path).expect("open seeded db");
+    conn.execute_batch("PRAGMA foreign_keys = OFF")
+        .expect("fk off");
+
+    let edition = FavoriteEditionRef {
+        symbol: "nwt".to_string(),
+        language: 0,
+    };
+    let tx = conn.unchecked_transaction().expect("open tx");
+    apply_favorite_add(&tx, &edition).expect("first apply must succeed");
+
+    let count_after_first: i64 = tx
+        .query_row("SELECT COUNT(*) FROM TagMap", [], |r| r.get(0))
+        .unwrap();
+
+    let result = apply_favorite_add(&tx, &edition);
+    assert!(
+        matches!(result, Err(ArchiveError::FavoriteDuplicate { .. })),
+        "second add of the same edition must return FavoriteDuplicate, got: {result:?}"
+    );
+
+    let count_after_second: i64 = tx
+        .query_row("SELECT COUNT(*) FROM TagMap", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(
+        count_after_first, count_after_second,
+        "a rejected duplicate must perform zero INSERTs into TagMap"
+    );
+    tx.rollback().unwrap();
+}
+
+/// The inserted `TagMap.Position` equals the prior max Position for that tag
+/// plus one, not a hardcoded 0 — a second favorite under the SAME system tag
+/// must not collide with an already-seeded favorite's Position.
+#[test]
+fn test_apply_favorite_add_position_is_prior_max_plus_one() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    let conn = Connection::open(&db_path).expect("open seeded db");
+    conn.execute_batch("PRAGMA foreign_keys = OFF")
+        .expect("fk off");
+    // Pre-existing favorite at LocationId/TagMapId 900, Position 0 (first
+    // under the tag).
+    seed_favorite(&conn, 900);
+
+    // A DIFFERENT edition (distinct KeySymbol) so this is a genuinely new
+    // Location, not a duplicate of the seeded one.
+    let edition = FavoriteEditionRef {
+        symbol: "nwtsty".to_string(),
+        language: 0,
+    };
+    let tx = conn.unchecked_transaction().expect("open tx");
+    apply_favorite_add(&tx, &edition).expect("apply must succeed");
+
+    let new_position: i64 = tx
+        .query_row(
+            "SELECT tm.Position FROM TagMap tm \
+             JOIN Location loc ON loc.LocationId = tm.LocationId \
+             WHERE loc.KeySymbol = 'nwtsty' AND loc.MepsLanguage = 0",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        new_position, 1,
+        "new favorite's Position must be the prior max (0) plus one"
+    );
+    tx.rollback().unwrap();
+}
+
+/// `load_favorite_editions` returns a non-empty vec for a seeded (real,
+/// bundled) language and an empty vec for an unknown one — exercised
+/// through the `favorites_tests` binary specifically, since the plan's
+/// `<verify>` command targets this integration test, not the lib's own
+/// unit tests.
+#[test]
+fn test_load_favorite_editions_seeded_vs_unknown_language() {
+    let catalog = ResourceCatalog::load(&dev_resources_db_path(), "en")
+        .expect("resources.db must load for the English UI language");
+
+    let english = catalog.load_favorite_editions("English");
+    assert!(
+        !english.is_empty(),
+        "English must have at least one favorite-eligible edition"
+    );
+
+    let unknown = catalog.load_favorite_editions("Not A Real Language Name");
+    assert!(
+        unknown.is_empty(),
+        "an unknown language must return an empty vec, not an error"
+    );
+}
+
+/// `dry_run_favorite_add` reports `added: {Location: 1, TagMap: 1}` (the
+/// system tag already exists via `res/blank`'s pre-seed, so `Tag` shows no
+/// diff) and leaves the DB unchanged.
+#[test]
+fn test_dry_run_favorite_add_reports_location_and_tagmap_added_leaves_db_unchanged() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    let mut conn = Connection::open(&db_path).expect("open seeded db");
+
+    let location_count_before: i64 = conn
+        .query_row("SELECT COUNT(*) FROM Location", [], |r| r.get(0))
+        .unwrap();
+    let tagmap_count_before: i64 = conn
+        .query_row("SELECT COUNT(*) FROM TagMap", [], |r| r.get(0))
+        .unwrap();
+
+    let edition = FavoriteEditionRef {
+        symbol: "nwt".to_string(),
+        language: 0,
+    };
+    let report = dry_run_favorite_add(&mut conn, &edition).expect("dry run must succeed");
+
+    assert_eq!(
+        report.added.get("Location").copied().unwrap_or(0),
+        1,
+        "report must show one Location added: {:?}",
+        report.added
+    );
+    assert_eq!(
+        report.added.get("TagMap").copied().unwrap_or(0),
+        1,
+        "report must show one TagMap added: {:?}",
+        report.added
+    );
+    assert_eq!(
+        report.added.get("Tag").copied().unwrap_or(0),
+        0,
+        "system tag already exists via res/blank's pre-seed, so Tag must show \
+         no diff: {:?}",
+        report.added
+    );
+
+    let location_count_after: i64 = conn
+        .query_row("SELECT COUNT(*) FROM Location", [], |r| r.get(0))
+        .unwrap();
+    let tagmap_count_after: i64 = conn
+        .query_row("SELECT COUNT(*) FROM TagMap", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(
+        location_count_before, location_count_after,
+        "dry-run must leave the working copy's Location row count unchanged"
+    );
+    assert_eq!(
+        tagmap_count_before, tagmap_count_after,
+        "dry-run must leave the working copy's TagMap row count unchanged"
+    );
+}
+
+/// Against a fixture genuinely lacking the system tag, `dry_run_favorite_add`
+/// ALSO reports `Tag: 1` added — and still leaves the DB unchanged (the
+/// tag-creation itself rolls back too).
+#[test]
+fn test_dry_run_favorite_add_without_system_tag_reports_tag_added_and_leaves_db_unchanged() {
+    let (_dir, db_path) = common::fresh_v16_db_without_favorite_tag();
+    let mut conn = Connection::open(&db_path).expect("open db without system tag");
+
+    let tag_count_before: i64 = conn
+        .query_row("SELECT COUNT(*) FROM Tag", [], |r| r.get(0))
+        .unwrap();
+
+    let edition = FavoriteEditionRef {
+        symbol: "nwt".to_string(),
+        language: 0,
+    };
+    let report = dry_run_favorite_add(&mut conn, &edition).expect("dry run must succeed");
+
+    assert_eq!(
+        report.added.get("Tag").copied().unwrap_or(0),
+        1,
+        "report must show the system tag as newly added: {:?}",
+        report.added
+    );
+
+    let tag_count_after: i64 = conn
+        .query_row("SELECT COUNT(*) FROM Tag", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(
+        tag_count_before, tag_count_after,
+        "dry-run must leave the working copy's Tag row count unchanged, even \
+         though the tag was staged for creation inside the rolled-back \
+         transaction"
+    );
+}
+
+/// A duplicate favorite surfaces as `Err(ArchiveError::FavoriteDuplicate)`
+/// from `dry_run_favorite_add` too, before any row is staged — mirroring
+/// what `apply_favorite_add` does directly.
+#[test]
+fn test_dry_run_favorite_add_duplicate_returns_error() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    {
+        let conn = Connection::open(&db_path).expect("open seeded db");
+        conn.execute_batch("PRAGMA foreign_keys = OFF")
+            .expect("fk off");
+        seed_favorite(&conn, 900); // KeySymbol='nwt', MepsLanguage=0
+    }
+
+    let mut conn = Connection::open(&db_path).expect("reopen db");
+    let edition = FavoriteEditionRef {
+        symbol: "nwt".to_string(),
+        language: 0,
+    };
+    let result = dry_run_favorite_add(&mut conn, &edition);
+    assert!(
+        matches!(result, Err(ArchiveError::FavoriteDuplicate { .. })),
+        "dry-run of a duplicate favorite must return FavoriteDuplicate, got: {result:?}"
     );
 }

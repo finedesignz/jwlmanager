@@ -14,7 +14,7 @@ pub mod time;
 use category::Category;
 use db::delete::NonEmptyNoteIds;
 use db::edit::DryRunReport;
-use db::favorites::NonEmptyTagMapIds;
+use db::favorites::{FavoriteEditionRef, NonEmptyTagMapIds};
 use db::notes::BrowseRow;
 use error::ErrorDto;
 use session::{ArchiveSession, SessionState};
@@ -368,6 +368,126 @@ fn favorite_remove_apply(
     })
 }
 
+/// Every display language name the Favorite Dialog's Language `<select>` can
+/// offer (07-01-PLAN.md Task 2/3, EDIT-05 mark) — the full bundled
+/// `Languages` catalog, NOT narrowed to languages that currently have a
+/// favorite-eligible edition (`ResourceCatalog::all_language_names`'s doc
+/// comment explains why the narrower Python behavior isn't ported here). No
+/// open archive session required: `resources.db` is bundled app-wide, not
+/// archive-specific — same reason `open_archive` resolves it independently
+/// of session state.
+#[tauri::command]
+fn list_favorite_languages(app: tauri::AppHandle) -> Result<Vec<String>, ErrorDto> {
+    let resources_db_path = db::resources::resolve_resources_db_path(&app)
+        .map_err(|err| err.to_dto("list_favorite_languages", None))?;
+    let catalog = db::resources::ResourceCatalog::load(&resources_db_path, "en")
+        .map_err(|err| err.to_dto("list_favorite_languages", None))?;
+    Ok(catalog
+        .all_language_names()
+        .into_iter()
+        .map(str::to_string)
+        .collect())
+}
+
+/// The Bible editions available to favorite for a display `language`
+/// (`Favorites.Lang`) — the Favorite Dialog's edition list, filtered by
+/// whichever language the user picked from `list_favorite_languages`. Empty
+/// (never an error) when the language has no favorite-eligible editions
+/// (07-UI-SPEC.md's "No editions found for {Language}" empty state).
+#[tauri::command]
+fn list_favorite_editions(
+    language: String,
+    app: tauri::AppHandle,
+) -> Result<Vec<db::resources::FavoriteEdition>, ErrorDto> {
+    let resources_db_path = db::resources::resolve_resources_db_path(&app)
+        .map_err(|err| err.to_dto("list_favorite_editions", None))?;
+    let catalog = db::resources::ResourceCatalog::load(&resources_db_path, "en")
+        .map_err(|err| err.to_dto("list_favorite_editions", None))?;
+    Ok(catalog.load_favorite_editions(&language))
+}
+
+/// Previews the effect of marking the given Bible edition as a Favorite
+/// WITHOUT mutating the working copy (SAFE-01, EDIT-05): opens the session's
+/// `db_path`, runs the real mark + trim inside a rolled-back transaction, and
+/// returns the resulting semantic [`DryRunReport`]. A duplicate favorite
+/// surfaces as a `favorite_duplicate` typed error here too, never a raw
+/// constraint violation (07-PATTERNS.md Correction #3).
+#[tauri::command]
+fn favorite_add_dry_run(
+    edition: FavoriteEditionRef,
+    state: tauri::State<SessionState>,
+) -> Result<DryRunReport, ErrorDto> {
+    let guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("favorite_add_dry_run", None))?;
+    let session = guard.as_ref().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("favorite_add_dry_run", None)
+    })?;
+
+    let mut conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("favorite_add_dry_run", Some(session.target_path.as_path()))
+    })?;
+
+    db::favorites::dry_run_favorite_add(&mut conn, &edition).map_err(|err| {
+        err.to_dto("favorite_add_dry_run", Some(session.target_path.as_path()))
+    })
+}
+
+/// Applies marking the given Bible edition as a Favorite — ensures the
+/// system tag/Location (creating either if absent) and inserts one `TagMap`
+/// row, all committed inside one transaction (EDIT-05). Marks the session
+/// dirty on success.
+#[tauri::command]
+fn favorite_add_apply(
+    edition: FavoriteEditionRef,
+    state: tauri::State<SessionState>,
+) -> Result<DryRunReport, ErrorDto> {
+    let mut guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("favorite_add_apply", None))?;
+    let session = guard.as_mut().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("favorite_add_apply", None)
+    })?;
+
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("favorite_add_apply", Some(session.target_path.as_path()))
+    })?;
+
+    // Defensive/uniform PragmaGuard + `foreign_keys` OFF around every edit
+    // apply, matching `favorite_remove_apply`'s established shape.
+    let guard_pragma = db::pragma_guard::PragmaGuard::new(&conn).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("favorite_add_apply", Some(session.target_path.as_path()))
+    })?;
+    conn.execute_batch("PRAGMA foreign_keys = 'OFF';")
+        .map_err(|err| {
+            error::ArchiveError::from(err)
+                .to_dto("favorite_add_apply", Some(session.target_path.as_path()))
+        })?;
+
+    // `unchecked_transaction` (shared `&self`) because `guard_pragma` already
+    // holds a shared borrow of `conn` for the duration of this function —
+    // same pattern as `favorite_remove_apply`/`delete_notes_apply`.
+    let tx = conn.unchecked_transaction().map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("favorite_add_apply", Some(session.target_path.as_path()))
+    })?;
+    let report = db::favorites::apply_favorite_add_reporting(&tx, &edition).map_err(|err| {
+        err.to_dto("favorite_add_apply", Some(session.target_path.as_path()))
+    })?;
+    tx.commit().map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("favorite_add_apply", Some(session.target_path.as_path()))
+    })?;
+    drop(guard_pragma);
+
+    session.dirty = true;
+
+    Ok(report)
+}
+
 /// Previews the effect of downgrading the open session to v14 WITHOUT mutating
 /// the working copy (D4-08): opens the session's `db_path` and runs the real
 /// trim + merge inside a rolled-back transaction (trim-FIRST, identical order to
@@ -490,6 +610,10 @@ pub fn run() {
             delete_notes_apply,
             favorite_remove_dry_run,
             favorite_remove_apply,
+            list_favorite_languages,
+            list_favorite_editions,
+            favorite_add_dry_run,
+            favorite_add_apply,
             downgrade_dry_run,
             save_v14_copy,
             merge_dry_run,

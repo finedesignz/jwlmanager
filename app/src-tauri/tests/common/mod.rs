@@ -607,6 +607,22 @@ pub fn fresh_v16_db() -> (TempDir, PathBuf) {
     (work_dir, db_path)
 }
 
+/// Seeds a fresh `res/blank` v16 `userData.db` with the system
+/// `Tag (Type=0, Name='Favorite')` row REMOVED — `res/blank` ships that row
+/// pre-seeded (`TagId=1`), so `fresh_v16_db()` alone can never exercise
+/// `apply_favorite_add`'s "creates the tag when absent" branch
+/// (07-01-PLAN.md Task 2). Simulates an archive shape where the system tag
+/// genuinely doesn't exist yet, so the defensive `INSERT ... WHERE NOT
+/// EXISTS` (`JWLManager.py:3435`) is the thing actually under test, not a
+/// no-op.
+pub fn fresh_v16_db_without_favorite_tag() -> (TempDir, PathBuf) {
+    let (dir, db_path) = fresh_v16_db();
+    let conn = Connection::open(&db_path).expect("open seeded db");
+    conn.execute("DELETE FROM Tag WHERE Type = 0 AND Name = 'Favorite'", [])
+        .expect("remove pre-seeded system Favorite tag");
+    (dir, db_path)
+}
+
 /// Inserts a colliding `Location` group at the canonical key shape. `ids[0]`
 /// is the intended (lowest) survivor when `ids` is ascending.
 ///
