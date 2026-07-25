@@ -1,7 +1,7 @@
-import { useCallback, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { DryRunReport } from "../bindings/DryRunReport";
 
-interface DeletePreviewDialogProps {
+interface EditPreviewDialogProps {
   report: DryRunReport;
   onConfirm: () => Promise<void>;
   onCancel: () => void;
@@ -21,21 +21,28 @@ interface DeletePreviewDialogProps {
 }
 
 /**
- * Reusable destructive-confirm surface (D2-08, general per D2-07 so Phase 4's
- * downgrade preview and Phase 5's merge preview can reuse it unchanged).
- * Renders the `DryRunReport`'s per-table `deleted` counts in plain language
- * BEFORE any mutation happens (SAFE-01) — Confirm is the only path to
- * `delete_notes_apply`; Cancel is a pure no-op that never invokes anything.
+ * Reusable preview-then-confirm surface (D2-08, general per D2-07 so Phase 4's
+ * downgrade preview and Phase 5's merge preview reuse it unchanged — and every
+ * Phase 7 edit op reuses it again under THIS name, 07-01-PLAN.md D7-01/D7-13:
+ * this component is Phase 2's original delete-preview dialog, renamed rather
+ * than redesigned, since it was already fully generalized via the prop
+ * surface below). Renders the `DryRunReport`'s per-table `deleted` counts in
+ * plain language BEFORE any mutation happens (SAFE-01) — Confirm is the only
+ * path to the caller's `*_apply` command; Cancel/Esc/click-outside are pure
+ * no-ops that never invoke anything.
  *
  * Calm and trustworthy per 01-UI-SPEC, not an alarm: `--bg-secondary` card,
  * hairline border, `rounded-xl`; the destructive red accent is restrained to
  * the Confirm button only, never a full red-flooded modal.
  *
- * Confirm mirrors `CommandBar`'s synchronous busy-ref double-click guard —
- * a second click while the apply is in flight is a no-op, never a duplicate
- * concurrent invoke (T-02-10).
+ * Confirm mirrors `CommandBar`'s synchronous busy-ref double-click guard — a
+ * second click while the apply is in flight is a no-op, never a duplicate
+ * concurrent invoke (T-02-10). Esc-to-cancel and click-outside-to-cancel
+ * (07-UI-SPEC Component Inventory's recommended bundle-in fix) are gated
+ * behind the SAME `busyRef` guard, so a dismiss can never race an in-flight
+ * apply.
  */
-export default function DeletePreviewDialog({
+export default function EditPreviewDialog({
   report,
   onConfirm,
   onCancel,
@@ -44,7 +51,7 @@ export default function DeletePreviewDialog({
   summary,
   confirmLabel = "Delete",
   confirmPendingLabel = "Deleting…",
-}: DeletePreviewDialogProps) {
+}: EditPreviewDialogProps) {
   const [pending, setPending] = useState(false);
   const busyRef = useRef(false);
 
@@ -63,11 +70,32 @@ export default function DeletePreviewDialog({
   }, [onConfirm]);
 
   const handleCancel = useCallback(() => {
-    if (pending) {
-      return;
+    if (busyRef.current) {
+      return; // dismiss guard: never cancel out from under an in-flight apply
     }
     onCancel();
-  }, [pending, onCancel]);
+  }, [onCancel]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        handleCancel();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [handleCancel]);
+
+  const handleOverlayClick = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      // Only a click on the backdrop itself (never a bubbled click from
+      // inside the dialog card) counts as "outside".
+      if (event.target === event.currentTarget) {
+        handleCancel();
+      }
+    },
+    [handleCancel],
+  );
 
   const entries = Object.entries(report.deleted).filter(([, count]) => count > 0);
   const defaultSummary =
@@ -76,16 +104,20 @@ export default function DeletePreviewDialog({
       : "nothing";
 
   return (
-    <div className="delete-preview-overlay" role="presentation">
+    <div
+      className="edit-preview-overlay"
+      role="presentation"
+      onClick={handleOverlayClick}
+    >
       <div
-        className="delete-preview-dialog"
+        className="edit-preview-dialog"
         role="dialog"
         aria-modal="true"
         aria-label={ariaLabel}
-        data-testid="delete-preview-dialog"
+        data-testid="edit-preview-dialog"
       >
-        <h2 className="delete-preview-title">{title}</h2>
-        <p className="delete-preview-summary" data-testid="delete-preview-summary">
+        <h2 className="edit-preview-title">{title}</h2>
+        <p className="edit-preview-summary" data-testid="edit-preview-summary">
           {summary ?? (
             <>
               This will remove {defaultSummary} ({report.total_deleted} row
@@ -94,23 +126,23 @@ export default function DeletePreviewDialog({
             </>
           )}
         </p>
-        <div className="delete-preview-actions">
+        <div className="edit-preview-actions">
           <button
             type="button"
             className="toolbar-button"
             onClick={handleCancel}
             disabled={pending}
-            data-testid="delete-preview-cancel"
+            data-testid="edit-preview-cancel"
           >
             Cancel
           </button>
           <button
             type="button"
-            className="toolbar-button delete-preview-confirm"
+            className="toolbar-button edit-preview-confirm"
             onClick={handleConfirm}
             disabled={pending}
             aria-busy={pending}
-            data-testid="delete-preview-confirm"
+            data-testid="edit-preview-confirm"
           >
             {pending ? confirmPendingLabel : confirmLabel}
           </button>

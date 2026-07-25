@@ -4,7 +4,7 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import type { BrowseRow } from "../bindings/BrowseRow";
 import type { ErrorDto } from "../bindings/ErrorDto";
 import type { DryRunReport } from "../bindings/DryRunReport";
-import DeletePreviewDialog from "./DeletePreviewDialog";
+import EditPreviewDialog from "./EditPreviewDialog";
 
 type ActionName = "open" | "new" | "save" | "saveAs" | "saveV14" | "merge";
 
@@ -172,7 +172,7 @@ export default function CommandBar({
   // "Save v14-compatible copy…" (D4-07/SCHEMA-03): an EXPLICIT export, never
   // the default Save. Preview-then-write — pick a target, run the dry-run to
   // learn how many Locations will merge, and open the reused
-  // `DeletePreviewDialog`. Only Confirm calls `save_v14_copy`; Cancel/dismiss
+  // `EditPreviewDialog`. Only Confirm calls `save_v14_copy`; Cancel/dismiss
   // write nothing.
   const handleSaveV14 = useCallback(
     () =>
@@ -216,7 +216,7 @@ export default function CommandBar({
 
   // "Merge Archive…" (MERGE-02): pick a SECOND `.jwlibrary` as the merge
   // source, run the REAL merge on a throwaway copy via `merge_dry_run` to learn
-  // the add/overwrite preview, and open the reused `DeletePreviewDialog`. Only
+  // the add/overwrite preview, and open the reused `EditPreviewDialog`. Only
   // Confirm calls `merge_commit`; Cancel/dismiss writes nothing. A missing or
   // wrong-arch jwlCore binary surfaces as a `merge_unavailable` ErrorDto through
   // the existing ErrorBanner copy — an actionable message, never a crash.
@@ -332,7 +332,7 @@ export default function CommandBar({
       </button>
     </div>
     {v14Preview && (
-      <DeletePreviewDialog
+      <EditPreviewDialog
         report={v14Preview.report}
         onConfirm={handleV14Confirm}
         onCancel={handleV14Cancel}
@@ -350,7 +350,7 @@ export default function CommandBar({
       />
     )}
     {mergePreview && (
-      <DeletePreviewDialog
+      <EditPreviewDialog
         report={mergePreview.report}
         onConfirm={handleMergeConfirm}
         onCancel={handleMergeCancel}

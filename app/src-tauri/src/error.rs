@@ -39,6 +39,10 @@ pub enum ArchiveError {
     TrimFailed { reason: String },
     #[error("note delete failed: {reason}")]
     DeleteFailed { reason: String },
+    #[error("favorite operation failed: {reason}")]
+    FavoriteFailed { reason: String },
+    #[error("favorite already exists for edition {edition} in language {language}")]
+    FavoriteDuplicate { language: String, edition: String },
     #[error("jwlCore merge engine is unavailable on this platform")]
     MergeUnavailable,
     #[error("archive merge failed: {reason}")]
@@ -125,6 +129,19 @@ impl ArchiveError {
             // `reason` is internal-only (module docs) — the DTO exposes only
             // the stable code + message_key; the frontend copy is generic.
             ArchiveError::DeleteFailed { .. } => ("delete_failed", "error.archive.delete_failed"),
+            // `reason` is internal-only (module docs) — the DTO exposes only
+            // the stable code + message_key; the frontend copy is generic.
+            ArchiveError::FavoriteFailed { .. } => {
+                ("favorite_failed", "error.archive.favorite_failed")
+            }
+            // `language`/`edition` are internal-only (module docs) — the DTO
+            // exposes only the stable code + message_key. The caller already
+            // knows which language it asked about (it is the one that picked
+            // it), so the frontend supplies the `{Language}` interpolation
+            // itself rather than round-tripping it through this DTO.
+            ArchiveError::FavoriteDuplicate { .. } => {
+                ("favorite_duplicate", "error.archive.favorite_duplicate")
+            }
             // A missing/wrong-arch jwlCore binary degrades to a typed error
             // (never the Python `crash_box + sys.exit()` defect) — the DTO
             // exposes only the stable code + generic message_key.

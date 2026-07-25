@@ -183,8 +183,8 @@ describe("CommandBar", () => {
     await vi.waitFor(() =>
       expect(invokeMock).toHaveBeenCalledWith("downgrade_dry_run"),
     );
-    expect(await screen.findByTestId("delete-preview-dialog")).toBeInTheDocument();
-    expect(screen.getByTestId("delete-preview-summary")).toHaveTextContent(
+    expect(await screen.findByTestId("edit-preview-dialog")).toBeInTheDocument();
+    expect(screen.getByTestId("edit-preview-summary")).toHaveTextContent(
       "2 Locations will be merged",
     );
     // Preview only — no write yet.
@@ -197,7 +197,7 @@ describe("CommandBar", () => {
     const handlers = renderBar({ archiveOpen: true });
 
     fireEvent.click(screen.getByTestId("save-v14-button"));
-    const confirm = await screen.findByTestId("delete-preview-confirm");
+    const confirm = await screen.findByTestId("edit-preview-confirm");
     invokeMock.mockResolvedValue(undefined);
     fireEvent.click(confirm);
 
@@ -215,11 +215,11 @@ describe("CommandBar", () => {
     renderBar({ archiveOpen: true });
 
     fireEvent.click(screen.getByTestId("save-v14-button"));
-    const cancel = await screen.findByTestId("delete-preview-cancel");
+    const cancel = await screen.findByTestId("edit-preview-cancel");
     fireEvent.click(cancel);
 
     await vi.waitFor(() =>
-      expect(screen.queryByTestId("delete-preview-dialog")).not.toBeInTheDocument(),
+      expect(screen.queryByTestId("edit-preview-dialog")).not.toBeInTheDocument(),
     );
     expect(invokeMock).not.toHaveBeenCalledWith("save_v14_copy", expect.anything());
   });
@@ -233,7 +233,7 @@ describe("CommandBar", () => {
 
     expect(invokeMock).not.toHaveBeenCalled();
     expect(handlers.onError).not.toHaveBeenCalled();
-    expect(screen.queryByTestId("delete-preview-dialog")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("edit-preview-dialog")).not.toBeInTheDocument();
   });
 
   it("disables the Save v14 action when no archive is open", () => {
@@ -265,9 +265,9 @@ describe("CommandBar", () => {
         sourcePath: "C:/archives/source.jwlibrary",
       }),
     );
-    expect(await screen.findByTestId("delete-preview-dialog")).toBeInTheDocument();
+    expect(await screen.findByTestId("edit-preview-dialog")).toBeInTheDocument();
     // 3 added (1+1+1), 2 overwritten, base file name of the source.
-    expect(screen.getByTestId("delete-preview-summary")).toHaveTextContent(
+    expect(screen.getByTestId("edit-preview-summary")).toHaveTextContent(
       "3 records added, 2 updated from source.jwlibrary",
     );
     // Preview only — no commit yet.
@@ -280,7 +280,7 @@ describe("CommandBar", () => {
     const handlers = renderBar({ archiveOpen: true });
 
     fireEvent.click(screen.getByTestId("merge-button"));
-    const confirm = await screen.findByTestId("delete-preview-confirm");
+    const confirm = await screen.findByTestId("edit-preview-confirm");
     // After commit, list_notes returns the merged Notes list.
     const mergedNotes: BrowseRow[] = [];
     invokeMock.mockImplementation((cmd: string) => {
@@ -306,11 +306,11 @@ describe("CommandBar", () => {
     renderBar({ archiveOpen: true });
 
     fireEvent.click(screen.getByTestId("merge-button"));
-    const cancel = await screen.findByTestId("delete-preview-cancel");
+    const cancel = await screen.findByTestId("edit-preview-cancel");
     fireEvent.click(cancel);
 
     await vi.waitFor(() =>
-      expect(screen.queryByTestId("delete-preview-dialog")).not.toBeInTheDocument(),
+      expect(screen.queryByTestId("edit-preview-dialog")).not.toBeInTheDocument(),
     );
     expect(invokeMock).not.toHaveBeenCalledWith("merge_commit", expect.anything());
   });
@@ -324,7 +324,7 @@ describe("CommandBar", () => {
 
     expect(invokeMock).not.toHaveBeenCalled();
     expect(handlers.onError).not.toHaveBeenCalled();
-    expect(screen.queryByTestId("delete-preview-dialog")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("edit-preview-dialog")).not.toBeInTheDocument();
   });
 
   it("surfaces a merge_unavailable ErrorDto via onError when merge_dry_run rejects", async () => {
@@ -340,6 +340,6 @@ describe("CommandBar", () => {
 
     fireEvent.click(screen.getByTestId("merge-button"));
     await vi.waitFor(() => expect(handlers.onError).toHaveBeenCalledWith(dto));
-    expect(screen.queryByTestId("delete-preview-dialog")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("edit-preview-dialog")).not.toBeInTheDocument();
   });
 });

@@ -30,13 +30,18 @@
 //! NEVER calls `trim_db`/`VACUUM` — it reuses the VACUUM-free `trim_sweep`
 //! (Plan 01), so nothing here is a non-rollback-able mutation (Pitfall 2,
 //! 02-RESEARCH.md).
+//!
+//! [`DryRunReport`] and the snapshot/diff primitives this module uses
+//! (`snapshot_all`, `diff_snapshots`) now live in `crate::db::edit`
+//! (07-01-PLAN.md Task 1 — the shared safety spine every Phase 7 edit op
+//! reuses); this module imports them rather than defining them.
 
+use crate::db::edit::{diff_snapshots, snapshot_all, DryRunReport};
 use crate::db::pragma_guard::PragmaGuard;
 use crate::db::trim::trim_sweep;
 use crate::error::ArchiveError;
 use rusqlite::{Connection, Transaction};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashSet};
 use ts_rs::TS;
 
 fn map_sqlite_err(err: rusqlite::Error, context: &str) -> ArchiveError {
@@ -82,115 +87,6 @@ impl NonEmptyNoteIds {
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
-}
-
-/// General semantic preview report: per-table primary-key counts of rows
-/// newly present (`added`), present in both before/after snapshots
-/// (`overwritten` — e.g. the TagMap re-densify's preserved mappings, or
-/// `Location.Title` normalized to `''`), and genuinely removed (`deleted`).
-/// Intentionally GENERAL (not Notes-delete-specific) so Phase 4 (schema
-/// downgrade preview) and Phase 5 (merge preview) can reuse it unchanged
-/// (D2-07).
-#[derive(Debug, Clone, Default, Serialize, TS)]
-#[ts(export, export_to = "../../src/bindings/DryRunReport.ts")]
-pub struct DryRunReport {
-    pub added: BTreeMap<String, usize>,
-    pub overwritten: BTreeMap<String, usize>,
-    pub deleted: BTreeMap<String, usize>,
-    pub total_deleted: usize,
-}
-
-/// Tables tracked for semantic before/after diffing, each with its
-/// single-column integer primary key. Covers every table `delete_notes` +
-/// `trim_sweep` can affect for a Notes-delete flow. The remaining
-/// composite-key `PlaylistItem*` junction tables (`PlaylistItemLocationMap`,
-/// `PlaylistItemIndependentMediaMap`, `PlaylistItemMarkerBibleVerseMap`,
-/// `PlaylistItemMarkerParagraphMap`) have no single-column identity PK and
-/// are intentionally out of scope for row-identity diffing here — a Notes
-/// delete never touches playlist data directly, and `trim_sweep`'s sweep of
-/// those tables is already covered by `trim_tests.rs`.
-pub(crate) const TRACKED_TABLES: &[(&str, &str)] = &[
-    ("Note", "NoteId"),
-    ("UserMark", "UserMarkId"),
-    ("BlockRange", "BlockRangeId"),
-    ("TagMap", "TagMapId"),
-    ("Tag", "TagId"),
-    ("Location", "LocationId"),
-    ("PlaylistItem", "PlaylistItemId"),
-    ("PlaylistItemMarker", "PlaylistItemMarkerId"),
-];
-
-pub(crate) fn snapshot_pks(
-    tx: &Transaction,
-    table: &str,
-    pk_col: &str,
-) -> Result<HashSet<i64>, ArchiveError> {
-    let sql = format!("SELECT {pk_col} FROM {table}");
-    let mut stmt = tx
-        .prepare(&sql)
-        .map_err(|e| map_sqlite_err(e, "snapshotting pks"))?;
-    let rows = stmt
-        .query_map([], |row| row.get::<_, i64>(0))
-        .map_err(|e| map_sqlite_err(e, "snapshotting pks"))?;
-    let mut set = HashSet::new();
-    for row in rows {
-        set.insert(row.map_err(|e| map_sqlite_err(e, "snapshotting pks"))?);
-    }
-    Ok(set)
-}
-
-/// Snapshots the single-column integer PKs of an arbitrary set of `tables`
-/// (each `(table, pk_col)`). Reused by the schema-downgrade dry-run
-/// (`archive::downgrade::dry_run_downgrade`) with its own table set — the diff
-/// logic must never be copy-pasted.
-pub(crate) fn snapshot_tables(
-    tx: &Transaction,
-    tables: &[(&str, &str)],
-) -> Result<BTreeMap<String, HashSet<i64>>, ArchiveError> {
-    let mut snapshot = BTreeMap::new();
-    for (table, pk_col) in tables {
-        snapshot.insert((*table).to_string(), snapshot_pks(tx, table, pk_col)?);
-    }
-    Ok(snapshot)
-}
-
-pub(crate) fn snapshot_all(
-    tx: &Transaction,
-) -> Result<BTreeMap<String, HashSet<i64>>, ArchiveError> {
-    snapshot_tables(tx, TRACKED_TABLES)
-}
-
-/// Diffs a before/after pair of per-table PK snapshots into a
-/// [`DryRunReport`]. A PK present in both sets is `overwritten` (this
-/// includes the TagMap re-densify's preserved mappings and any
-/// `Location.Title` normalization — SEMANTIC accounting per D2-07, never a
-/// false `deleted`); a PK present only before is genuinely `deleted`; a PK
-/// present only after is `added`.
-pub(crate) fn diff_snapshots(
-    before: &BTreeMap<String, HashSet<i64>>,
-    after: &BTreeMap<String, HashSet<i64>>,
-) -> DryRunReport {
-    let mut report = DryRunReport::default();
-    for (table, before_set) in before {
-        let empty = HashSet::new();
-        let after_set = after.get(table).unwrap_or(&empty);
-
-        let deleted = before_set.difference(after_set).count();
-        let added = after_set.difference(before_set).count();
-        let overwritten = before_set.intersection(after_set).count();
-
-        if deleted > 0 {
-            report.deleted.insert(table.clone(), deleted);
-        }
-        if added > 0 {
-            report.added.insert(table.clone(), added);
-        }
-        if overwritten > 0 {
-            report.overwritten.insert(table.clone(), overwritten);
-        }
-    }
-    report.total_deleted = report.deleted.values().sum();
-    report
 }
 
 /// Deletes EXACTLY the selected `Note` rows and NOTHING else — a single

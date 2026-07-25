@@ -28,7 +28,7 @@ describe("operationSet (D6-08 capability descriptor)", () => {
     expect(del).toMatchObject({ deferred: false, enabled: true });
   });
 
-  it("Bookmarks at 3 selected: every op is deferred and none enabled (only Notes:delete is live in Phase 6)", () => {
+  it("Bookmarks at 3 selected: every op is deferred and none enabled (Bookmarks:delete is not live yet)", () => {
     const ops = operationSet("Bookmarks", 3);
     expect(ops.length).toBeGreaterThan(0);
     for (const o of ops) {
@@ -37,7 +37,29 @@ describe("operationSet (D6-08 capability descriptor)", () => {
     }
   });
 
+  it("Favorites at 2 selected: Favorites:delete is live (07-01-PLAN.md), other Favorites ops stay deferred", () => {
+    const ops = operationSet("Favorites", 2);
+    const del = ops.find((o) => o.op === "delete");
+    expect(del).toMatchObject({ deferred: false, enabled: true });
+
+    for (const o of ops) {
+      if (o.op === "delete") continue;
+      expect(o.deferred, `${o.op} should be deferred`).toBe(true);
+      expect(o.enabled, `${o.op} should be disabled`).toBe(false);
+    }
+  });
+
+  it("Favorites at 0 selected: Favorites:delete is live but disabled (needs a selection)", () => {
+    const ops = operationSet("Favorites", 0);
+    const del = ops.find((o) => o.op === "delete");
+    expect(del).toMatchObject({ deferred: false, enabled: false });
+  });
+
   it("every op carries { op, enabled, deferred }; deferred is true exactly when (category, op) is not LIVE", () => {
+    // Mirrors operations.ts's own LIVE set — kept as an explicit local list
+    // (rather than importing LIVE, which is module-private) so this test
+    // fails loudly the moment a new pair is flipped live without updating it.
+    const LIVE_PAIRS = new Set(["Notes:delete", "Favorites:delete"]);
     for (const cat of [
       "Notes",
       "Bookmarks",
@@ -50,7 +72,7 @@ describe("operationSet (D6-08 capability descriptor)", () => {
         expect(o).toHaveProperty("op");
         expect(o).toHaveProperty("enabled");
         expect(o).toHaveProperty("deferred");
-        const isLive = cat === "Notes" && o.op === "delete";
+        const isLive = LIVE_PAIRS.has(`${cat}:${o.op}`);
         expect(o.deferred).toBe(!isLive);
       }
     }

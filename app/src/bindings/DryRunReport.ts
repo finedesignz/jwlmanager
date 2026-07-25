@@ -5,8 +5,7 @@
  * newly present (`added`), present in both before/after snapshots
  * (`overwritten` — e.g. the TagMap re-densify's preserved mappings, or
  * `Location.Title` normalized to `''`), and genuinely removed (`deleted`).
- * Intentionally GENERAL (not Notes-delete-specific) so Phase 4 (schema
- * downgrade preview) and Phase 5 (merge preview) can reuse it unchanged
- * (D2-07).
+ * Intentionally GENERAL (D2-07) — every edit op in the app reuses this one
+ * shape. MOVED here unchanged from `db::delete` (07-01-PLAN.md Task 1).
  */
 export type DryRunReport = { added: { [key in string]: number }, overwritten: { [key in string]: number }, deleted: { [key in string]: number }, total_deleted: number, };

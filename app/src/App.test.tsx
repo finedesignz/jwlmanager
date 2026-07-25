@@ -211,8 +211,8 @@ describe("App — DATA-07 end-to-end (mocked IPC)", () => {
     await vi.waitFor(() =>
       expect(invokeMock).toHaveBeenCalledWith("delete_notes_dry_run", { ids: [1n] }),
     );
-    await screen.findByTestId("delete-preview-dialog");
-    fireEvent.click(screen.getByTestId("delete-preview-confirm"));
+    await screen.findByTestId("edit-preview-dialog");
+    fireEvent.click(screen.getByTestId("edit-preview-confirm"));
 
     await vi.waitFor(() =>
       expect(invokeMock).toHaveBeenCalledWith("delete_notes_apply", { ids: [1n] }),

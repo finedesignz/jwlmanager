@@ -46,7 +46,7 @@
 //! no-op on these fixtures), never silently claimed as covered.
 
 use crate::archive::extract::extract_zip_slip_safe;
-use crate::db::delete::DryRunReport;
+use crate::db::edit::DryRunReport;
 use crate::error::ArchiveError;
 use crate::session::{ArchiveSession, ZipEntryMeta};
 use rusqlite::Connection;

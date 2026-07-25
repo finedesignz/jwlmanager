@@ -225,15 +225,15 @@ describe("CategoryList — live Notes delete flow", () => {
     fireEvent.click(screen.getAllByTestId("category-list-row-checkbox")[0]);
     fireEvent.click(screen.getByTestId("category-list-delete-button"));
 
-    await screen.findByTestId("delete-preview-dialog");
-    fireEvent.click(screen.getByTestId("delete-preview-confirm"));
+    await screen.findByTestId("edit-preview-dialog");
+    fireEvent.click(screen.getByTestId("edit-preview-confirm"));
 
     await vi.waitFor(() =>
       expect(invokeMock).toHaveBeenCalledWith("delete_notes_apply", { ids: [1n] }),
     );
     await vi.waitFor(() => expect(onRowsChanged).toHaveBeenCalledWith([rows[1]]));
     await vi.waitFor(() =>
-      expect(screen.queryByTestId("delete-preview-dialog")).not.toBeInTheDocument(),
+      expect(screen.queryByTestId("edit-preview-dialog")).not.toBeInTheDocument(),
     );
     await vi.waitFor(() =>
       expect(screen.getByTestId("category-list-delete-button")).toBeDisabled(),
@@ -254,11 +254,11 @@ describe("CategoryList — live Notes delete flow", () => {
     fireEvent.click(screen.getAllByTestId("category-list-row-checkbox")[0]);
     fireEvent.click(screen.getByTestId("category-list-delete-button"));
 
-    await screen.findByTestId("delete-preview-dialog");
+    await screen.findByTestId("edit-preview-dialog");
     invokeMock.mockClear();
-    fireEvent.click(screen.getByTestId("delete-preview-cancel"));
+    fireEvent.click(screen.getByTestId("edit-preview-cancel"));
 
-    expect(screen.queryByTestId("delete-preview-dialog")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("edit-preview-dialog")).not.toBeInTheDocument();
     expect(invokeMock).not.toHaveBeenCalled();
     expect(onRowsChanged).not.toHaveBeenCalled();
   });

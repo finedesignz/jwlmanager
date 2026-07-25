@@ -12,7 +12,9 @@ pub mod session;
 pub mod time;
 
 use category::Category;
-use db::delete::{DryRunReport, NonEmptyNoteIds};
+use db::delete::NonEmptyNoteIds;
+use db::edit::DryRunReport;
+use db::favorites::NonEmptyTagMapIds;
 use db::notes::BrowseRow;
 use error::ErrorDto;
 use session::{ArchiveSession, SessionState};
@@ -271,6 +273,101 @@ fn delete_notes_apply(
     })
 }
 
+/// Previews the effect of unmarking the given Favorites selection WITHOUT
+/// mutating the working copy (SAFE-01, EDIT-05): opens the session's
+/// `db_path`, runs the real unmark + trim inside a rolled-back transaction,
+/// and returns the resulting semantic [`DryRunReport`]. `ids` cannot be
+/// empty — an empty array fails IPC deserialization before this command
+/// body ever runs, because [`NonEmptyTagMapIds`] is the parameter type.
+#[tauri::command]
+fn favorite_remove_dry_run(
+    ids: NonEmptyTagMapIds,
+    state: tauri::State<SessionState>,
+) -> Result<DryRunReport, ErrorDto> {
+    let guard = state.lock().map_err(|_| {
+        error::ArchiveError::StatePoisoned.to_dto("favorite_remove_dry_run", None)
+    })?;
+    let session = guard.as_ref().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("favorite_remove_dry_run", None)
+    })?;
+
+    let mut conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("favorite_remove_dry_run", Some(session.target_path.as_path()))
+    })?;
+
+    db::favorites::dry_run_favorite_remove(&mut conn, &ids).map_err(|err| {
+        err.to_dto("favorite_remove_dry_run", Some(session.target_path.as_path()))
+    })
+}
+
+/// Applies the unmark of the given Favorites selection — a single
+/// `DELETE FROM TagMap` committed inside its own transaction (EDIT-05).
+/// Marks the session dirty on success.
+#[tauri::command]
+fn favorite_remove_apply(
+    ids: NonEmptyTagMapIds,
+    state: tauri::State<SessionState>,
+) -> Result<DryRunReport, ErrorDto> {
+    let mut guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("favorite_remove_apply", None))?;
+    let session = guard.as_mut().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("favorite_remove_apply", None)
+    })?;
+
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("favorite_remove_apply", Some(session.target_path.as_path()))
+    })?;
+
+    // Defensive/uniform PragmaGuard + `foreign_keys` OFF around every edit
+    // apply, matching `delete_notes_apply`'s established shape. Not
+    // load-bearing here the way it is for Note delete (nothing references
+    // `TagMap.TagMapId` as a foreign key, so a plain TagMap delete never
+    // trips FK enforcement) — kept for uniformity so a future
+    // favorites-adjacent migration can't silently reintroduce the hazard
+    // unnoticed.
+    let guard_pragma = db::pragma_guard::PragmaGuard::new(&conn).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("favorite_remove_apply", Some(session.target_path.as_path()))
+    })?;
+    conn.execute_batch("PRAGMA foreign_keys = 'OFF';")
+        .map_err(|err| {
+            error::ArchiveError::from(err)
+                .to_dto("favorite_remove_apply", Some(session.target_path.as_path()))
+        })?;
+
+    // `unchecked_transaction` (shared `&self`) because `guard_pragma` already
+    // holds a shared borrow of `conn` for the duration of this function —
+    // same pattern as `trim_db`/`delete_notes_apply`.
+    let tx = conn.unchecked_transaction().map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("favorite_remove_apply", Some(session.target_path.as_path()))
+    })?;
+    let removed = db::favorites::apply_favorite_remove(&tx, &ids).map_err(|err| {
+        err.to_dto("favorite_remove_apply", Some(session.target_path.as_path()))
+    })?;
+    tx.commit().map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("favorite_remove_apply", Some(session.target_path.as_path()))
+    })?;
+    drop(guard_pragma);
+
+    session.dirty = true;
+
+    let mut deleted_map = BTreeMap::new();
+    if removed > 0 {
+        deleted_map.insert("TagMap".to_string(), removed);
+    }
+    Ok(DryRunReport {
+        added: BTreeMap::new(),
+        overwritten: BTreeMap::new(),
+        deleted: deleted_map,
+        total_deleted: removed,
+    })
+}
+
 /// Previews the effect of downgrading the open session to v14 WITHOUT mutating
 /// the working copy (D4-08): opens the session's `db_path` and runs the real
 /// trim + merge inside a rolled-back transaction (trim-FIRST, identical order to
@@ -391,6 +488,8 @@ pub fn run() {
             new_archive,
             delete_notes_dry_run,
             delete_notes_apply,
+            favorite_remove_dry_run,
+            favorite_remove_apply,
             downgrade_dry_run,
             save_v14_copy,
             merge_dry_run,

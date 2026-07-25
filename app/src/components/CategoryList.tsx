@@ -5,7 +5,7 @@ import type { BrowseRow } from "../bindings/BrowseRow";
 import type { Category } from "../bindings/Category";
 import type { DryRunReport } from "../bindings/DryRunReport";
 import type { ErrorDto } from "../bindings/ErrorDto";
-import DeletePreviewDialog from "./DeletePreviewDialog";
+import EditPreviewDialog from "./EditPreviewDialog";
 import { operationSet, type Op } from "../lib/operations";
 
 /**
@@ -35,6 +35,21 @@ const OP_LABEL: Record<Op, string> = {
   tag: "Tag",
   add: "Add",
   import: "Import",
+};
+
+/**
+ * The `(dryRun, apply)` Tauri command pair backing the LIVE "delete" op for
+ * each category, keyed by category. Notes shipped in Phase 2
+ * (`delete_notes_dry_run`/`delete_notes_apply`); Favorites lands in
+ * 07-01-PLAN.md Task 1 (`favorite_remove_dry_run`/`favorite_remove_apply`).
+ * More categories are added here as their own delete backend lands (D7-10)
+ * — the render/dispatch logic below never hardcodes a category name; it only
+ * asks "is this (category, op) pair LIVE?" (`operations.ts`'s `deferred`
+ * flag) and, if so, looks up which commands to invoke here.
+ */
+const DELETE_COMMANDS: Partial<Record<Category, { dryRun: string; apply: string }>> = {
+  Notes: { dryRun: "delete_notes_dry_run", apply: "delete_notes_apply" },
+  Favorites: { dryRun: "favorite_remove_dry_run", apply: "favorite_remove_apply" },
 };
 
 /**
@@ -84,10 +99,12 @@ interface CategoryListProps {
  * changes (an integer key means nothing across categories).
  *
  * The contextual operation bar is rendered from `operationSet(category,
- * selection.size)` (D6-08). In Phase 6 exactly one operation is wired to a real
- * backend mutation — Notes delete (`delete_notes_dry_run`/`delete_notes_apply`
- * + `DeletePreviewDialog`); every other op renders as a visibly-deferred
- * affordance. No new backend mutation is added here.
+ * selection.size)` (D6-08). Phase 6 shipped exactly one live mutation — Notes
+ * delete; Phase 7 progressively flips more `(category, op)` pairs LIVE
+ * (07-01-PLAN.md starts with Favorites delete). Every selection-scoped delete
+ * shares ONE dispatch below, keyed by [`DELETE_COMMANDS`] — the render logic
+ * never hardcodes a category name, it only asks `operationSet`'s `deferred`
+ * flag; every op still not LIVE renders as a visibly-deferred affordance.
  */
 export default function CategoryList({
   rows,
@@ -126,26 +143,31 @@ export default function CategoryList({
     });
   }, []);
 
+  const deleteCommands = DELETE_COMMANDS[category];
+
   const handleDeleteClick = useCallback(async () => {
-    if (selected.size === 0 || dryRunPending) {
+    if (selected.size === 0 || dryRunPending || !deleteCommands) {
       return;
     }
     setDryRunPending(true);
     try {
       const ids = Array.from(selected);
-      const dryRunReport = await invoke<DryRunReport>("delete_notes_dry_run", { ids });
+      const dryRunReport = await invoke<DryRunReport>(deleteCommands.dryRun, { ids });
       setReport(dryRunReport);
     } catch (err) {
       onError?.(err as ErrorDto);
     } finally {
       setDryRunPending(false);
     }
-  }, [selected, dryRunPending, onError]);
+  }, [selected, dryRunPending, deleteCommands, onError]);
 
   const handleConfirm = useCallback(async () => {
+    if (!deleteCommands) {
+      return;
+    }
     const ids = Array.from(selected);
     try {
-      await invoke("delete_notes_apply", { ids });
+      await invoke(deleteCommands.apply, { ids });
       onRowsChanged?.(rows.filter((row) => !selected.has(row.id)));
       setSelected(new Set());
     } catch (err) {
@@ -153,7 +175,7 @@ export default function CategoryList({
     } finally {
       setReport(null);
     }
-  }, [selected, rows, onRowsChanged, onError]);
+  }, [selected, rows, deleteCommands, onRowsChanged, onError]);
 
   const handleCancel = useCallback(() => {
     setReport(null);
@@ -181,8 +203,12 @@ export default function CategoryList({
           {selected.size}
         </span>
         {ops.map((state) => {
-          // The single live op this phase: Notes delete.
-          if (category === "Notes" && state.op === "delete") {
+          // Every LIVE selection-scoped delete shares one dispatch — the
+          // command pair is looked up per-category via DELETE_COMMANDS, but
+          // whether the button renders live at all is driven entirely by
+          // `operations.ts`'s LIVE set (`state.deferred`), never a hardcoded
+          // category name here.
+          if (state.op === "delete" && !state.deferred) {
             return (
               <button
                 key={state.op}
@@ -280,7 +306,7 @@ export default function CategoryList({
         </ul>
       </div>
       {report && (
-        <DeletePreviewDialog
+        <EditPreviewDialog
           report={report}
           onConfirm={handleConfirm}
           onCancel={handleCancel}

@@ -46,7 +46,7 @@
 //! SQLite NULL-distinctness semantics) and fails with a named
 //! `SchemaDowngradeFailed` + full rollback rather than a partial write (T-04-13).
 
-use crate::db::delete::{diff_snapshots, snapshot_tables, DryRunReport};
+use crate::db::edit::{diff_snapshots, snapshot_tables, DryRunReport};
 use crate::db::pragma_guard::PragmaGuard;
 use crate::db::trim::trim_sweep;
 use crate::error::ArchiveError;

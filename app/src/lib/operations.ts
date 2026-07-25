@@ -8,12 +8,12 @@ import type { Category } from "../bindings/Category";
  * contextual operation bar surface, and which of those are actually actionable
  * right now?
  *
- * Phase 6 scope: this is the descriptor + the selection-gated presentation, NOT
- * the Phase 7 mutations. Exactly one operation is wired to a real backend
- * mutation this phase — Notes delete (the shipped `delete_notes_dry_run`/
- * `delete_notes_apply`). Every other (category, op) pair is surfaced-but-
- * deferred so DATA-07 criterion 3 (op set updates with selection) is
- * demonstrable without adding a single new backend mutation.
+ * Phase 6 scope was the descriptor + the selection-gated presentation, with
+ * exactly one operation wired to a real backend mutation — Notes delete (the
+ * shipped `delete_notes_dry_run`/`delete_notes_apply`). Phase 7
+ * progressively flips more `(category, op)` pairs into [`LIVE`] as each
+ * edit-op backend lands (07-01-PLAN.md starts with `Favorites:delete`).
+ * Every pair not yet in [`LIVE`] renders surfaced-but-deferred.
  */
 
 /** Every operation any category can, in principle, offer. */
@@ -48,10 +48,12 @@ const NEEDS_SELECTION: ReadonlySet<Op> = new Set<Op>([
 ]);
 
 /**
- * The ONLY (category, op) pairs wired to a real backend mutation in Phase 6.
- * Keyed as `${Category}:${Op}`. Everything not in this set renders deferred.
+ * The (category, op) pairs wired to a real backend mutation. Keyed as
+ * `${Category}:${Op}`. Everything not in this set renders deferred.
+ * `Notes:delete` shipped in Phase 2; `Favorites:delete` (EDIT-05 unmark)
+ * lands in 07-01-PLAN.md Task 1.
  */
-const LIVE: ReadonlySet<string> = new Set<string>(["Notes:delete"]);
+const LIVE: ReadonlySet<string> = new Set<string>(["Notes:delete", "Favorites:delete"]);
 
 /** A single entry in the contextual operation bar. */
 export interface OperationState {
