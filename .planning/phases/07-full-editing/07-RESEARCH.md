@@ -561,3 +561,61 @@ sqlite3 fixture.db "PRAGMA index_list('InputField');"
 
 **Research date:** 2026-07-23
 **Valid until:** stable (in-repo source of truth; ~30 days, but effectively until the Python source or Phase 2 infra changes)
+
+---
+
+## ⚠ Corrections (from 07-PATTERNS.md pattern-mapping pass, 2026-07-24)
+
+These SUPERSEDE the corresponding entries in `## Assumptions Log` and `## Standard Stack` above.
+The pattern mapper verified each against the live repo; the planner and executor must follow
+these, not the original assumptions.
+
+1. **A4 was wrong in kind — no `favorites` TABLE.** `res/resources.db` exposes a **VIEW**
+   `Favorites (Language, Symbol, Short, Lang)` over `Publications` / `Extras WHERE Favorite = 1`.
+   `ResourceCatalog` (`app/src-tauri/src/db/resources.rs:28-35`) does NOT load it. The favorites
+   Bible-edition picker (D7-06) therefore needs a NEW loader method on `ResourceCatalog` — this
+   is real work, not a lookup of existing state.
+
+2. **A3 is easier than assumed — no synthetic-key helper needed.** `InputField`'s composite
+   primary key is non-INTEGER, so the table remains a rowid table. `snapshot_pks(tx,
+   "InputField", "rowid")` works with ZERO new code. Constraint: valid only INSIDE a single
+   dry-run transaction — `rowid` is not stable across VACUUM, so never persist or compare it
+   across the save pipeline.
+
+3. **A2 confirmed and larger than documented.** `TagMap` carries THREE named UNIQUE
+   constraints — `(TagId, Position)`, `(TagId, NoteId)`, and `(TagId, LocationId)` — plus a
+   CHECK that exactly one of `PlaylistItemId` / `NoteId` / `LocationId` is non-NULL. The
+   `(TagId, LocationId)` constraint means a duplicate favorite is a HARD DB ERROR, not merely
+   the Python's courtesy check. D7-06's duplicate detection must be an explicit typed error
+   raised BEFORE the INSERT, never a caught constraint violation.
+
+4. **Stack table wrong on `uuid` / `rand` / `fancy-regex`.** `uuid` is NOT a declared
+   dependency — it appears in `Cargo.lock` only transitively via tauri. `rand` is absent from
+   the lock file entirely; so is `fancy-regex`. Both D7-02 (UserMark GUID synthesis) and D7-08
+   (mask RNG) therefore need EITHER a newly declared dependency (behind the package-legitimacy
+   checkpoint) OR the repo's own established precedent: `app/src-tauri/src/time.rs` hand-rolls a
+   dependency-free implementation with a cited algorithm plus shape tests. For determinism,
+   thread a `seed: u64` parameter the same way `now: &str` is threaded at
+   `app/src-tauri/src/lib.rs:132`.
+
+### Additional finding — prior art for the D7-05 reorder
+
+`app/src-tauri/src/db/trim.rs:171-205` (`redensify_tag_positions`) ALREADY solves the
+`UNIQUE(TagId, Position)` collision on this exact table using TEMP-table staging. It is shipped
+and tested. Put it in front of the D7-05 decision as a proven in-repo alternative to porting the
+Python two-pass negative-position technique — the planner must choose deliberately between
+"port the Python two-pass verbatim" and "reuse the existing redensify approach", and record why.
+
+### Design gap the planner MUST resolve
+
+`app/src/lib/operations.ts` cannot express an ARCHIVE-WIDE operation. Clean and Mask (EDIT-06)
+have no selection and therefore no `(category, op)` slot in `CAPABILITY` / `LIVE`. Options:
+(a) a new selection-independent `Op` member with a `NEEDS_SELECTION` exclusion, or (b) a
+separate app-level menu surface outside the per-category operation bar. Decide in PLAN.md.
+
+### Mandatory frontend detail
+
+`DeletePreviewDialog.tsx` is already prop-parameterized for reuse (Phases 4 and 5 pass
+overrides). Its synchronous `busyRef` double-click guard is MANDATORY and non-obvious — any
+generalized `EditPreviewDialog` must preserve it. A double-fired destructive apply is exactly
+the class of bug the Core Value forbids.
