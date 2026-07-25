@@ -161,8 +161,14 @@
   4. User can open a raw data viewer/editor and directly edit underlying records
   5. Each of the above is covered by a round-trip semantic-equivalence test
 
-**Plans**: TBD
+**Plans**: 5 plans (5 waves)
 **UI hint**: yes
+
+- [ ] 07-01-PLAN.md — Tracer: shared db/edit.rs spine + EditPreviewDialog rename + Favorites mark/unmark end-to-end (EDIT-05) (Wave 1)
+- [ ] 07-02-PLAN.md — merge_block_ranges primitive + highlight recolor + Highlights delete; D7-03 decision checkpoint (EDIT-02) (Wave 2)
+- [ ] 07-03-PLAN.md — Tag add/remove/rename + archive-wide reorder + Utilities menu (EDIT-03, EDIT-04) (Wave 3)
+- [ ] 07-04-PLAN.md — Clean + Mask with typed-confirm gate (EDIT-06) (Wave 4)
+- [ ] 07-05-PLAN.md — Field-constrained record editor + remaining per-category deletes + cross-op round-trip suite (EDIT-07) (Wave 5)
 
 ### Phase 8: Import / Export Parity
 
