@@ -1758,6 +1758,139 @@ pub fn generate_merge_failing_source_archive() -> (TempDir, PathBuf) {
 }
 
 // ---------------------------------------------------------------------------
+// N-WAY FOLD fixtures (10-01-PLAN.md) — Phase 10 generalizes the Phase 5 pair
+// into a fold over N sources. These extend the merge fixtures above with
+// MUTUALLY INDEPENDENT sources (no shared identity keys — for the
+// copy-source regression guard) and a CONTESTED pair (same identity, deliberately
+// different content — for the order-sensitivity proof), following the same
+// seed_from_res_blank + build_fixture_archive shape. SYNTHETIC only.
+// ---------------------------------------------------------------------------
+
+/// Full `.jwlibrary` source archive carrying exactly ONE standalone,
+/// independent Note (no UserMark/Location linkage) with the given Guid and
+/// content. Used where a fold test needs several MUTUALLY INDEPENDENT
+/// sources with no contested identity keys
+/// (`fold_merge_carries_all_sources`, the copy-source regression guard).
+pub fn generate_fold_standalone_source_archive(
+    note_guid: &str,
+    content: &str,
+) -> (TempDir, PathBuf) {
+    let work_dir = TempDir::new().expect("create fold standalone source work dir");
+    seed_from_res_blank(work_dir.path());
+    let db_path = work_dir.path().join("userData.db");
+    {
+        let conn = Connection::open(&db_path).expect("open fold standalone source db");
+        conn.execute_batch("PRAGMA foreign_keys = OFF")
+            .expect("fk off");
+        conn.execute(
+            "INSERT INTO Note (NoteId, Guid, UserMarkId, LocationId, Title, Content, \
+             LastModified, Created, BlockType, BlockIdentifier) VALUES (1, ?1, NULL, NULL, \
+             'Fold standalone note', ?2, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 0, NULL)",
+            rusqlite::params![note_guid, content],
+        )
+        .expect("insert fold standalone Note");
+        conn.execute(
+            "UPDATE LastModified SET LastModified = '2026-01-01T00:00:00Z'",
+            [],
+        )
+        .expect("fold standalone LastModified");
+    }
+    build_fixture_archive(work_dir.path(), &synthetic_manifest_json())
+}
+
+// Stable identity for the FOLD CONTESTED pair: both sources share this
+// Note/UserMark Guid but carry DIFFERENT content, so a fold that merges them
+// in order B-then-C must leave C's content as the final, order-sensitive
+// winner (D10-01) — fold(A,B,C) != fold(A,C,B) is CORRECT, never tested for
+// the reverse. Each source ALSO carries its own uniquely-identifiable Note.
+pub const MERGE_FOLD_CONTESTED_NOTE_GUID: &str = "merge-fold-contested-note-0001";
+pub const MERGE_FOLD_CONTESTED_USERMARK_GUID: &str = "merge-fold-contested-usermark-0001";
+pub const MERGE_FOLD_B_ONLY_NOTE_GUID: &str = "merge-fold-note-b-only-0001";
+pub const MERGE_FOLD_C_ONLY_NOTE_GUID: &str = "merge-fold-note-c-only-0001";
+pub const MERGE_FOLD_B_CONTENT: &str = "fold contested content from B (must be overwritten)";
+pub const MERGE_FOLD_C_CONTENT: &str = "fold contested content from C (must win, later in order)";
+
+fn insert_fold_contested_rows(
+    db_path: &Path,
+    own_note_guid: &str,
+    contested_content: &str,
+    last_modified: &str,
+) {
+    let conn = Connection::open(db_path).expect("open fold contested db");
+    conn.execute_batch("PRAGMA foreign_keys = OFF")
+        .expect("fk off");
+    conn.execute(
+        "INSERT INTO Location (LocationId, BookNumber, ChapterNumber, DocumentId, Track, \
+         IssueTagNumber, KeySymbol, MepsLanguage, Type, Title, Specialty, Edition) \
+         VALUES (1, 1, 1, NULL, NULL, 0, 'nwt', 0, 0, 'Genesis 1:1', NULL, NULL)",
+        [],
+    )
+    .expect("fold contested Location");
+    conn.execute(
+        "INSERT INTO UserMark (UserMarkId, ColorIndex, LocationId, StyleIndex, UserMarkGuid, Version) \
+         VALUES (1, 1, 1, 0, ?1, 1)",
+        rusqlite::params![MERGE_FOLD_CONTESTED_USERMARK_GUID],
+    )
+    .expect("fold contested UserMark");
+    conn.execute(
+        "INSERT INTO BlockRange (BlockRangeId, BlockType, Identifier, StartToken, EndToken, UserMarkId) \
+         VALUES (1, 1, 1, 0, 5, 1)",
+        [],
+    )
+    .expect("fold contested BlockRange");
+    // The CONTESTED note: SAME Guid across both sources, DIFFERENT content.
+    conn.execute(
+        "INSERT INTO Note (NoteId, Guid, UserMarkId, LocationId, Title, Content, LastModified, \
+         Created, BlockType, BlockIdentifier) VALUES (1, ?1, 1, 1, 'Contested note', \
+         ?2, ?3, '2020-01-01T00:00:00Z', 2, 1)",
+        rusqlite::params![MERGE_FOLD_CONTESTED_NOTE_GUID, contested_content, last_modified],
+    )
+    .expect("fold contested Note");
+    // This source's OWN uniquely-identifiable row.
+    conn.execute(
+        "INSERT INTO Note (NoteId, Guid, UserMarkId, LocationId, Title, Content, LastModified, \
+         Created, BlockType, BlockIdentifier) VALUES (2, ?1, NULL, NULL, 'Fold own-only note', \
+         'own-only content', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', 0, NULL)",
+        rusqlite::params![own_note_guid],
+    )
+    .expect("fold own-only Note");
+    conn.execute(
+        "UPDATE LastModified SET LastModified = ?1",
+        rusqlite::params![last_modified],
+    )
+    .expect("fold contested LastModified");
+}
+
+/// The FOLD CONTESTED pair `(source_b, source_c)`: both touch the SAME
+/// Note/UserMark identity with DIFFERENT content, plus each carries its own
+/// uniquely-identifiable Note. Used by `fold_matches_chained_pairwise` to pin
+/// order-sensitivity: folding B-then-C must leave C's contested content as
+/// final (D10-01), never B's.
+pub fn generate_fold_contested_pair() -> ((TempDir, PathBuf), (TempDir, PathBuf)) {
+    let b_work = TempDir::new().expect("create fold contested B work dir");
+    seed_from_res_blank(b_work.path());
+    insert_fold_contested_rows(
+        &b_work.path().join("userData.db"),
+        MERGE_FOLD_B_ONLY_NOTE_GUID,
+        MERGE_FOLD_B_CONTENT,
+        "2030-01-01T00:00:00Z",
+    );
+    let source_b = build_fixture_archive(b_work.path(), &synthetic_manifest_json());
+
+    let c_work = TempDir::new().expect("create fold contested C work dir");
+    seed_from_res_blank(c_work.path());
+    insert_fold_contested_rows(
+        &c_work.path().join("userData.db"),
+        MERGE_FOLD_C_ONLY_NOTE_GUID,
+        MERGE_FOLD_C_CONTENT,
+        "2040-01-01T00:00:00Z",
+    );
+    let source_c = build_fixture_archive(c_work.path(), &synthetic_manifest_json());
+
+    (source_b, source_c)
+}
+
+// ---------------------------------------------------------------------------
 // Zip-slip fixture generator (6 variants, D-08)
 // ---------------------------------------------------------------------------
 
