@@ -1459,6 +1459,61 @@ fn merge_commit(
     Ok(())
 }
 
+/// Previews an N-way fold of `source_paths` INTO the open session, in the
+/// CALLER's list order (MERGE-03, D10-01) — never sorted, deduplicated, or
+/// filtered — WITHOUT mutating the live session: runs the SAME fold chain the
+/// commit uses, under a throwaway root, and content-signature-diffs the
+/// ORIGINAL session DB against the FINAL folded state, so a row overwritten
+/// at an intermediate step is reported once, with its final content. Fewer
+/// than 3 sources is rejected with `merge_failed`, never silently degraded to
+/// a Phase-5-equivalent single merge. A missing/wrong-arch jwlCore binary
+/// maps to `merge_unavailable`.
+#[tauri::command]
+fn fold_merge_dry_run(
+    source_paths: Vec<String>,
+    app: tauri::AppHandle,
+    state: tauri::State<SessionState>,
+) -> Result<DryRunReport, ErrorDto> {
+    let sources: Vec<PathBuf> = source_paths.into_iter().map(PathBuf::from).collect();
+    let guard = state.lock().map_err(|_| {
+        error::ArchiveError::StatePoisoned.to_dto("fold_merge_dry_run", None)
+    })?;
+    let session = guard.as_ref().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("fold_merge_dry_run", None)
+    })?;
+
+    archive::merge::fold_dry_run_merge(&app, session, &sources)
+        .map_err(|err| err.to_dto("fold_merge_dry_run", None))
+}
+
+/// Commits an N-way fold of `source_paths` INTO the open session, in the
+/// CALLER's list order (MERGE-03, D10-01) — the list order IS the fold order
+/// and is the user's, never re-sequenced. Runs `source_paths.len()`
+/// sequential merges under one staging root, folding media back after every
+/// step, then performs EXACTLY ONE atomic promote onto `session.db_path`
+/// after the LAST step succeeds. A step failure leaves the session untouched
+/// and NOT dirty. Fewer than 3 sources is rejected with `merge_failed`.
+/// Serialized under the SessionState mutex (D5-06). A missing/wrong-arch
+/// binary maps to `merge_unavailable`.
+#[tauri::command]
+fn fold_merge_commit(
+    source_paths: Vec<String>,
+    app: tauri::AppHandle,
+    state: tauri::State<SessionState>,
+) -> Result<(), ErrorDto> {
+    let sources: Vec<PathBuf> = source_paths.into_iter().map(PathBuf::from).collect();
+    let mut guard = state.lock().map_err(|_| {
+        error::ArchiveError::StatePoisoned.to_dto("fold_merge_commit", None)
+    })?;
+    let session = guard.as_mut().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("fold_merge_commit", None)
+    })?;
+
+    archive::merge::fold_merge_commit(&app, session, &sources)
+        .map_err(|err| err.to_dto("fold_merge_commit", None))?;
+    Ok(())
+}
+
 /// Exports Favorites to `path` (whole category when `ids` is `None`, D8-10
 /// selection-optional) as a `.txt` file — pure read + file write, never
 /// mutates the archive or sets `session.dirty` (D8-09). The header's archive
@@ -2890,6 +2945,8 @@ pub fn run() {
             save_v14_copy,
             merge_dry_run,
             merge_commit,
+            fold_merge_dry_run,
+            fold_merge_commit,
             list_notes,
             list_category,
             export_favorites,
