@@ -8,4 +8,14 @@
  * Intentionally GENERAL (D2-07) — every edit op in the app reuses this one
  * shape. MOVED here unchanged from `db::delete` (07-01-PLAN.md Task 1).
  */
-export type DryRunReport = { added: { [key in string]: number }, overwritten: { [key in string]: number }, deleted: { [key in string]: number }, total_deleted: number, };
+export type DryRunReport = { added: { [key in string]: number }, overwritten: { [key in string]: number }, deleted: { [key in string]: number }, total_deleted: number, 
+/**
+ * Per-table count of records an import silently no-op'd on because they
+ * already exactly match an existing row (PD-2, 08-01-PLAN.md) — e.g.
+ * Favorites' string-level dup check (`db::io::import`). Distinct from
+ * `overwritten`: a skip performs ZERO writes, so reporting it as an
+ * "update" would tell the user the archive changed when it did not.
+ * `Default`-derived alongside the rest of the struct, so every existing
+ * Phase 2/7 constructor keeps compiling and reports an empty map here.
+ */
+skipped: { [key in string]: number }, };

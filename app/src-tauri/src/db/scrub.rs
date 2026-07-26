@@ -195,6 +195,7 @@ fn clean_report(counts: BTreeMap<String, usize>) -> DryRunReport {
         overwritten: counts,
         deleted: BTreeMap::new(),
         total_deleted: 0,
+        skipped: BTreeMap::new(),
     }
 }
 
@@ -475,6 +476,7 @@ fn mask_report(counts: BTreeMap<String, usize>) -> DryRunReport {
         overwritten: counts,
         deleted: BTreeMap::new(),
         total_deleted: 0,
+        skipped: BTreeMap::new(),
     }
 }
 

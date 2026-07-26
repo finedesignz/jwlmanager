@@ -55,6 +55,16 @@ pub enum ArchiveError {
     MaskFailed { reason: String },
     #[error("record edit failed: {reason}")]
     RecordEditFailed { reason: String },
+    #[error("export failed: {reason}")]
+    ExportFailed { reason: String },
+    #[error("import file is malformed at line {line} ({category}): {reason}")]
+    ImportMalformed {
+        category: String,
+        line: usize,
+        reason: String,
+    },
+    #[error("import failed: {reason}")]
+    ImportFailed { reason: String },
     #[error("jwlCore merge engine is unavailable on this platform")]
     MergeUnavailable,
     #[error("archive merge failed: {reason}")]
@@ -176,6 +186,22 @@ impl ArchiveError {
             ArchiveError::RecordEditFailed { .. } => {
                 ("record_edit_failed", "error.archive.record_edit_failed")
             }
+            // `reason` is internal-only (module docs) — the DTO exposes only
+            // the stable code + message_key; the frontend copy is generic
+            // ("the archive is unchanged").
+            ArchiveError::ExportFailed { .. } => ("export_failed", "error.archive.export_failed"),
+            // `category`/`line`/`reason` are NOT threaded through the DTO
+            // (D-14's established "reason is internal-only" posture, applied
+            // uniformly here too, even though this reason originates from
+            // the user's own picked file rather than internal SQL/path
+            // detail) — the frontend copy is a generic-but-actionable
+            // sentence naming the problem class, not the exact line/reason.
+            ArchiveError::ImportMalformed { .. } => {
+                ("import_malformed", "error.archive.import_malformed")
+            }
+            // `reason` is internal-only (module docs) — the DTO exposes only
+            // the stable code + message_key; the frontend copy is generic.
+            ArchiveError::ImportFailed { .. } => ("import_failed", "error.archive.import_failed"),
             // A missing/wrong-arch jwlCore binary degrades to a typed error
             // (never the Python `crash_box + sys.exit()` defect) — the DTO
             // exposes only the stable code + generic message_key.

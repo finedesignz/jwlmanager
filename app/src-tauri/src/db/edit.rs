@@ -64,6 +64,14 @@ pub struct DryRunReport {
     pub overwritten: BTreeMap<String, usize>,
     pub deleted: BTreeMap<String, usize>,
     pub total_deleted: usize,
+    /// Per-table count of records an import silently no-op'd on because they
+    /// already exactly match an existing row (PD-2, 08-01-PLAN.md) — e.g.
+    /// Favorites' string-level dup check (`db::io::import`). Distinct from
+    /// `overwritten`: a skip performs ZERO writes, so reporting it as an
+    /// "update" would tell the user the archive changed when it did not.
+    /// `Default`-derived alongside the rest of the struct, so every existing
+    /// Phase 2/7 constructor keeps compiling and reports an empty map here.
+    pub skipped: BTreeMap<String, usize>,
 }
 
 /// Default tables tracked for semantic before/after diffing when an op has

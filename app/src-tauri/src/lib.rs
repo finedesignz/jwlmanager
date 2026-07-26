@@ -17,6 +17,10 @@ use db::color::{ColorSelection, NonEmptyBlockRangeIds};
 use db::delete::{NonEmptyBookmarkIds, NonEmptyLocationIds, NonEmptyNoteIds};
 use db::edit::DryRunReport;
 use db::favorites::{FavoriteEditionRef, NonEmptyTagMapIds};
+use db::ids::compute_available_ids;
+use db::io::export::export_favorites as export_favorites_impl;
+use db::io::header::ExportHeaderCtx;
+use db::io::import::{apply_import_favorites, dry_run_import_favorites, parse_favorites_file};
 use db::notes::BrowseRow;
 use db::record_edit::{RecordEditFields, RecordEditPayload, RecordIdentity};
 use db::tags::TagState;
@@ -300,6 +304,7 @@ fn delete_notes_apply(
         overwritten: BTreeMap::new(),
         deleted: deleted_map,
         total_deleted: deleted,
+        skipped: BTreeMap::new(),
     })
 }
 
@@ -395,6 +400,7 @@ fn favorite_remove_apply(
         overwritten: BTreeMap::new(),
         deleted: deleted_map,
         total_deleted: removed,
+        skipped: BTreeMap::new(),
     })
 }
 
@@ -668,6 +674,7 @@ fn highlight_delete_apply(
         overwritten: BTreeMap::new(),
         deleted: deleted_map,
         total_deleted: deleted,
+        skipped: BTreeMap::new(),
     })
 }
 
@@ -751,6 +758,7 @@ fn bookmark_delete_apply(
         overwritten: BTreeMap::new(),
         deleted: deleted_map,
         total_deleted: deleted,
+        skipped: BTreeMap::new(),
     })
 }
 
@@ -835,6 +843,7 @@ fn annotation_delete_apply(
         overwritten: BTreeMap::new(),
         deleted: deleted_map,
         total_deleted: deleted,
+        skipped: BTreeMap::new(),
     })
 }
 
@@ -1024,6 +1033,7 @@ fn record_delete_apply(
         overwritten: BTreeMap::new(),
         deleted: deleted_map,
         total_deleted: deleted,
+        skipped: BTreeMap::new(),
     })
 }
 
@@ -1255,6 +1265,7 @@ fn clean_apply(state: tauri::State<SessionState>) -> Result<DryRunReport, ErrorD
         overwritten: counts,
         deleted: BTreeMap::new(),
         total_deleted: 0,
+        skipped: BTreeMap::new(),
     })
 }
 
@@ -1324,6 +1335,7 @@ fn mask_apply(state: tauri::State<SessionState>) -> Result<DryRunReport, ErrorDt
         overwritten: counts,
         deleted: BTreeMap::new(),
         total_deleted: 0,
+        skipped: BTreeMap::new(),
     })
 }
 
@@ -1427,6 +1439,151 @@ fn merge_commit(
     Ok(())
 }
 
+/// Exports Favorites to `path` (whole category when `ids` is `None`, D8-10
+/// selection-optional) as a `.txt` file — pure read + file write, never
+/// mutates the archive or sets `session.dirty` (D8-09). The header's archive
+/// name is the current target path's base file name (`Path(current_archive)
+/// .name`, `JWLManager.py:1829`); the timestamp and app version are injected
+/// HERE — the only place real wall-clock time is read — never inside
+/// `build_export_header` itself, so `export_wireformat_tests.rs`'s
+/// golden-fixture byte comparison stays deterministic.
+#[tauri::command]
+fn export_favorites(
+    path: String,
+    ids: Option<NonEmptyTagMapIds>,
+    state: tauri::State<SessionState>,
+) -> Result<usize, ErrorDto> {
+    let guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("export_favorites", None))?;
+    let session = guard
+        .as_ref()
+        .ok_or_else(|| error::ArchiveError::MissingUserDataBackup.to_dto("export_favorites", None))?;
+
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("export_favorites", Some(session.target_path.as_path()))
+    })?;
+
+    let archive_name = session
+        .target_path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "NEW ARCHIVE".to_string());
+    let header = ExportHeaderCtx {
+        category_tag: "{FAVORITES}",
+        archive_name,
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        timestamp: time::now_export_header_timestamp(),
+    };
+
+    let out_path = PathBuf::from(&path);
+    export_favorites_impl(&conn, ids.as_ref(), &header, &out_path)
+        .map_err(|err| err.to_dto("export_favorites", Some(out_path.as_path())))
+}
+
+/// Previews a Favorites `.txt` import (IO-02) WITHOUT mutating the working
+/// copy: reads `path` as strict UTF-8, parses it FULLY before any
+/// transaction opens (D8-04 fail-fast — a malformed file returns
+/// `import_malformed` here and `EditPreviewDialog` never opens), then runs
+/// the real apply + trim inside a rolled-back transaction and returns the
+/// resulting semantic `DryRunReport` (`skipped` populated, PD-2).
+#[tauri::command]
+fn import_favorites_dry_run(
+    path: String,
+    state: tauri::State<SessionState>,
+) -> Result<DryRunReport, ErrorDto> {
+    let guard = state.lock().map_err(|_| {
+        error::ArchiveError::StatePoisoned.to_dto("import_favorites_dry_run", None)
+    })?;
+    let session = guard.as_ref().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("import_favorites_dry_run", None)
+    })?;
+
+    let in_path = PathBuf::from(&path);
+    let text = std::fs::read_to_string(&in_path).map_err(|err| {
+        error::ArchiveError::from(err).to_dto("import_favorites_dry_run", Some(in_path.as_path()))
+    })?;
+    let records = parse_favorites_file(&text)
+        .map_err(|err| err.to_dto("import_favorites_dry_run", Some(in_path.as_path())))?;
+
+    let mut conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("import_favorites_dry_run", Some(session.target_path.as_path()))
+    })?;
+
+    dry_run_import_favorites(&mut conn, &records).map_err(|err| {
+        err.to_dto("import_favorites_dry_run", Some(session.target_path.as_path()))
+    })
+}
+
+/// Applies a Favorites `.txt` import (IO-02/IO-03) — re-parses `path` (D8-10:
+/// the double-parse is accepted, no cached parse state crosses the two IPC
+/// calls) and commits the real apply inside one transaction. Marks the
+/// session dirty on success.
+#[tauri::command]
+fn import_favorites_apply(
+    path: String,
+    state: tauri::State<SessionState>,
+) -> Result<DryRunReport, ErrorDto> {
+    let mut guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("import_favorites_apply", None))?;
+    let session = guard.as_mut().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("import_favorites_apply", None)
+    })?;
+
+    let in_path = PathBuf::from(&path);
+    let text = std::fs::read_to_string(&in_path).map_err(|err| {
+        error::ArchiveError::from(err).to_dto("import_favorites_apply", Some(in_path.as_path()))
+    })?;
+    let records = parse_favorites_file(&text)
+        .map_err(|err| err.to_dto("import_favorites_apply", Some(in_path.as_path())))?;
+
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("import_favorites_apply", Some(session.target_path.as_path()))
+    })?;
+
+    let guard_pragma = db::pragma_guard::PragmaGuard::new(&conn).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("import_favorites_apply", Some(session.target_path.as_path()))
+    })?;
+    conn.execute_batch("PRAGMA foreign_keys = 'OFF';")
+        .map_err(|err| {
+            error::ArchiveError::from(err)
+                .to_dto("import_favorites_apply", Some(session.target_path.as_path()))
+        })?;
+
+    let tx = conn.unchecked_transaction().map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("import_favorites_apply", Some(session.target_path.as_path()))
+    })?;
+
+    let mut available = compute_available_ids(&tx)
+        .map_err(|err| err.to_dto("import_favorites_apply", Some(session.target_path.as_path())))?;
+    let before = db::edit::snapshot_tables(&tx, db::edit::FAVORITE_SNAPSHOT_TABLES)
+        .map_err(|err| err.to_dto("import_favorites_apply", Some(session.target_path.as_path())))?;
+    let skipped = apply_import_favorites(&tx, &records, &mut available)
+        .map_err(|err| err.to_dto("import_favorites_apply", Some(session.target_path.as_path())))?;
+    let after = db::edit::snapshot_tables(&tx, db::edit::FAVORITE_SNAPSHOT_TABLES)
+        .map_err(|err| err.to_dto("import_favorites_apply", Some(session.target_path.as_path())))?;
+
+    tx.commit().map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("import_favorites_apply", Some(session.target_path.as_path()))
+    })?;
+    drop(guard_pragma);
+
+    session.dirty = true;
+
+    let mut report = db::edit::diff_snapshots(&before, &after);
+    if skipped > 0 {
+        report.skipped.insert("TagMap".to_string(), skipped);
+    }
+    Ok(report)
+}
+
 /// Tauri builder wiring for the Walking Skeleton.
 ///
 /// `open_archive` (01-07) and `check_jwlcore` (01-03) are registered here.
@@ -1480,7 +1637,10 @@ pub fn run() {
             merge_dry_run,
             merge_commit,
             list_notes,
-            list_category
+            list_category,
+            export_favorites,
+            import_favorites_dry_run,
+            import_favorites_apply
         ])
         .run(tauri::generate_context!())
     {

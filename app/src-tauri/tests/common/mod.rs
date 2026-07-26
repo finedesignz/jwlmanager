@@ -1884,3 +1884,118 @@ fn write_raw_duplicate_entry_zip(path: &Path) {
 
     fs::write(path, buf).expect("failed to write raw duplicate-entry zip");
 }
+
+// ---------------------------------------------------------------------------
+// Phase 8 (Import/Export Parity) fixtures — ID-gap recycling + Favorites
+// ---------------------------------------------------------------------------
+
+/// The nine archive-wide ID-recycling tables (`db::ids::RECYCLING_TABLES`),
+/// duplicated here as a plain string list so this test-only fixture doesn't
+/// need to depend on the crate's `pub(crate)` const.
+const RECYCLING_TABLES_FOR_FIXTURE: [&str; 9] = [
+    "Location",
+    "Bookmark",
+    "UserMark",
+    "Note",
+    "BlockRange",
+    "TagMap",
+    "PlaylistItem",
+    "IndependentMedia",
+    "Tag",
+];
+
+/// A fresh v16 db with EVERY recycling table's rows cleared, so
+/// `compute_available_ids`'s gap set is fully deterministic and never
+/// perturbed by `res/blank`'s own pre-seeded rows (e.g. `TagId=1
+/// 'Favorite'`). Seeds `Tag` ids `1, 2, 4, 7` (gaps `[3, 5, 6]`) and `TagMap`
+/// ids `1, 2, 3` (contiguous, no gaps) — the two representative shapes
+/// `ids_tests.rs` asserts against. Every other recycling table is left
+/// EMPTY, covering the "empty table -> empty vec, all nine keys present"
+/// case for the remaining seven.
+pub fn seed_id_gap_fixture() -> (TempDir, PathBuf) {
+    let (dir, db_path) = fresh_v16_db();
+    let conn = Connection::open(&db_path).expect("open seeded db");
+    conn.execute_batch("PRAGMA foreign_keys = OFF")
+        .expect("fk off");
+    for table in RECYCLING_TABLES_FOR_FIXTURE {
+        conn.execute(&format!("DELETE FROM {table}"), [])
+            .unwrap_or_else(|e| panic!("failed to clear {table}: {e}"));
+    }
+    for id in [1_i64, 2, 4, 7] {
+        conn.execute(
+            "INSERT INTO Tag (TagId, Type, Name) VALUES (?1, 1, ?2)",
+            rusqlite::params![id, format!("Fixture Tag {id}")],
+        )
+        .expect("insert fixture Tag");
+    }
+    for id in [1_i64, 2, 3] {
+        // TagMap's one-of CHECK requires exactly one of
+        // PlaylistItemId/LocationId/NoteId non-null — use a dangling
+        // LocationId (FK enforcement is OFF for this fixture, matching
+        // every other fixture in this file).
+        conn.execute(
+            "INSERT INTO TagMap (TagMapId, PlaylistItemId, LocationId, NoteId, TagId, Position) \
+             VALUES (?1, NULL, ?1, NULL, 1, ?1)",
+            rusqlite::params![id],
+        )
+        .expect("insert fixture TagMap");
+    }
+    (dir, db_path)
+}
+
+/// A fresh v16 db with the system `Tag (Type=0, Name='Favorite')` row and any
+/// pre-existing Favorite `TagMap`/`Location` rows removed, so Favorites
+/// export/import tests start from a clean, fully-known slate — no favorites,
+/// no publication `Location` rows, id sequences starting fresh. Distinct from
+/// `fresh_v16_db_without_favorite_tag` (07-01-PLAN.md) in also clearing any
+/// TagMap/Location rows that tag might already own (there are none in
+/// `res/blank`, but this makes the invariant explicit for Phase 8 fixtures
+/// built on top of this one).
+pub fn fresh_v16_db_for_favorites_io() -> (TempDir, PathBuf) {
+    let (dir, db_path) = fresh_v16_db();
+    let conn = Connection::open(&db_path).expect("open seeded db");
+    conn.execute_batch("PRAGMA foreign_keys = OFF")
+        .expect("fk off");
+    conn.execute(
+        "DELETE FROM TagMap WHERE TagId IN (SELECT TagId FROM Tag WHERE Type = 0 AND Name = 'Favorite')",
+        [],
+    )
+    .expect("clear pre-seeded favorite TagMap rows");
+    conn.execute("DELETE FROM Tag WHERE Type = 0 AND Name = 'Favorite'", [])
+        .expect("remove pre-seeded system Favorite tag");
+    (dir, db_path)
+}
+
+/// Seeds one Favorite: the system tag (created fresh), a publication
+/// `Location` (`DocumentId=1001, Track=NULL, IssueTagNumber=0,
+/// KeySymbol='nwt', MepsLanguage=0, Type=0` — the "Document or Bible
+/// chapter" CHECK branch, which only requires a non-zero `DocumentId`), and
+/// the linking `TagMap` row at `Position=0`. Returns `(tag_id,
+/// location_id)`. Used by export/import wireformat tests that need a known,
+/// non-empty starting Favorites list. The formatted wire line for this row
+/// is `"1001|None|0|nwt|0|0"`.
+pub fn seed_one_favorite(db_path: &Path) -> (i64, i64) {
+    let conn = Connection::open(db_path).expect("open seeded db");
+    conn.execute_batch("PRAGMA foreign_keys = OFF")
+        .expect("fk off");
+    conn.execute(
+        "INSERT INTO Tag (Type, Name) VALUES (0, 'Favorite')",
+        [],
+    )
+    .expect("insert system Favorite tag");
+    let tag_id = conn.last_insert_rowid();
+    conn.execute(
+        "INSERT INTO Location (DocumentId, Track, IssueTagNumber, KeySymbol, MepsLanguage, Type) \
+         VALUES (1001, NULL, 0, 'nwt', 0, 0)",
+        [],
+    )
+    .expect("insert favorite publication Location");
+    let location_id = conn.last_insert_rowid();
+    conn.execute(
+        "INSERT INTO TagMap (PlaylistItemId, LocationId, NoteId, TagId, Position) \
+         VALUES (NULL, ?1, NULL, ?2, 0)",
+        rusqlite::params![location_id, tag_id],
+    )
+    .expect("insert favorite TagMap");
+    (tag_id, location_id)
+}

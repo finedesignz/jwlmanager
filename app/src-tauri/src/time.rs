@@ -42,6 +42,34 @@ pub fn now_iso8601_utc() -> String {
     format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
 }
 
+/// Returns the current UTC time formatted as `YYYY-MM-DD @ HH:MM:SS` —
+/// matches `datetime.now().strftime('%Y-%m-%d @ %H:%M:%S')`
+/// (`JWLManager.py:1369`'s `export_header`, `db::io::header::build_export_header`'s
+/// injected `timestamp` context, 08-01-PLAN.md Task 1). Python's
+/// `datetime.now()` here is LOCAL time, not UTC — this port deliberately
+/// uses UTC instead (same posture as `now_iso8601_utc`): a wall-clock-local
+/// export timestamp is cosmetic-only content inside the file (never parsed
+/// back on import, since `parse_favorites_file` only reads the `{FAVORITES}`
+/// tag line and pipe-delimited data rows, never the header body), so
+/// UTC-vs-local is a non-load-bearing divergence traded for not adding a
+/// timezone-database dependency.
+pub fn now_export_header_timestamp() -> String {
+    let secs_since_epoch = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+
+    let days = secs_since_epoch.div_euclid(86_400);
+    let secs_of_day = secs_since_epoch.rem_euclid(86_400);
+
+    let (year, month, day) = civil_from_days(days);
+    let hour = secs_of_day / 3600;
+    let minute = (secs_of_day % 3600) / 60;
+    let second = secs_of_day % 60;
+
+    format!("{year:04}-{month:02}-{day:02} @ {hour:02}:{minute:02}:{second:02}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

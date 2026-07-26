@@ -9,6 +9,8 @@ pub mod delete;
 pub mod edit;
 pub mod favorites;
 pub mod highlights;
+pub mod ids;
+pub mod io;
 pub mod labels;
 pub mod notes;
 pub mod pragma_guard;

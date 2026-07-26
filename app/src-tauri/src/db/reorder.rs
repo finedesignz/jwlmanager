@@ -136,6 +136,7 @@ pub fn reorder_report(changed: usize) -> DryRunReport {
         overwritten,
         deleted: BTreeMap::new(),
         total_deleted: 0,
+        skipped: BTreeMap::new(),
     }
 }
 
