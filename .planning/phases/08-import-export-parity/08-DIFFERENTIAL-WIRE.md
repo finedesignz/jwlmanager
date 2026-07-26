@@ -119,3 +119,64 @@ stdlib sqlite3 only — no PySide6/jwlCore dependency for this leg).
 
 `cargo test --jobs 2` (non-ignored) confirmed still green after this change —
 no existing test or fixture was modified.
+
+## CRLF import interchange bug (found via this oracle, fixed 2026-07-26)
+
+**Finding:** the oracle above established that `JWLManager.py` opens export
+files with `open(fname, 'w', encoding='utf-8')` and no `newline=''`, so
+Python's text-mode write translates `\n` -> `os.linesep` — on Windows the
+real Python app writes **CRLF** into every `.txt` export. Chasing that
+finding through the Rust *importer* (not just the exporter, which this
+document otherwise covers) surfaced an asymmetric interchange failure:
+
+- `parse_favorites_file`, the Bookmarks/Annotations line parser, and
+  `parse_highlights_file` all incidentally tolerated CRLF (each strips a
+  trailing `\r` per line before use — `trim_end_matches('\r')` /
+  `trim_end()`).
+- **`parse_notes_file` did not.** It locates each record's header/body
+  boundary via `chunk.find("===\n")`; a CRLF file contains `===\r\n`, so the
+  search failed and import aborted with `ImportMalformed { reason:
+  "unterminated record header" }`. A Notes `.txt` file exported by the real
+  Python app on Windows could not be re-imported by this app at all — a
+  direct violation of Phase 8's bidirectional-interchange goal.
+- Separately, `parse_annotations_file` uses the identical
+  `chunk.find("===\n")` boundary search on bracket-tag records, so it carried
+  the same latent defect even though it was not the file originally flagged.
+
+**Fix:** added a single shared helper, `normalize_line_endings` (`app/src-
+tauri/src/db/io/import.rs`), that converts `\r\n` -> `\n` (and a lone `\r` ->
+`\n`, full universal-newlines) once on the WHOLE file text, applied at the
+top of all five `parse_*_file` entry points (Favorites, Bookmarks,
+Annotations, Highlights, Notes) — not just the one broken parser, so no
+parser is left depending on incidental per-line `trim_end` behavior. This is
+**parity, not a deviation**: Python's own reader
+(`open(fname, encoding='utf-8')`, also no `newline=''`) applies universal-
+newlines translation on READ, silently converting `\r\n`/`\r` back to `\n`
+before any parsing logic runs, so Python never sees the `\r` at all —
+reproducing that invisible read-time behavior in Rust is what makes the
+round trip actually interchangeable. The existing per-line `\r` trims in the
+other four parsers were left in place (now harmless belt-and-braces); the
+export side is unchanged (Rust exporting LF unconditionally remains the
+documented, separate decision — Python's reader accepts LF fine via the same
+universal-newlines translation).
+
+**Tests added** (`app/src-tauri/src/db/io/import.rs`, `mod tests`), all pure
+`parse_*_file` unit tests — no DB fixture needed:
+- `favorites_crlf_file_parses_identically_to_lf`
+- `bookmarks_crlf_file_parses_identically_to_lf`
+- `annotations_crlf_file_parses_identically_to_lf`
+- `highlights_crlf_file_parses_identically_to_lf`
+- `notes_crlf_file_parses_identically_to_lf` — the fixture that failed with
+  `ImportMalformed { reason: "unterminated record header" }` before the fix
+  (confirmed by inspection of the pre-fix `chunk.find("===\n")` boundary
+  search against a `===\r\n` terminator)
+- `notes_crlf_file_title_and_content_carry_no_stray_cr` — silent-corruption
+  guard proving Title/Content contain no interior `\r` after a CRLF import,
+  which a narrower fix limited to only the header-boundary match (without
+  whole-file normalization) would NOT have caught, since `body.trim_end()`
+  only strips the end of the whole body, not each interior line
+
+**Verification:** `cargo test --jobs 2` (130 passed, `--lib` +
+all integration suites, 0 failed), `cargo clippy --all-targets -- -D
+warnings` (clean), `npx vitest run` (133 passed), `npx tsc --noEmit` (clean).
+No existing fixture or test was modified; no new Cargo dependency added.

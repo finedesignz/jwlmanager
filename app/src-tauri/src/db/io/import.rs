@@ -40,6 +40,30 @@ fn map_sqlite_err(err: rusqlite::Error, context: &str) -> ArchiveError {
     }
 }
 
+/// Normalizes `\r\n` -> `\n` for the WHOLE file text, applied uniformly at
+/// the top of every `parse_*_file` entry point (08-DIFFERENTIAL-WIRE.md
+/// "CRLF import interchange" finding). This is PARITY, not a deviation:
+/// `JWLManager.py` exports every `.txt` category via
+/// `open(fname, 'w', encoding='utf-8')` with no `newline=''`, so on Windows
+/// Python's text-mode write translates `\n` -> `os.linesep`, meaning the real
+/// Python app writes CRLF line endings into every export on Windows. Python's
+/// own reader (`open(fname, encoding='utf-8')`, also no `newline=''`) then
+/// applies universal-newlines translation on READ, silently converting
+/// `\r\n`/`\r` back to `\n` before any parsing logic runs — so Python never
+/// sees the `\r` at all. Doing the same normalization here, once, at the
+/// read boundary, reproduces that invisible behavior instead of requiring
+/// every downstream `find("...\n")`/`match_indices("\n...")` boundary search
+/// to separately cope with a stray `\r`. Per-line `trim_end_matches('\r')`/
+/// `trim_end()` calls elsewhere in this file are now belt-and-braces (they
+/// were already correct on their own) and are deliberately left in place.
+fn normalize_line_endings(text: &str) -> std::borrow::Cow<'_, str> {
+    if text.contains('\r') {
+        std::borrow::Cow::Owned(text.replace("\r\n", "\n").replace('\r', "\n"))
+    } else {
+        std::borrow::Cow::Borrowed(text)
+    }
+}
+
 /// One parsed Favorites data row, fields in the SAME order the wire format
 /// (and `export_favorites`'s SQL) uses: `DocumentId, Track, IssueTagNumber,
 /// KeySymbol, MepsLanguage, Type`. Kept as raw `Option<String>` (never
@@ -89,6 +113,7 @@ impl FavoriteRecord {
 /// (blank lines, the header's own non-tag lines) are silently skipped,
 /// exactly like Python's `if '|' in line` filter (`:2097`).
 pub fn parse_favorites_file(text: &str) -> Result<Vec<FavoriteRecord>, ArchiveError> {
+    let text = normalize_line_endings(text);
     let mut lines = text.split('\n');
     let first_line = lines.next().unwrap_or("");
     if !first_line.contains("{FAVORITES}") {
@@ -397,6 +422,7 @@ pub struct BookmarkRecord {
 /// pipe-delimited fields (`JWLManager.py:2020`) or the whole parse fails,
 /// naming the exact 1-indexed line.
 pub fn parse_bookmarks_file(text: &str) -> Result<Vec<BookmarkRecord>, ArchiveError> {
+    let text = normalize_line_endings(text);
     let mut lines = text.split('\n');
     let first_line = lines.next().unwrap_or("");
     if !first_line.contains("{BOOKMARKS}") {
@@ -811,6 +837,8 @@ fn parse_header_attrs(header: &str) -> BTreeMap<String, String> {
 /// `line` field is reused to carry a record index here, since bracket-tag
 /// records have no single meaningful source line).
 pub fn parse_annotations_file(text: &str) -> Result<Vec<AnnotationRecord>, ArchiveError> {
+    let text = normalize_line_endings(text);
+    let text: &str = &text;
     let first_line_end = text.find('\n').unwrap_or(text.len());
     let first_line = &text[..first_line_end];
     if !first_line.contains("{ANNOTATIONS}") {
@@ -1059,6 +1087,7 @@ pub struct HighlightRecord {
 /// around `int(attribs[2])`/`int(attribs[3])` at `:2168-2169` aborts the
 /// whole import with a ROLLBACK the same way, `:2197-2200`).
 pub fn parse_highlights_file(text: &str) -> Result<Vec<HighlightRecord>, ArchiveError> {
+    let text = normalize_line_endings(text);
     let mut lines = text.split('\n');
     let first_line = lines.next().unwrap_or("");
     if !first_line.contains("{HIGHLIGHTS}") {
@@ -1485,6 +1514,8 @@ fn parse_note_range(
 /// `NOTE` is everything after it REJOINED with `\n`
 /// (`JWLManager.py:2244-2248`) — an empty body yields `TITLE = NOTE = ""`.
 pub fn parse_notes_file(text: &str) -> Result<(Option<char>, Vec<NoteRecord>), ArchiveError> {
+    let text = normalize_line_endings(text);
+    let text: &str = &text;
     let first_line_end = text.find('\n').unwrap_or(text.len());
     let first_line = &text[..first_line_end];
     let bucket = extract_notes_bucket(first_line).ok_or_else(|| ArchiveError::ImportMalformed {
@@ -2243,6 +2274,72 @@ mod tests {
         let ranges = parse_note_range("5-9", 1).unwrap();
         assert_eq!(ranges.len(), 1);
         assert_eq!(ranges[0].identifier, None);
+    }
+
+    // -----------------------------------------------------------------
+    // CRLF import interchange (08-DIFFERENTIAL-WIRE.md "CRLF import
+    // interchange" finding). `JWLManager.py` exports every `.txt` category
+    // via `open(fname, 'w', encoding='utf-8')` with no `newline=''`, so on
+    // Windows Python's text-mode write translates `\n` -> `os.linesep`,
+    // meaning a real Python-exported file carries CRLF line endings. Each
+    // test below takes an LF fixture already used elsewhere in this module,
+    // converts it to CRLF, and asserts the parser produces byte-identical
+    // records either way.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn favorites_crlf_file_parses_identically_to_lf() {
+        let lf = "{FAVORITES}\n \nExported from x\nby y (1) on z\n****\nNone|Track|0|nwt|0|1";
+        let crlf = lf.replace('\n', "\r\n");
+        assert_eq!(parse_favorites_file(lf).unwrap(), parse_favorites_file(&crlf).unwrap());
+    }
+
+    #[test]
+    fn bookmarks_crlf_file_parses_identically_to_lf() {
+        let lf = "{BOOKMARKS}\n1|1|None|0|nwt|0|0|0|New Title|None|0|None";
+        let crlf = lf.replace('\n', "\r\n");
+        assert_eq!(parse_bookmarks_file(lf).unwrap(), parse_bookmarks_file(&crlf).unwrap());
+    }
+
+    #[test]
+    fn annotations_crlf_file_parses_identically_to_lf() {
+        let lf = "{ANNOTATIONS}\n \nheader\n==={PUB=w}{DOC=1001}{LABEL=tag1}===\nFirst value\n==={END}===";
+        let crlf = lf.replace('\n', "\r\n");
+        assert_eq!(parse_annotations_file(lf).unwrap(), parse_annotations_file(&crlf).unwrap());
+    }
+
+    #[test]
+    fn highlights_crlf_file_parses_identically_to_lf() {
+        let lf = "{HIGHLIGHTS}\n1|1|0|5|1|1|1|1|None|0|nwt|0|0";
+        let crlf = lf.replace('\n', "\r\n");
+        assert_eq!(parse_highlights_file(lf).unwrap(), parse_highlights_file(&crlf).unwrap());
+    }
+
+    #[test]
+    fn notes_crlf_file_parses_identically_to_lf() {
+        // This is the fixture that FAILED before the CRLF-normalization fix:
+        // `chunk.find("===\n")` never matched `===\r\n`, so the CRLF variant
+        // raised `ImportMalformed { reason: "unterminated record header" }`
+        // instead of parsing.
+        let lf = "{NOTES=}\nheader\n==={CREATED=2024-01-01T00:00:00}{MODIFIED=2024-01-01T00:00:00}{TAGS=}===\nMy Title\nMy note body\n==={END}===";
+        let crlf = lf.replace('\n', "\r\n");
+        assert_eq!(parse_notes_file(lf).unwrap(), parse_notes_file(&crlf).unwrap());
+    }
+
+    #[test]
+    fn notes_crlf_file_title_and_content_carry_no_stray_cr() {
+        // Silent-corruption guard: a naive fix to only the header-boundary
+        // matching (without normalizing the whole file) would still leave a
+        // trailing `\r` on every interior body line, since `body.trim_end()`
+        // only strips the END of the whole body.
+        let lf = "{NOTES=}\nheader\n==={CREATED=2024-01-01T00:00:00}{MODIFIED=2024-01-01T00:00:00}{TAGS=}===\nMy Title\nline one\nline two\n==={END}===";
+        let crlf = lf.replace('\n', "\r\n");
+        let (_bucket, records) = parse_notes_file(&crlf).unwrap();
+        assert_eq!(records.len(), 1);
+        assert!(!records[0].title.contains('\r'), "title must not contain a stray CR: {:?}", records[0].title);
+        assert!(!records[0].note.contains('\r'), "note body must not contain a stray CR: {:?}", records[0].note);
+        assert_eq!(records[0].title, "My Title");
+        assert_eq!(records[0].note, "line one\nline two");
     }
 
     #[test]
