@@ -202,10 +202,11 @@
   1. User can choose a prior export point and export only items changed since then
   2. Note identity for the diff is resolved via content hashing, not vendor timestamps, so re-exports are stable even when timestamps drift
 
-**Plans**: 4 plans
+**Plans**: 1/4 plans executed
 
 Plans:
-- [ ] 09-01-PLAN.md — tracer: Notes diff + hashing engine (`db/io/diff.rs`), `export_notes_incremental`, UI, convergence test
+
+- [x] 09-01-PLAN.md — tracer: Notes diff + hashing engine (`db/io/diff.rs`), `export_notes_incremental`, UI, convergence test
 - [ ] 09-02-PLAN.md — Favorites, Bookmarks, Highlights: id-carrying reads, identity keys, three incremental commands
 - [ ] 09-03-PLAN.md — Annotations: wire-recoverable (DOC, LABEL) identity, disclosed LocationId over-selection
 - [ ] 09-04-PLAN.md — uniform UI across five categories, cross-category invariant + CRLF suites, documentation
@@ -251,7 +252,7 @@ Plans:
 | 6. Full Data Browsing | 4/4 | In Progress|  |
 | 7. Full Editing | 5/5 | In Progress|  |
 | 8. Import / Export Parity | 6/6 | In Progress|  |
-| 9. Incremental Export | 0/TBD | Not started | - |
+| 9. Incremental Export | 1/4 | In Progress|  |
 | 10. N-Way Merge Fold | 0/TBD | Not started | - |
 | 11. Platform Polish | 0/TBD | Not started | - |
 
