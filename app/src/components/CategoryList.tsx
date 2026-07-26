@@ -8,6 +8,7 @@ import type { ErrorDto } from "../bindings/ErrorDto";
 import ColorMenu from "./ColorMenu";
 import EditPreviewDialog from "./EditPreviewDialog";
 import FavoriteAddDialog from "./FavoriteAddDialog";
+import RecordEditor from "./RecordEditor";
 import TagDialog from "./TagDialog";
 import { operationSet, type Op } from "../lib/operations";
 
@@ -33,7 +34,11 @@ const NO_WRAP_STYLE: React.CSSProperties = {
 const OP_LABEL: Record<Op, string> = {
   delete: "Delete",
   export: "Export",
-  view: "View",
+  // "Edit" (EDIT-07, 07-05-PLAN.md) — the `view` op's real name once the
+  // field-constrained record editor lands. Safe to rename globally: both
+  // `view`-carrying categories (Notes, Annotations) go LIVE simultaneously
+  // this phase.
+  view: "Edit",
   color: "Color",
   tag: "Tag",
   add: "Add",
@@ -57,6 +62,14 @@ const DELETE_COMMANDS: Partial<Record<Category, { dryRun: string; apply: string 
   Notes: { dryRun: "delete_notes_dry_run", apply: "delete_notes_apply" },
   Favorites: { dryRun: "favorite_remove_dry_run", apply: "favorite_remove_apply" },
   Highlights: { dryRun: "highlight_delete_dry_run", apply: "highlight_delete_apply" },
+  // Bookmarks/Annotations (D7-10, 07-05-PLAN.md). Annotations delete is by
+  // LocationId — an intentional over-deletion (rule #10): it removes ALL
+  // InputField rows at that location, never just one TextTag. This is
+  // distinct from the record editor's own (LocationId, TextTag)-scoped
+  // single delete (`RecordEditor`'s "Delete" button), which must never be
+  // crossed with this one.
+  Bookmarks: { dryRun: "bookmark_delete_dry_run", apply: "bookmark_delete_apply" },
+  Annotations: { dryRun: "annotation_delete_dry_run", apply: "annotation_delete_apply" },
 };
 
 /**
@@ -150,6 +163,11 @@ export default function CategoryList({
   // "Tag" (EDIT-03) — its own show/hide flag; TagDialog owns its OWN
   // fetch/dry-run/preview/apply flow internally once open.
   const [showTagDialog, setShowTagDialog] = useState(false);
+  // "Edit" (EDIT-07, the `view` op) -- its own show/hide flag; RecordEditor
+  // owns its OWN fetch/dry-run/preview/apply flow internally, same shape as
+  // TagDialog/FavoriteAddDialog. Only ever opened at selection size 1
+  // (07-UI-SPEC.md's stricter-than-NEEDS_SELECTION precondition).
+  const [showRecordEditor, setShowRecordEditor] = useState(false);
 
   // D6-05: switching categories clears stale integer keys that would collide
   // across categories (a BookmarkId means nothing in the Highlights list).
@@ -173,6 +191,7 @@ export default function CategoryList({
     setShowFavoriteDialog(false);
     setShowColorMenu(false);
     setShowTagDialog(false);
+    setShowRecordEditor(false);
   }
 
   const virtualizer = useVirtualizer({
@@ -233,6 +252,11 @@ export default function CategoryList({
   }, []);
 
   const ops = operationSet(category, selected.size);
+
+  // The single selected row for the record editor (EDIT-07) — only ever
+  // read when `selected.size === 1`, so the first (only) match is exact.
+  const singleSelectedRow =
+    selected.size === 1 ? rows.find((row) => selected.has(row.id)) : undefined;
 
   // NOTE: unlike the pre-Phase-7 shape, the empty-rows case no longer
   // early-returns before the toolbar — Favorites' "Add Favorite" (EDIT-05
@@ -339,6 +363,29 @@ export default function CategoryList({
                 onClick={() => setShowTagDialog(true)}
                 disabled={!state.enabled}
                 data-testid="category-list-tag-button"
+              >
+                {resolveOpLabel(state.op, category)}
+              </button>
+            );
+          }
+          // "Edit" (EDIT-07, the `view` op, Notes + Annotations) — opens the
+          // modal RecordEditor, which owns its own fetch/dry-run/preview/
+          // apply flow internally. Stricter precondition than
+          // `operationSet`'s generic `NEEDS_SELECTION` (>0): 07-UI-SPEC.md
+          // requires EXACTLY one row selected, present-but-disabled with an
+          // explicit tooltip for 2+ — reusing the same disabled+title
+          // convention already used for deferred ops.
+          if (state.op === "view" && !state.deferred) {
+            const tooManySelected = selected.size > 1;
+            return (
+              <button
+                key={state.op}
+                type="button"
+                className="toolbar-button category-list-edit-button"
+                onClick={() => setShowRecordEditor(true)}
+                disabled={!state.enabled || selected.size !== 1}
+                title={tooManySelected ? "Select exactly one row to edit" : undefined}
+                data-testid="category-list-edit-button"
               >
                 {resolveOpLabel(state.op, category)}
               </button>
@@ -459,6 +506,19 @@ export default function CategoryList({
             onRowsChanged?.(freshRows);
           }}
           onCancel={() => setShowTagDialog(false)}
+          onError={(err) => onError?.(err)}
+        />
+      )}
+      {showRecordEditor && singleSelectedRow && (
+        <RecordEditor
+          category={category}
+          row={singleSelectedRow}
+          onApplied={(freshRows) => {
+            setShowRecordEditor(false);
+            setSelected(new Set());
+            onRowsChanged?.(freshRows);
+          }}
+          onCancel={() => setShowRecordEditor(false)}
           onError={(err) => onError?.(err)}
         />
       )}

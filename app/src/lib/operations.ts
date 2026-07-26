@@ -54,8 +54,13 @@ const NEEDS_SELECTION: ReadonlySet<Op> = new Set<Op>([
  * and `Favorites:add` (EDIT-05 mark) land in 07-01-PLAN.md. `Notes:color` /
  * `Highlights:color` (EDIT-02 recolor) and `Highlights:delete` (D7-10,
  * BlockRange-only, rule #9) land in 07-02-PLAN.md. `Notes:tag` (EDIT-03)
- * lands in 07-03-PLAN.md. `Playlists:add` (media add) stays deferred —
- * Phase 8 (D7-06/D7-10).
+ * lands in 07-03-PLAN.md. `Notes:view`/`Annotations:view` (EDIT-07 record
+ * editor, `view` renders as "Edit") and `Bookmarks:delete`/
+ * `Annotations:delete` (D7-10, the remaining per-category deletes —
+ * Annotations delete is by `LocationId`, an intentional over-deletion, rule
+ * #10) land in 07-05-PLAN.md. `Playlists:add` (media add) and
+ * `Playlists:delete` (ref-counted media) stay deferred — Phase 8
+ * (D7-06/D7-10).
  *
  * Sort Tags (EDIT-04) is ARCHIVE-WIDE, never selection-scoped, so it
  * deliberately does NOT enter this descriptor at all — it lives entirely
@@ -68,10 +73,14 @@ const LIVE: ReadonlySet<string> = new Set<string>([
   "Notes:delete",
   "Notes:color",
   "Notes:tag",
+  "Notes:view",
   "Favorites:delete",
   "Favorites:add",
   "Highlights:color",
   "Highlights:delete",
+  "Bookmarks:delete",
+  "Annotations:delete",
+  "Annotations:view",
 ]);
 
 /** A single entry in the contextual operation bar. */

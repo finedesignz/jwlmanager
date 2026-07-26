@@ -43,6 +43,7 @@ function makeRow(id: number, overrides: Partial<BrowseRow> = {}): BrowseRow {
     full: "The Watchtower",
     type_group: "Magazines",
     independent: false,
+    text_tag: null,
     ...overrides,
   };
 }

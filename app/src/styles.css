@@ -691,3 +691,146 @@ body {
   justify-content: flex-end;
   gap: var(--space-sm);
 }
+
+/* Record Editor ("Edit", EDIT-07, 07-05-PLAN.md Task 2). Reuses
+   .edit-preview-overlay for its backdrop; the card matches
+   .edit-preview-dialog's/.tag-dialog's radius/surface/padding scale --
+   no new radius, spacing, or color value beyond what 07-UI-SPEC.md names. */
+.record-editor {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-hairline);
+  border-radius: 12px;
+  padding: var(--space-lg);
+  max-width: 32em;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.record-editor-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.record-editor-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.record-editor-field label,
+.record-editor-field > span {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.record-editor-loading {
+  margin: 0;
+  padding: var(--space-md) 0;
+  color: var(--text-muted);
+}
+
+/* Title field -- same box metrics as every other first-class text input in
+   the app (.tag-dialog-add-input/.favorite-dialog-select): --bg-tertiary
+   background, 44px min-height, --space-md horizontal padding,
+   --brand-primary focus ring. */
+.record-editor-title-input {
+  min-height: 44px;
+  padding: 0 var(--space-md);
+  border-radius: 8px;
+  border: none;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.record-editor-title-input:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 2px;
+}
+
+/* The Content/Value textarea -- the FIRST real multi-line <textarea> in the
+   app (07-UI-SPEC.md "overflow" UI Consideration). DELIBERATE deviation
+   from the app's list-row no-wrap/ellipsis convention: this field wraps and
+   scrolls internally and never truncates or single-lines. Do not "fix" this
+   to match the row-truncation rule -- it is intentionally different because
+   this is editable free-text content, not a label. */
+.record-editor-textarea {
+  min-height: 8em;
+  max-height: 40vh;
+  padding: var(--space-sm) var(--space-md);
+  border-radius: 8px;
+  border: none;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-family: inherit;
+  resize: vertical;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  overflow-y: auto;
+}
+
+.record-editor-textarea:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 2px;
+}
+
+.record-editor-colors {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+/* Same 7-swatch metric as .color-menu-swatch (20x20px, 4px radius), reused
+   verbatim here as an interactive <button> rather than a decorative <span>
+   -- see 07-UI-SPEC.md "the same 7-swatch row used by Color Menu". */
+.record-editor-color-swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+}
+
+.record-editor-color-swatch:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 2px;
+}
+
+.record-editor-color-swatch-selected {
+  border-color: var(--text-primary);
+}
+
+/* The "No color" affordance (07-UI-SPEC.md "partial" UI Consideration) --
+   muted, no swatch rendered as selected, rather than a blank/broken state. */
+.record-editor-no-color {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.record-editor-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.record-editor-actions-right {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.record-editor-delete-button {
+  border-color: var(--destructive);
+  color: var(--destructive);
+}
+
+.record-editor-delete-button:hover:not(:disabled) {
+  background: var(--destructive);
+  color: var(--text-primary);
+}

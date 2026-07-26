@@ -12,7 +12,7 @@ import EditPreviewDialog from "./EditPreviewDialog";
  * (07-UI-SPEC.md), so it lives as a local module constant here (mirroring
  * how `db/labels.rs::COLOR_NAMES` is a Rust module const), never promoted to
  * a `--brand-*`-style CSS custom property. Index = the archive `ColorIndex`. */
-const PALETTE: readonly { name: string; hex: string }[] = [
+export const PALETTE: readonly { name: string; hex: string }[] = [
   { name: "Grey", hex: "#808080" },
   { name: "Yellow", hex: "#FAD929" },
   { name: "Green", hex: "#81BD4F" },

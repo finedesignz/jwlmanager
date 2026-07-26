@@ -24,6 +24,7 @@ function makeRow(id: number, overrides: Partial<BrowseRow> = {}): BrowseRow {
     full: "The Watchtower",
     type_group: "Magazines",
     independent: false,
+    text_tag: null,
     ...overrides,
   };
 }
@@ -165,10 +166,11 @@ describe("CategoryList — selection model (D6-05)", () => {
 });
 
 describe("CategoryList — contextual operation set (D6-08, DATA-07 criterion 3)", () => {
-  it("a non-Notes category renders every operation deferred/disabled and has no live delete button", () => {
-    render(<CategoryList rows={[makeRow(1), makeRow(2)]} category="Bookmarks" />);
+  it("a still-fully-deferred category (Playlists) renders every operation deferred/disabled and has no live delete button", () => {
+    render(<CategoryList rows={[makeRow(1), makeRow(2)]} category="Playlists" />);
 
-    // No live delete affordance for a non-Notes category.
+    // No live delete affordance for Playlists — its delete stays deferred
+    // (ref-counted media, D7-10/Phase 8).
     expect(screen.queryByTestId("category-list-delete-button")).not.toBeInTheDocument();
 
     // The deferred delete affordance is present, marked deferred, and disabled.
@@ -261,5 +263,47 @@ describe("CategoryList — live Notes delete flow", () => {
     expect(screen.queryByTestId("edit-preview-dialog")).not.toBeInTheDocument();
     expect(invokeMock).not.toHaveBeenCalled();
     expect(onRowsChanged).not.toHaveBeenCalled();
+  });
+});
+
+describe("CategoryList — Edit precondition (EDIT-07, 07-05-PLAN.md Task 2)", () => {
+  it("Edit is disabled with title 'Select exactly one row to edit' at selection size 2", () => {
+    render(<CategoryList rows={[makeRow(1), makeRow(2)]} category="Notes" />);
+    const checkboxes = screen.getAllByTestId("category-list-row-checkbox");
+    fireEvent.click(checkboxes[0]);
+    fireEvent.click(checkboxes[1]);
+
+    const editButton = screen.getByTestId("category-list-edit-button");
+    expect(editButton).toBeDisabled();
+    expect(editButton).toHaveAttribute("title", "Select exactly one row to edit");
+  });
+
+  it("Edit is enabled at selection size 1", () => {
+    render(<CategoryList rows={[makeRow(1), makeRow(2)]} category="Notes" />);
+    fireEvent.click(screen.getAllByTestId("category-list-row-checkbox")[0]);
+
+    const editButton = screen.getByTestId("category-list-edit-button");
+    expect(editButton).not.toBeDisabled();
+  });
+
+  it("Edit is disabled with no title at selection size 0", () => {
+    render(<CategoryList rows={[makeRow(1), makeRow(2)]} category="Notes" />);
+    const editButton = screen.getByTestId("category-list-edit-button");
+    expect(editButton).toBeDisabled();
+    expect(editButton).not.toHaveAttribute("title");
+  });
+
+  it("clicking Edit at selection size 1 opens the RecordEditor for the selected row", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "record_fetch") {
+        return Promise.resolve({ category: "Notes", title: "T", content: "C", color_index: null });
+      }
+      return Promise.reject(new Error(`unexpected invoke: ${cmd}`));
+    });
+    render(<CategoryList rows={[makeRow(1), makeRow(2)]} category="Notes" />);
+    fireEvent.click(screen.getAllByTestId("category-list-row-checkbox")[0]);
+    fireEvent.click(screen.getByTestId("category-list-edit-button"));
+
+    expect(await screen.findByTestId("record-editor")).toBeInTheDocument();
   });
 });
