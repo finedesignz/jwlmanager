@@ -207,9 +207,9 @@
 Plans:
 
 - [x] 09-01-PLAN.md — tracer: Notes diff + hashing engine (`db/io/diff.rs`), `export_notes_incremental`, UI, convergence test
-- [ ] 09-02-PLAN.md — Favorites, Bookmarks, Highlights: id-carrying reads, identity keys, three incremental commands
-- [ ] 09-03-PLAN.md — Annotations: wire-recoverable (DOC, LABEL) identity, disclosed LocationId over-selection
-- [ ] 09-04-PLAN.md — uniform UI across five categories, cross-category invariant + CRLF suites, documentation
+- [x] 09-02-PLAN.md — Favorites, Bookmarks, Highlights: id-carrying reads, identity keys, three incremental commands
+- [x] 09-03-PLAN.md — Annotations: wire-recoverable (DOC, LABEL) identity, disclosed LocationId over-selection
+- [x] 09-04-PLAN.md — uniform UI across five categories, cross-category invariant + CRLF suites, documentation
 
 ### Phase 10: N-Way Merge Fold
 
