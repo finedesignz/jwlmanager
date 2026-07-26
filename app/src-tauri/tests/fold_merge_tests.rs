@@ -33,6 +33,7 @@ use jwlmanager_lib::session::ArchiveSession;
 use rusqlite::Connection;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 /// Skip-as-pass helper: returns the host DLL path or `None` off-host — an
 /// arm64-windows or binary-less CI host must PASS these tests, not fail them
@@ -46,6 +47,33 @@ fn host_lib_or_skip(test: &str) -> Option<PathBuf> {
         }
     }
 }
+
+/// Serializes every test in THIS binary that invokes the real vendored
+/// jwlCore DLL. Cargo's default multi-threaded test runner executes all
+/// `#[test]` functions in one binary concurrently on a thread pool; the
+/// production app never does this (a single `Mutex<Option<ArchiveSession>>`
+/// serializes every merge/fold Tauri command through one critical section,
+/// see `lib.rs` `merge_commit`/`fold_merge_commit`, D5-06) so this is a
+/// TEST-ONLY concurrency concern, not a production defect.
+///
+/// Root cause (10-CONCURRENCY-FINDING.md): jwlCore's `mergeDatabase` is not
+/// safe to invoke concurrently from multiple threads in one process —
+/// `loader::load_library` prepends the DLL's directory to the process-global
+/// `PATH` env var for the duration of the load (a second thread's load can
+/// observe/restore a mutated `PATH`), and `run_merge_with_lib_path`'s own
+/// doc comment already establishes that `getLastResult()` is
+/// "process-global native memory that a later merge would overwrite"
+/// (D5-06). Windows' loader also hands back the SAME already-loaded module
+/// handle to concurrent callers (same DLL path), so two threads' merges can
+/// run inside the same native library instance at once. Verification
+/// (10-CONCURRENCY-FINDING.md) observed a real row-count divergence
+/// (`Tag`/`TagMap` present on only one side) under default `cargo test`
+/// parallelism that never reproduces under `--test-threads=1`.
+///
+/// DO NOT remove this lock as a "cleanup" — that reintroduces the flake this
+/// mutex exists to close. Every test below that calls `host_lib_or_skip` and
+/// then touches the real DLL acquires `JWLCORE_TEST_LOCK` first.
+static JWLCORE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
 fn hash_file(path: &Path) -> String {
     let bytes = std::fs::read(path).expect("read file for hashing");
@@ -97,6 +125,7 @@ fn fold_merge_carries_all_sources() {
     let Some(lib) = host_lib_or_skip("fold_merge_carries_all_sources") else {
         return;
     };
+    let _lock = JWLCORE_TEST_LOCK.lock().unwrap();
 
     let (_dest_fx, dest_archive) = common::generate_merge_dest_archive();
     let (_s1_fx, source_1) = common::generate_merge_source_archive();
@@ -148,6 +177,7 @@ fn fold_matches_chained_pairwise() {
     let Some(lib) = host_lib_or_skip("fold_matches_chained_pairwise") else {
         return;
     };
+    let _lock = JWLCORE_TEST_LOCK.lock().unwrap();
 
     let (_dest_fx, dest_archive) = common::generate_merge_dest_archive();
     let (_s1_fx, source_1) = common::generate_merge_source_archive();
@@ -216,6 +246,7 @@ fn fold_dry_run_aggregate() {
     let Some(lib) = host_lib_or_skip("fold_dry_run_aggregate") else {
         return;
     };
+    let _lock = JWLCORE_TEST_LOCK.lock().unwrap();
 
     let (_dest_fx, dest_archive) = common::generate_merge_dest_archive();
     let (_s1_fx, source_1) = common::generate_merge_source_archive();
@@ -280,6 +311,7 @@ fn fold_rejects_fewer_than_three_sources() {
     let Some(lib) = host_lib_or_skip("fold_rejects_fewer_than_three_sources") else {
         return;
     };
+    let _lock = JWLCORE_TEST_LOCK.lock().unwrap();
 
     let (_dest_fx, dest_archive) = common::generate_merge_dest_archive();
     let (_s1_fx, source_1) = common::generate_merge_source_archive();
@@ -349,6 +381,7 @@ fn fold_playlist_graph_merge() {
     let Some(lib) = host_lib_or_skip("fold_playlist_graph_merge") else {
         return;
     };
+    let _lock = JWLCORE_TEST_LOCK.lock().unwrap();
 
     let (_dest_fx, dest_archive) = common::generate_merge_dest_archive();
     let (_s1_fx, source_1) = common::generate_fold_standalone_source_archive(
@@ -457,6 +490,7 @@ fn fold_step_failure_pristine() {
     let Some(lib) = host_lib_or_skip("fold_step_failure_pristine") else {
         return;
     };
+    let _lock = JWLCORE_TEST_LOCK.lock().unwrap();
 
     let (_dest_fx, dest_archive) = common::generate_merge_dest_archive();
     let (_s1_fx, source_1) =
@@ -572,6 +606,7 @@ fn fold_step_failure_names_source() {
     let Some(lib) = host_lib_or_skip("fold_step_failure_names_source") else {
         return;
     };
+    let _lock = JWLCORE_TEST_LOCK.lock().unwrap();
 
     let (_dest_fx, dest_archive) = common::generate_merge_dest_archive();
     let (_s1_fx, source_1) =
@@ -598,6 +633,7 @@ fn fold_step_failure_stops_immediately() {
     let Some(lib) = host_lib_or_skip("fold_step_failure_stops_immediately") else {
         return;
     };
+    let _lock = JWLCORE_TEST_LOCK.lock().unwrap();
 
     let (_dest_fx, dest_archive) = common::generate_merge_dest_archive();
     let (_s1_fx, source_1) =
@@ -626,6 +662,7 @@ fn fold_dry_run_failure_cleans_up() {
     let Some(lib) = host_lib_or_skip("fold_dry_run_failure_cleans_up") else {
         return;
     };
+    let _lock = JWLCORE_TEST_LOCK.lock().unwrap();
 
     let (_dest_fx, dest_archive) = common::generate_merge_dest_archive();
     let (_s1_fx, source_1) =
@@ -680,6 +717,7 @@ fn fold_media_intermediate_step() {
     let Some(lib) = host_lib_or_skip("fold_media_intermediate_step") else {
         return;
     };
+    let _lock = JWLCORE_TEST_LOCK.lock().unwrap();
 
     let (_dest_fx, dest_archive) = common::generate_merge_dest_archive();
     let (_s1_fx, source_1) =
