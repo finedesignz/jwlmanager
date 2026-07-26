@@ -17,6 +17,7 @@
 //! range-merge) — to prove the whole spine end-to-end before Plans 02-05 add
 //! Annotations/Bookmarks/Highlights/Notes on top of it.
 
+pub mod diff;
 pub mod export;
 pub mod header;
 pub mod import;

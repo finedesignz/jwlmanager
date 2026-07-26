@@ -439,7 +439,8 @@ pub(crate) const NOTES_WRITES_END_SENTINEL: bool = true;
 
 /// One raw `Note` export row, straight off the SQL (`JWLManager.py:1519-1542`)
 /// before any of `get_notes`'s per-shape derivation runs.
-struct RawNoteRow {
+pub(crate) struct RawNoteRow {
+    note_id: i64,
     book_number: Option<i64>,
     document_id: Option<i64>,
     title: Option<String>,
@@ -494,7 +495,7 @@ fn read_raw_note_rows(
     conn: &Connection,
     ids: Option<&NonEmptyNoteIds>,
 ) -> Result<Vec<RawNoteRow>, ArchiveError> {
-    let base_sql = "SELECT l.BookNumber, l.DocumentId, n.Title, n.Content, \
+    let base_sql = "SELECT n.NoteId, l.BookNumber, l.DocumentId, n.Title, n.Content, \
          (SELECT GROUP_CONCAT(t.Name, ' | ') FROM Note nt \
               LEFT JOIN TagMap USING (NoteId) JOIN Tag t USING (TagId) \
               WHERE nt.NoteId = n.NoteId), \
@@ -529,21 +530,22 @@ fn read_raw_note_rows(
     let rows = stmt
         .query_map(rusqlite::params_from_iter(bound.iter()), |row| {
             Ok(RawNoteRow {
-                book_number: row.get(0)?,
-                document_id: row.get(1)?,
-                title: row.get(2)?,
-                content: row.get(3)?,
-                tags: row.get(4)?,
-                meps_language: row.get(5)?,
-                chapter_number: row.get(6)?,
-                block_identifier: row.get(7)?,
-                issue_tag_number: row.get(8)?,
-                key_symbol: row.get(9)?,
-                location_title: row.get(10)?,
-                last_modified: row.get(11)?,
-                created: row.get(12)?,
-                color_index: row.get(13)?,
-                user_mark_id: row.get(14)?,
+                note_id: row.get(0)?,
+                book_number: row.get(1)?,
+                document_id: row.get(2)?,
+                title: row.get(3)?,
+                content: row.get(4)?,
+                tags: row.get(5)?,
+                meps_language: row.get(6)?,
+                chapter_number: row.get(7)?,
+                block_identifier: row.get(8)?,
+                issue_tag_number: row.get(9)?,
+                key_symbol: row.get(10)?,
+                location_title: row.get(11)?,
+                last_modified: row.get(12)?,
+                created: row.get(13)?,
+                color_index: row.get(14)?,
+                user_mark_id: row.get(15)?,
             })
         })
         .map_err(|e| map_sqlite_err(e, "read_raw_note_rows: query"))?
@@ -587,126 +589,154 @@ pub fn export_notes(
     let mut count = 0usize;
     for raw in &raw_rows {
         count += 1;
-
-        let title = raw.title.clone().unwrap_or_default();
-        let note = raw
-            .content
-            .as_deref()
-            .map(|c| c.trim().to_string())
-            .unwrap_or_default();
-        let tags = raw.tags.clone().unwrap_or_default().replace(" | ", "|");
-        let color = raw.color_index.unwrap_or(0);
         let range = match raw.user_mark_id {
             Some(id) => read_note_range(conn, id)?,
             None => None,
         };
-
-        // `JWLManager.py:1602-1608`'s data-hygiene fallback for a corrupted
-        // stored timestamp — a rare, non-load-bearing edge case ported for
-        // completeness, not exercised by the golden fixture.
-        let mut created = take19(&raw.created);
-        let mut modified = take19(&raw.last_modified);
-        if !created.contains('-') || created.chars().count() < 10 {
-            created = now.to_string();
-        } else if !modified.contains('T') {
-            modified = format!("{}T00:00:00", modified.chars().take(10).collect::<String>());
-        }
-        if !modified.contains('-') || modified.chars().count() < 10 {
-            modified = created.clone();
-        } else if !created.contains('T') {
-            created = format!("{}T00:00:00", created.chars().take(10).collect::<String>());
-        }
-
-        file.write_all(
-            format!("\n==={{CREATED={created}}}{{MODIFIED={modified}}}{{TAGS={tags}}}").as_bytes(),
-        )
-        .map_err(ArchiveError::from)?;
-
-        // `item.get('DOC')` truthiness (`JWLManager.py:1622`/`:1655`/`:1661`):
-        // a `DocumentId` of `0` is treated as absent, same as `NULL`.
-        let doc_present = raw.document_id.filter(|d| *d != 0);
-
-        if let Some(bk) = raw.book_number {
-            // Bible-shaped (`:1646-1657`). `VS` is the raw BlockIdentifier;
-            // `BLOCK` becomes unconditionally `None` once BK is present
-            // (Python's `item['BLOCK'] = None` when VS is Some, and BLOCK
-            // was ALREADY None whenever VS is None — both dict entries are
-            // read from the identical `row[7]`), so `{BLOCK=...}` never
-            // actually renders for a Bible-shaped note.
-            let vs = raw.block_identifier;
-            let ch = raw.chapter_number.unwrap_or(0);
-            let vs_str = vs.map(|v| format!("{v:03}")).unwrap_or_else(|| "000".to_string());
-            let reference = format!("{bk:02}{ch:03}{vs_str}");
-
-            let mut heading = raw.location_title.clone().unwrap_or_default();
-            if heading.is_empty() {
-                let book_name = catalog.bible_book(bk).unwrap_or("");
-                heading = format!("{book_name} {ch}");
-            } else if vs.is_some() && !heading.contains(':') {
-                heading = format!("{heading}:{}", vs.unwrap_or_default());
-            }
-
-            let lang = raw.meps_language.unwrap_or(0);
-            let pub_sym = raw.key_symbol.clone().unwrap_or_default();
-            file.write_all(format!("{{LANG={lang}}}{{PUB={pub_sym}}}{{BK={bk}}}{{CH={ch}}}").as_bytes())
-                .map_err(ArchiveError::from)?;
-            if let Some(v) = vs {
-                file.write_all(format!("{{VS={v}}}").as_bytes())
-                    .map_err(ArchiveError::from)?;
-            }
-            file.write_all(format!("{{Reference={reference}}}").as_bytes())
-                .map_err(ArchiveError::from)?;
-            if !heading.is_empty() {
-                file.write_all(format!("{{HEADING={heading}}}").as_bytes())
-                    .map_err(ArchiveError::from)?;
-            }
-            file.write_all(format!("{{COLOR={color}}}").as_bytes())
-                .map_err(ArchiveError::from)?;
-            if let Some(r) = &range {
-                file.write_all(format!("{{RANGE={r}}}").as_bytes())
-                    .map_err(ArchiveError::from)?;
-            }
-            if doc_present.is_some() {
-                file.write_all(b"{DOC=0}").map_err(ArchiveError::from)?;
-            }
-        } else if let Some(doc) = doc_present {
-            // Publication-shaped (`:1658-1666`). `BLOCK`/`HEADING` are NEVER
-            // overridden here — they stay exactly as read off the row.
-            let heading = raw.location_title.clone().unwrap_or_default();
-            let issue = raw.issue_tag_number.filter(|n| *n > 10_000_000);
-            let lang = raw.meps_language.unwrap_or(0);
-            let pub_sym = raw.key_symbol.clone().unwrap_or_default();
-            file.write_all(format!("{{LANG={lang}}}{{PUB={pub_sym}}}").as_bytes())
-                .map_err(ArchiveError::from)?;
-            if let Some(iss) = issue {
-                file.write_all(format!("{{ISSUE={iss}}}").as_bytes())
-                    .map_err(ArchiveError::from)?;
-            }
-            file.write_all(format!("{{DOC={doc}}}").as_bytes())
-                .map_err(ArchiveError::from)?;
-            if let Some(blk) = raw.block_identifier {
-                file.write_all(format!("{{BLOCK={blk}}}").as_bytes())
-                    .map_err(ArchiveError::from)?;
-            }
-            if !heading.is_empty() {
-                file.write_all(format!("{{HEADING={heading}}}").as_bytes())
-                    .map_err(ArchiveError::from)?;
-            }
-            file.write_all(format!("{{COLOR={color}}}").as_bytes())
-                .map_err(ArchiveError::from)?;
-            if let Some(r) = &range {
-                file.write_all(format!("{{RANGE={r}}}").as_bytes())
-                    .map_err(ArchiveError::from)?;
-            }
-        }
-        // else: independent-shaped — no further brackets (`:1636-1637`).
-
-        file.write_all(format!("===\n{title}\n{note}").as_bytes())
-            .map_err(ArchiveError::from)?;
+        let record = format_note_record(raw, range.as_deref(), catalog, now);
+        file.write_all(record.as_bytes()).map_err(ArchiveError::from)?;
     }
     file.write_all(b"\n==={END}===").map_err(ArchiveError::from)?;
 
     Ok(count)
+}
+
+/// Renders the exact bytes [`export_notes`]'s write loop writes for ONE
+/// `Note` record — the leading newline, the `\n==={CREATED=...}` opener,
+/// every per-shape bracket, the `===\n<TITLE>\n<NOTE>` body — everything
+/// except the shared header (written once, before the loop) and the
+/// trailing `==={END}===` sentinel (written once, after it). Pure
+/// extraction (09-01-PLAN.md Task 1): `export_notes` now calls this and
+/// writes the returned string, so the exported bytes and the incremental
+/// diff's live-side hash input can never drift apart — [`db::io::diff`]
+/// reuses this SAME function via [`read_note_id_records`] below.
+pub(crate) fn format_note_record(
+    raw: &RawNoteRow,
+    range: Option<&str>,
+    catalog: &ResourceCatalog,
+    now: &str,
+) -> String {
+    let title = raw.title.clone().unwrap_or_default();
+    let note = raw
+        .content
+        .as_deref()
+        .map(|c| c.trim().to_string())
+        .unwrap_or_default();
+    let tags = raw.tags.clone().unwrap_or_default().replace(" | ", "|");
+    let color = raw.color_index.unwrap_or(0);
+
+    // `JWLManager.py:1602-1608`'s data-hygiene fallback for a corrupted
+    // stored timestamp — a rare, non-load-bearing edge case ported for
+    // completeness, not exercised by the golden fixture.
+    let mut created = take19(&raw.created);
+    let mut modified = take19(&raw.last_modified);
+    if !created.contains('-') || created.chars().count() < 10 {
+        created = now.to_string();
+    } else if !modified.contains('T') {
+        modified = format!("{}T00:00:00", modified.chars().take(10).collect::<String>());
+    }
+    if !modified.contains('-') || modified.chars().count() < 10 {
+        modified = created.clone();
+    } else if !created.contains('T') {
+        created = format!("{}T00:00:00", created.chars().take(10).collect::<String>());
+    }
+
+    let mut out =
+        format!("\n==={{CREATED={created}}}{{MODIFIED={modified}}}{{TAGS={tags}}}");
+
+    // `item.get('DOC')` truthiness (`JWLManager.py:1622`/`:1655`/`:1661`):
+    // a `DocumentId` of `0` is treated as absent, same as `NULL`.
+    let doc_present = raw.document_id.filter(|d| *d != 0);
+
+    if let Some(bk) = raw.book_number {
+        // Bible-shaped (`:1646-1657`). `VS` is the raw BlockIdentifier;
+        // `BLOCK` becomes unconditionally `None` once BK is present
+        // (Python's `item['BLOCK'] = None` when VS is Some, and BLOCK
+        // was ALREADY None whenever VS is None — both dict entries are
+        // read from the identical `row[7]`), so `{BLOCK=...}` never
+        // actually renders for a Bible-shaped note.
+        let vs = raw.block_identifier;
+        let ch = raw.chapter_number.unwrap_or(0);
+        let vs_str = vs.map(|v| format!("{v:03}")).unwrap_or_else(|| "000".to_string());
+        let reference = format!("{bk:02}{ch:03}{vs_str}");
+
+        let mut heading = raw.location_title.clone().unwrap_or_default();
+        if heading.is_empty() {
+            let book_name = catalog.bible_book(bk).unwrap_or("");
+            heading = format!("{book_name} {ch}");
+        } else if vs.is_some() && !heading.contains(':') {
+            heading = format!("{heading}:{}", vs.unwrap_or_default());
+        }
+
+        let lang = raw.meps_language.unwrap_or(0);
+        let pub_sym = raw.key_symbol.clone().unwrap_or_default();
+        out.push_str(&format!("{{LANG={lang}}}{{PUB={pub_sym}}}{{BK={bk}}}{{CH={ch}}}"));
+        if let Some(v) = vs {
+            out.push_str(&format!("{{VS={v}}}"));
+        }
+        out.push_str(&format!("{{Reference={reference}}}"));
+        if !heading.is_empty() {
+            out.push_str(&format!("{{HEADING={heading}}}"));
+        }
+        out.push_str(&format!("{{COLOR={color}}}"));
+        if let Some(r) = range {
+            out.push_str(&format!("{{RANGE={r}}}"));
+        }
+        if doc_present.is_some() {
+            out.push_str("{DOC=0}");
+        }
+    } else if let Some(doc) = doc_present {
+        // Publication-shaped (`:1658-1666`). `BLOCK`/`HEADING` are NEVER
+        // overridden here — they stay exactly as read off the row.
+        let heading = raw.location_title.clone().unwrap_or_default();
+        let issue = raw.issue_tag_number.filter(|n| *n > 10_000_000);
+        let lang = raw.meps_language.unwrap_or(0);
+        let pub_sym = raw.key_symbol.clone().unwrap_or_default();
+        out.push_str(&format!("{{LANG={lang}}}{{PUB={pub_sym}}}"));
+        if let Some(iss) = issue {
+            out.push_str(&format!("{{ISSUE={iss}}}"));
+        }
+        out.push_str(&format!("{{DOC={doc}}}"));
+        if let Some(blk) = raw.block_identifier {
+            out.push_str(&format!("{{BLOCK={blk}}}"));
+        }
+        if !heading.is_empty() {
+            out.push_str(&format!("{{HEADING={heading}}}"));
+        }
+        out.push_str(&format!("{{COLOR={color}}}"));
+        if let Some(r) = range {
+            out.push_str(&format!("{{RANGE={r}}}"));
+        }
+    }
+    // else: independent-shaped — no further brackets (`:1636-1637`).
+
+    out.push_str(&format!("===\n{title}\n{note}"));
+    out
+}
+
+/// Reads every live Note (or the subset named by `ids`), paired with its
+/// `NoteId` and its [`format_note_record`] wire text — the incremental
+/// export diff's live side (09-01-PLAN.md Task 1). Reuses
+/// [`read_raw_note_rows`]'s SAME SQL (extended once, above, to also select
+/// `NoteId` — never a second column list) and [`read_note_range`], so this
+/// and [`export_notes`] can never see a different row set.
+pub(crate) fn read_note_id_records(
+    conn: &Connection,
+    ids: Option<&NonEmptyNoteIds>,
+    catalog: &ResourceCatalog,
+    now: &str,
+) -> Result<Vec<(i64, String)>, ArchiveError> {
+    let raw_rows = read_raw_note_rows(conn, ids)?;
+    raw_rows
+        .iter()
+        .map(|raw| {
+            let range = match raw.user_mark_id {
+                Some(id) => read_note_range(conn, id)?,
+                None => None,
+            };
+            Ok((raw.note_id, format_note_record(raw, range.as_deref(), catalog, now)))
+        })
+        .collect()
 }
 
 #[cfg(test)]
