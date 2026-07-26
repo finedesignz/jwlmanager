@@ -18,6 +18,7 @@ use db::delete::NonEmptyNoteIds;
 use db::edit::DryRunReport;
 use db::favorites::{FavoriteEditionRef, NonEmptyTagMapIds};
 use db::notes::BrowseRow;
+use db::tags::TagState;
 use error::ErrorDto;
 use session::{ArchiveSession, SessionState};
 use std::collections::BTreeMap;
@@ -656,6 +657,170 @@ fn highlight_delete_apply(
     })
 }
 
+/// Every `Tag WHERE Type = 1` row with its tri-state count for `ids` (EDIT-03)
+/// — the Tag Dialog's checklist source. `ids` cannot be empty — an empty
+/// array fails IPC deserialization before this command body ever runs,
+/// because [`NonEmptyNoteIds`] is the parameter type.
+#[tauri::command]
+fn tag_states(
+    ids: NonEmptyNoteIds,
+    state: tauri::State<SessionState>,
+) -> Result<Vec<TagState>, ErrorDto> {
+    let guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("tag_states", None))?;
+    let session = guard
+        .as_ref()
+        .ok_or_else(|| error::ArchiveError::MissingUserDataBackup.to_dto("tag_states", None))?;
+
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err).to_dto("tag_states", Some(session.target_path.as_path()))
+    })?;
+
+    db::tags::tag_states(&conn, &ids)
+        .map_err(|err| err.to_dto("tag_states", Some(session.target_path.as_path())))
+}
+
+/// Previews the effect of a tag edit WITHOUT mutating the working copy
+/// (SAFE-01, EDIT-03): opens the session's `db_path`, runs the real
+/// `apply_tag_edit` + `trim_sweep` inside a rolled-back transaction, and
+/// returns the resulting semantic [`DryRunReport`].
+#[tauri::command]
+fn tag_dry_run(
+    ids: NonEmptyNoteIds,
+    removed_tag_ids: Vec<i64>,
+    added_tag_ids: Vec<i64>,
+    new_tag_names: Vec<String>,
+    state: tauri::State<SessionState>,
+) -> Result<DryRunReport, ErrorDto> {
+    let guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("tag_dry_run", None))?;
+    let session = guard
+        .as_ref()
+        .ok_or_else(|| error::ArchiveError::MissingUserDataBackup.to_dto("tag_dry_run", None))?;
+
+    let mut conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err).to_dto("tag_dry_run", Some(session.target_path.as_path()))
+    })?;
+
+    db::tags::dry_run_tag_edit(&mut conn, &ids, &removed_tag_ids, &added_tag_ids, &new_tag_names)
+        .map_err(|err| err.to_dto("tag_dry_run", Some(session.target_path.as_path())))
+}
+
+/// Applies a tag edit — the committed counterpart to [`tag_dry_run`]
+/// (EDIT-03). Marks the session dirty on success.
+#[tauri::command]
+fn tag_apply(
+    ids: NonEmptyNoteIds,
+    removed_tag_ids: Vec<i64>,
+    added_tag_ids: Vec<i64>,
+    new_tag_names: Vec<String>,
+    state: tauri::State<SessionState>,
+) -> Result<DryRunReport, ErrorDto> {
+    let mut guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("tag_apply", None))?;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| error::ArchiveError::MissingUserDataBackup.to_dto("tag_apply", None))?;
+
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err).to_dto("tag_apply", Some(session.target_path.as_path()))
+    })?;
+
+    let guard_pragma = db::pragma_guard::PragmaGuard::new(&conn).map_err(|err| {
+        error::ArchiveError::from(err).to_dto("tag_apply", Some(session.target_path.as_path()))
+    })?;
+    conn.execute_batch("PRAGMA foreign_keys = 'OFF';")
+        .map_err(|err| {
+            error::ArchiveError::from(err).to_dto("tag_apply", Some(session.target_path.as_path()))
+        })?;
+
+    let tx = conn.unchecked_transaction().map_err(|err| {
+        error::ArchiveError::from(err).to_dto("tag_apply", Some(session.target_path.as_path()))
+    })?;
+    let report = db::tags::apply_tag_edit_reporting(
+        &tx,
+        &ids,
+        &removed_tag_ids,
+        &added_tag_ids,
+        &new_tag_names,
+    )
+    .map_err(|err| err.to_dto("tag_apply", Some(session.target_path.as_path())))?;
+    tx.commit().map_err(|err| {
+        error::ArchiveError::from(err).to_dto("tag_apply", Some(session.target_path.as_path()))
+    })?;
+    drop(guard_pragma);
+
+    session.dirty = true;
+
+    Ok(report)
+}
+
+/// Previews the effect of archive-wide "Sort Tags…" WITHOUT mutating the
+/// working copy (SAFE-01, EDIT-04): opens the session's `db_path`, runs the
+/// real `apply_reorder` inside a rolled-back transaction, and returns the
+/// resulting semantic [`DryRunReport`]. No selection required — this op is
+/// archive-wide (07-UI-SPEC.md: Sort Tags deliberately does NOT enter
+/// `operations.ts`'s capability descriptor).
+#[tauri::command]
+fn reorder_dry_run(state: tauri::State<SessionState>) -> Result<DryRunReport, ErrorDto> {
+    let guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("reorder_dry_run", None))?;
+    let session = guard.as_ref().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("reorder_dry_run", None)
+    })?;
+
+    let mut conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("reorder_dry_run", Some(session.target_path.as_path()))
+    })?;
+
+    db::reorder::dry_run_reorder(&mut conn)
+        .map_err(|err| err.to_dto("reorder_dry_run", Some(session.target_path.as_path())))
+}
+
+/// Applies archive-wide "Sort Tags…" — the committed counterpart to
+/// [`reorder_dry_run`] (EDIT-04). Marks the session dirty on success.
+#[tauri::command]
+fn reorder_apply(state: tauri::State<SessionState>) -> Result<DryRunReport, ErrorDto> {
+    let mut guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("reorder_apply", None))?;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| error::ArchiveError::MissingUserDataBackup.to_dto("reorder_apply", None))?;
+
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err).to_dto("reorder_apply", Some(session.target_path.as_path()))
+    })?;
+
+    let guard_pragma = db::pragma_guard::PragmaGuard::new(&conn).map_err(|err| {
+        error::ArchiveError::from(err).to_dto("reorder_apply", Some(session.target_path.as_path()))
+    })?;
+    conn.execute_batch("PRAGMA foreign_keys = 'OFF';")
+        .map_err(|err| {
+            error::ArchiveError::from(err)
+                .to_dto("reorder_apply", Some(session.target_path.as_path()))
+        })?;
+
+    let tx = conn.unchecked_transaction().map_err(|err| {
+        error::ArchiveError::from(err).to_dto("reorder_apply", Some(session.target_path.as_path()))
+    })?;
+    let changed = db::reorder::apply_reorder(&tx)
+        .map_err(|err| err.to_dto("reorder_apply", Some(session.target_path.as_path())))?;
+    tx.commit().map_err(|err| {
+        error::ArchiveError::from(err).to_dto("reorder_apply", Some(session.target_path.as_path()))
+    })?;
+    drop(guard_pragma);
+
+    session.dirty = true;
+
+    Ok(db::reorder::reorder_report(changed))
+}
+
 /// Previews the effect of downgrading the open session to v14 WITHOUT mutating
 /// the working copy (D4-08): opens the session's `db_path` and runs the real
 /// trim + merge inside a rolled-back transaction (trim-FIRST, identical order to
@@ -786,6 +951,11 @@ pub fn run() {
             color_apply,
             highlight_delete_dry_run,
             highlight_delete_apply,
+            tag_states,
+            tag_dry_run,
+            tag_apply,
+            reorder_dry_run,
+            reorder_apply,
             downgrade_dry_run,
             save_v14_copy,
             merge_dry_run,

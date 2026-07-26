@@ -52,6 +52,10 @@ export function describeError(err: ErrorDto): string {
       return "This edition is already marked as a favorite. Choose a different edition, or check your existing Favorites.";
     case "color_failed":
       return "Couldn't change the color of the selected items — the archive is unchanged. Try again, or close and reopen the archive if the problem continues.";
+    case "tag_failed":
+      return "Couldn't update tags for the selected items — the archive is unchanged. Try again, or close and reopen the archive if the problem continues.";
+    case "reorder_failed":
+      return "Couldn't sort tags — the archive is unchanged. Try again, or close and reopen the archive if the problem continues.";
     case "merge_unavailable":
       return "Couldn't merge — the merge engine isn't available on this device (for example on Windows on Arm, which has no merge build yet). Your open archive is unchanged.";
     case "merge_failed":

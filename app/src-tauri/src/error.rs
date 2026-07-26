@@ -45,6 +45,10 @@ pub enum ArchiveError {
     FavoriteDuplicate { language: String, edition: String },
     #[error("color change failed: {reason}")]
     ColorFailed { reason: String },
+    #[error("tag edit failed: {reason}")]
+    TagFailed { reason: String },
+    #[error("tag reorder failed: {reason}")]
+    ReorderFailed { reason: String },
     #[error("jwlCore merge engine is unavailable on this platform")]
     MergeUnavailable,
     #[error("archive merge failed: {reason}")]
@@ -147,6 +151,14 @@ impl ArchiveError {
             // `reason` is internal-only (module docs) — the DTO exposes only
             // the stable code + message_key; the frontend copy is generic.
             ArchiveError::ColorFailed { .. } => ("color_failed", "error.archive.color_failed"),
+            // `reason` is internal-only (module docs) — the DTO exposes only
+            // the stable code + message_key; the frontend copy is generic.
+            ArchiveError::TagFailed { .. } => ("tag_failed", "error.archive.tag_failed"),
+            // `reason` is internal-only (module docs) — the DTO exposes only
+            // the stable code + message_key; the frontend copy is generic.
+            ArchiveError::ReorderFailed { .. } => {
+                ("reorder_failed", "error.archive.reorder_failed")
+            }
             // A missing/wrong-arch jwlCore binary degrades to a typed error
             // (never the Python `crash_box + sys.exit()` defect) — the DTO
             // exposes only the stable code + generic message_key.
