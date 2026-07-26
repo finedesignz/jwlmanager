@@ -30,6 +30,10 @@ ts-rs = "12"
 tempfile = "3"
 # process_code/process_yr regex ports (JWLManager.py:930-931) — used only
 # against internally-sourced KeySymbol strings, never raw user input.
+# Phase 7 widens the surface: Clean/Mask (db::scrub) match Unicode
+# Zs/Zl/Zp/L character classes against user-authored archive TEXT
+# (Note/InputField/Bookmark/Location fields) to normalize or replace it —
+# still never used to build SQL, only to classify/transform bound values.
 regex = "1"
 
 [profile.release]

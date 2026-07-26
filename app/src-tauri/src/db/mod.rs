@@ -14,5 +14,6 @@ pub mod notes;
 pub mod pragma_guard;
 pub mod reorder;
 pub mod resources;
+pub mod scrub;
 pub mod tags;
 pub mod trim;

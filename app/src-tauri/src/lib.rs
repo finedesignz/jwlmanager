@@ -38,6 +38,19 @@ fn guid_seed_now() -> u64 {
         .unwrap_or(0)
 }
 
+/// Wall-clock-derived seed for [`db::scrub::obscure_text`]'s [`SplitMix64`],
+/// threaded through exactly like [`guid_seed_now`] — Mask's `dry_run`/
+/// `apply` command pair shares ONE seed per user action so the preview's
+/// counts and shape stay consistent with what `mask_apply` actually writes.
+/// A distinct function (not a reuse of `guid_seed_now`) so a future change
+/// to one seed source can't silently perturb the other.
+fn mask_seed_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0)
+}
+
 /// Fixed app identity used for `manifest.json`'s `name`/`deviceName` fields
 /// on every save (mirrors `JWLManager.py:28-29`'s `APP`/`VERSION` constants).
 /// Kept as a literal here rather than pulling `tauri.conf.json`'s
@@ -821,6 +834,142 @@ fn reorder_apply(state: tauri::State<SessionState>) -> Result<DryRunReport, Erro
     Ok(db::reorder::reorder_report(changed))
 }
 
+/// Previews the effect of archive-wide "Clean Archive…" WITHOUT mutating the
+/// working copy (SAFE-01, EDIT-06): opens the session's `db_path`, runs the
+/// real `apply_clean` inside a rolled-back transaction, and returns the
+/// resulting semantic [`DryRunReport`]. No selection required — this op is
+/// archive-wide (07-UI-SPEC.md: Clean/Mask deliberately do NOT enter
+/// `operations.ts`'s capability descriptor, same as Sort Tags).
+#[tauri::command]
+fn clean_dry_run(state: tauri::State<SessionState>) -> Result<DryRunReport, ErrorDto> {
+    let guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("clean_dry_run", None))?;
+    let session = guard
+        .as_ref()
+        .ok_or_else(|| error::ArchiveError::MissingUserDataBackup.to_dto("clean_dry_run", None))?;
+
+    let mut conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err).to_dto("clean_dry_run", Some(session.target_path.as_path()))
+    })?;
+
+    db::scrub::dry_run_clean(&mut conn)
+        .map_err(|err| err.to_dto("clean_dry_run", Some(session.target_path.as_path())))
+}
+
+/// Applies archive-wide "Clean Archive…" — the committed counterpart to
+/// [`clean_dry_run`] (EDIT-06). Marks the session dirty on success.
+#[tauri::command]
+fn clean_apply(state: tauri::State<SessionState>) -> Result<DryRunReport, ErrorDto> {
+    let mut guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("clean_apply", None))?;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| error::ArchiveError::MissingUserDataBackup.to_dto("clean_apply", None))?;
+
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err).to_dto("clean_apply", Some(session.target_path.as_path()))
+    })?;
+
+    let guard_pragma = db::pragma_guard::PragmaGuard::new(&conn).map_err(|err| {
+        error::ArchiveError::from(err).to_dto("clean_apply", Some(session.target_path.as_path()))
+    })?;
+    conn.execute_batch("PRAGMA foreign_keys = 'OFF';")
+        .map_err(|err| {
+            error::ArchiveError::from(err)
+                .to_dto("clean_apply", Some(session.target_path.as_path()))
+        })?;
+
+    let tx = conn.unchecked_transaction().map_err(|err| {
+        error::ArchiveError::from(err).to_dto("clean_apply", Some(session.target_path.as_path()))
+    })?;
+    let counts = db::scrub::apply_clean(&tx)
+        .map_err(|err| err.to_dto("clean_apply", Some(session.target_path.as_path())))?;
+    tx.commit().map_err(|err| {
+        error::ArchiveError::from(err).to_dto("clean_apply", Some(session.target_path.as_path()))
+    })?;
+    drop(guard_pragma);
+
+    session.dirty = true;
+
+    Ok(DryRunReport {
+        added: BTreeMap::new(),
+        overwritten: counts,
+        deleted: BTreeMap::new(),
+        total_deleted: 0,
+    })
+}
+
+/// Previews the effect of archive-wide "Mask Archive…" WITHOUT mutating the
+/// working copy (SAFE-01, EDIT-06, D7-08): opens the session's `db_path`,
+/// runs the real `apply_mask` inside a rolled-back transaction under a
+/// freshly-drawn [`mask_seed_now`] seed, and returns the resulting semantic
+/// [`DryRunReport`]. No selection required, same as [`clean_dry_run`].
+#[tauri::command]
+fn mask_dry_run(state: tauri::State<SessionState>) -> Result<DryRunReport, ErrorDto> {
+    let guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("mask_dry_run", None))?;
+    let session = guard
+        .as_ref()
+        .ok_or_else(|| error::ArchiveError::MissingUserDataBackup.to_dto("mask_dry_run", None))?;
+
+    let mut conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err).to_dto("mask_dry_run", Some(session.target_path.as_path()))
+    })?;
+
+    db::scrub::dry_run_mask(&mut conn, mask_seed_now())
+        .map_err(|err| err.to_dto("mask_dry_run", Some(session.target_path.as_path())))
+}
+
+/// Applies archive-wide "Mask Archive…" — the committed counterpart to
+/// [`mask_dry_run`] (EDIT-06, D7-08). Draws its OWN fresh [`mask_seed_now`]
+/// seed (the preview's masked TEXT is never shown to the user — only counts
+/// — so the apply need not reproduce the preview's exact seed, only its
+/// shape). Marks the session dirty on success.
+#[tauri::command]
+fn mask_apply(state: tauri::State<SessionState>) -> Result<DryRunReport, ErrorDto> {
+    let mut guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("mask_apply", None))?;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| error::ArchiveError::MissingUserDataBackup.to_dto("mask_apply", None))?;
+
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err).to_dto("mask_apply", Some(session.target_path.as_path()))
+    })?;
+
+    let guard_pragma = db::pragma_guard::PragmaGuard::new(&conn).map_err(|err| {
+        error::ArchiveError::from(err).to_dto("mask_apply", Some(session.target_path.as_path()))
+    })?;
+    conn.execute_batch("PRAGMA foreign_keys = 'OFF';")
+        .map_err(|err| {
+            error::ArchiveError::from(err)
+                .to_dto("mask_apply", Some(session.target_path.as_path()))
+        })?;
+
+    let tx = conn.unchecked_transaction().map_err(|err| {
+        error::ArchiveError::from(err).to_dto("mask_apply", Some(session.target_path.as_path()))
+    })?;
+    let counts = db::scrub::apply_mask(&tx, mask_seed_now())
+        .map_err(|err| err.to_dto("mask_apply", Some(session.target_path.as_path())))?;
+    tx.commit().map_err(|err| {
+        error::ArchiveError::from(err).to_dto("mask_apply", Some(session.target_path.as_path()))
+    })?;
+    drop(guard_pragma);
+
+    session.dirty = true;
+
+    Ok(DryRunReport {
+        added: BTreeMap::new(),
+        overwritten: counts,
+        deleted: BTreeMap::new(),
+        total_deleted: 0,
+    })
+}
+
 /// Previews the effect of downgrading the open session to v14 WITHOUT mutating
 /// the working copy (D4-08): opens the session's `db_path` and runs the real
 /// trim + merge inside a rolled-back transaction (trim-FIRST, identical order to
@@ -956,6 +1105,10 @@ pub fn run() {
             tag_apply,
             reorder_dry_run,
             reorder_apply,
+            clean_dry_run,
+            clean_apply,
+            mask_dry_run,
+            mask_apply,
             downgrade_dry_run,
             save_v14_copy,
             merge_dry_run,
