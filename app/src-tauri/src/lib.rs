@@ -14,10 +14,11 @@ pub mod time;
 
 use category::Category;
 use db::color::{ColorSelection, NonEmptyBlockRangeIds};
-use db::delete::NonEmptyNoteIds;
+use db::delete::{NonEmptyBookmarkIds, NonEmptyLocationIds, NonEmptyNoteIds};
 use db::edit::DryRunReport;
 use db::favorites::{FavoriteEditionRef, NonEmptyTagMapIds};
 use db::notes::BrowseRow;
+use db::record_edit::{RecordEditFields, RecordEditPayload, RecordIdentity};
 use db::tags::TagState;
 use error::ErrorDto;
 use session::{ArchiveSession, SessionState};
@@ -670,6 +671,362 @@ fn highlight_delete_apply(
     })
 }
 
+/// Previews the effect of deleting the given Bookmarks selection WITHOUT
+/// mutating the working copy (SAFE-01, D7-10): removes `Bookmark` rows,
+/// identity = `BookmarkId` (`browse.rs:33-37`, NOT the first-SELECTed
+/// `LocationId`).
+#[tauri::command]
+fn bookmark_delete_dry_run(
+    ids: NonEmptyBookmarkIds,
+    state: tauri::State<SessionState>,
+) -> Result<DryRunReport, ErrorDto> {
+    let guard = state.lock().map_err(|_| {
+        error::ArchiveError::StatePoisoned.to_dto("bookmark_delete_dry_run", None)
+    })?;
+    let session = guard.as_ref().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("bookmark_delete_dry_run", None)
+    })?;
+
+    let mut conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("bookmark_delete_dry_run", Some(session.target_path.as_path()))
+    })?;
+
+    db::delete::dry_run_delete_bookmarks(&mut conn, &ids).map_err(|err| {
+        err.to_dto("bookmark_delete_dry_run", Some(session.target_path.as_path()))
+    })
+}
+
+/// Applies the delete of the given Bookmarks selection — a single `DELETE
+/// FROM Bookmark` committed inside its own transaction (D7-10). Marks the
+/// session dirty on success.
+#[tauri::command]
+fn bookmark_delete_apply(
+    ids: NonEmptyBookmarkIds,
+    state: tauri::State<SessionState>,
+) -> Result<DryRunReport, ErrorDto> {
+    let mut guard = state.lock().map_err(|_| {
+        error::ArchiveError::StatePoisoned.to_dto("bookmark_delete_apply", None)
+    })?;
+    let session = guard.as_mut().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("bookmark_delete_apply", None)
+    })?;
+
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("bookmark_delete_apply", Some(session.target_path.as_path()))
+    })?;
+
+    let guard_pragma = db::pragma_guard::PragmaGuard::new(&conn).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("bookmark_delete_apply", Some(session.target_path.as_path()))
+    })?;
+    conn.execute_batch("PRAGMA foreign_keys = 'OFF';")
+        .map_err(|err| {
+            error::ArchiveError::from(err)
+                .to_dto("bookmark_delete_apply", Some(session.target_path.as_path()))
+        })?;
+
+    let tx = conn.unchecked_transaction().map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("bookmark_delete_apply", Some(session.target_path.as_path()))
+    })?;
+    let deleted = db::delete::delete_bookmarks(&tx, &ids).map_err(|err| {
+        err.to_dto("bookmark_delete_apply", Some(session.target_path.as_path()))
+    })?;
+    tx.commit().map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("bookmark_delete_apply", Some(session.target_path.as_path()))
+    })?;
+    drop(guard_pragma);
+
+    session.dirty = true;
+
+    let mut deleted_map = BTreeMap::new();
+    if deleted > 0 {
+        deleted_map.insert("Bookmark".to_string(), deleted);
+    }
+    Ok(DryRunReport {
+        added: BTreeMap::new(),
+        overwritten: BTreeMap::new(),
+        deleted: deleted_map,
+        total_deleted: deleted,
+    })
+}
+
+/// Previews the effect of deleting the given Annotations selection (by
+/// `LocationId`) WITHOUT mutating the working copy (SAFE-01, D7-10): removes
+/// ALL `InputField` rows at each selected location — an intentional
+/// over-deletion (rule #10) the returned report surfaces truthfully via its
+/// `InputField` count.
+#[tauri::command]
+fn annotation_delete_dry_run(
+    ids: NonEmptyLocationIds,
+    state: tauri::State<SessionState>,
+) -> Result<DryRunReport, ErrorDto> {
+    let guard = state.lock().map_err(|_| {
+        error::ArchiveError::StatePoisoned.to_dto("annotation_delete_dry_run", None)
+    })?;
+    let session = guard.as_ref().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("annotation_delete_dry_run", None)
+    })?;
+
+    let mut conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("annotation_delete_dry_run", Some(session.target_path.as_path()))
+    })?;
+
+    db::delete::dry_run_delete_annotations(&mut conn, &ids).map_err(|err| {
+        err.to_dto("annotation_delete_dry_run", Some(session.target_path.as_path()))
+    })
+}
+
+/// Applies the delete of the given Annotations selection (by `LocationId`) —
+/// a single `DELETE FROM InputField` committed inside its own transaction
+/// (D7-10, rule #10). Marks the session dirty on success.
+#[tauri::command]
+fn annotation_delete_apply(
+    ids: NonEmptyLocationIds,
+    state: tauri::State<SessionState>,
+) -> Result<DryRunReport, ErrorDto> {
+    let mut guard = state.lock().map_err(|_| {
+        error::ArchiveError::StatePoisoned.to_dto("annotation_delete_apply", None)
+    })?;
+    let session = guard.as_mut().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("annotation_delete_apply", None)
+    })?;
+
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("annotation_delete_apply", Some(session.target_path.as_path()))
+    })?;
+
+    let guard_pragma = db::pragma_guard::PragmaGuard::new(&conn).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("annotation_delete_apply", Some(session.target_path.as_path()))
+    })?;
+    conn.execute_batch("PRAGMA foreign_keys = 'OFF';")
+        .map_err(|err| {
+            error::ArchiveError::from(err)
+                .to_dto("annotation_delete_apply", Some(session.target_path.as_path()))
+        })?;
+
+    let tx = conn.unchecked_transaction().map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("annotation_delete_apply", Some(session.target_path.as_path()))
+    })?;
+    let deleted = db::delete::delete_annotations(&tx, &ids).map_err(|err| {
+        err.to_dto("annotation_delete_apply", Some(session.target_path.as_path()))
+    })?;
+    tx.commit().map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("annotation_delete_apply", Some(session.target_path.as_path()))
+    })?;
+    drop(guard_pragma);
+
+    session.dirty = true;
+
+    let mut deleted_map = BTreeMap::new();
+    if deleted > 0 {
+        deleted_map.insert("InputField".to_string(), deleted);
+    }
+    Ok(DryRunReport {
+        added: BTreeMap::new(),
+        overwritten: BTreeMap::new(),
+        deleted: deleted_map,
+        total_deleted: deleted,
+    })
+}
+
+/// Fetches the current field values for one record so the Record Editor can
+/// prefill them (EDIT-07) — `BrowseRow` never carries a Note's Title/Content
+/// or an Annotation's Value (see `db::record_edit` module docs).
+#[tauri::command]
+fn record_fetch(
+    identity: RecordIdentity,
+    state: tauri::State<SessionState>,
+) -> Result<RecordEditFields, ErrorDto> {
+    let guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("record_fetch", None))?;
+    let session = guard
+        .as_ref()
+        .ok_or_else(|| error::ArchiveError::MissingUserDataBackup.to_dto("record_fetch", None))?;
+
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err).to_dto("record_fetch", Some(session.target_path.as_path()))
+    })?;
+
+    db::record_edit::fetch_record_fields(&conn, &identity)
+        .map_err(|err| err.to_dto("record_fetch", Some(session.target_path.as_path())))
+}
+
+/// Previews saving a record edit WITHOUT mutating the working copy (SAFE-01,
+/// EDIT-07, D7-09): opens the session's `db_path`, runs the real
+/// `apply_record_edit` + `trim_sweep` inside a rolled-back transaction, and
+/// returns the resulting semantic [`DryRunReport`].
+#[tauri::command]
+fn record_edit_dry_run(
+    payload: RecordEditPayload,
+    state: tauri::State<SessionState>,
+) -> Result<DryRunReport, ErrorDto> {
+    let guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("record_edit_dry_run", None))?;
+    let session = guard.as_ref().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("record_edit_dry_run", None)
+    })?;
+
+    let mut conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("record_edit_dry_run", Some(session.target_path.as_path()))
+    })?;
+
+    db::record_edit::dry_run_record_edit(
+        &mut conn,
+        &payload,
+        &time::now_iso8601_utc(),
+        guid_seed_now(),
+    )
+    .map_err(|err| err.to_dto("record_edit_dry_run", Some(session.target_path.as_path())))
+}
+
+/// Applies a record edit — the committed counterpart to [`record_edit_dry_run`]
+/// (EDIT-07). Marks the session dirty on success.
+#[tauri::command]
+fn record_edit_apply(
+    payload: RecordEditPayload,
+    state: tauri::State<SessionState>,
+) -> Result<DryRunReport, ErrorDto> {
+    let mut guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("record_edit_apply", None))?;
+    let session = guard.as_mut().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("record_edit_apply", None)
+    })?;
+
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("record_edit_apply", Some(session.target_path.as_path()))
+    })?;
+
+    let guard_pragma = db::pragma_guard::PragmaGuard::new(&conn).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("record_edit_apply", Some(session.target_path.as_path()))
+    })?;
+    conn.execute_batch("PRAGMA foreign_keys = 'OFF';")
+        .map_err(|err| {
+            error::ArchiveError::from(err)
+                .to_dto("record_edit_apply", Some(session.target_path.as_path()))
+        })?;
+
+    let tx = conn.unchecked_transaction().map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("record_edit_apply", Some(session.target_path.as_path()))
+    })?;
+    let report = db::record_edit::apply_record_edit_reporting(
+        &tx,
+        &payload,
+        &time::now_iso8601_utc(),
+        guid_seed_now(),
+    )
+    .map_err(|err| err.to_dto("record_edit_apply", Some(session.target_path.as_path())))?;
+    tx.commit().map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("record_edit_apply", Some(session.target_path.as_path()))
+    })?;
+    drop(guard_pragma);
+
+    session.dirty = true;
+
+    Ok(report)
+}
+
+/// Previews deleting one record from the editor WITHOUT mutating the working
+/// copy (SAFE-01, EDIT-07): Notes -> `NoteId`; Annotations -> `(LocationId,
+/// TextTag)` — NEVER the browse-list's over-deleting `LocationId`-only
+/// delete (rule #10).
+#[tauri::command]
+fn record_delete_dry_run(
+    identity: RecordIdentity,
+    state: tauri::State<SessionState>,
+) -> Result<DryRunReport, ErrorDto> {
+    let guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("record_delete_dry_run", None))?;
+    let session = guard.as_ref().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("record_delete_dry_run", None)
+    })?;
+
+    let mut conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("record_delete_dry_run", Some(session.target_path.as_path()))
+    })?;
+
+    db::record_edit::dry_run_record_delete(&mut conn, &identity)
+        .map_err(|err| err.to_dto("record_delete_dry_run", Some(session.target_path.as_path())))
+}
+
+/// Applies deleting one record from the editor — the committed counterpart
+/// to [`record_delete_dry_run`] (EDIT-07, D7-10). Marks the session dirty on
+/// success.
+#[tauri::command]
+fn record_delete_apply(
+    identity: RecordIdentity,
+    state: tauri::State<SessionState>,
+) -> Result<DryRunReport, ErrorDto> {
+    let mut guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("record_delete_apply", None))?;
+    let session = guard.as_mut().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("record_delete_apply", None)
+    })?;
+
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("record_delete_apply", Some(session.target_path.as_path()))
+    })?;
+
+    let guard_pragma = db::pragma_guard::PragmaGuard::new(&conn).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("record_delete_apply", Some(session.target_path.as_path()))
+    })?;
+    conn.execute_batch("PRAGMA foreign_keys = 'OFF';")
+        .map_err(|err| {
+            error::ArchiveError::from(err)
+                .to_dto("record_delete_apply", Some(session.target_path.as_path()))
+        })?;
+
+    let tx = conn.unchecked_transaction().map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("record_delete_apply", Some(session.target_path.as_path()))
+    })?;
+    let deleted = db::record_edit::apply_record_delete(&tx, &identity)
+        .map_err(|err| err.to_dto("record_delete_apply", Some(session.target_path.as_path())))?;
+    tx.commit().map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("record_delete_apply", Some(session.target_path.as_path()))
+    })?;
+    drop(guard_pragma);
+
+    session.dirty = true;
+
+    let mut deleted_map = BTreeMap::new();
+    if deleted > 0 {
+        let table = match identity {
+            RecordIdentity::Notes { .. } => "Note",
+            RecordIdentity::Annotations { .. } => "InputField",
+        };
+        deleted_map.insert(table.to_string(), deleted);
+    }
+    Ok(DryRunReport {
+        added: BTreeMap::new(),
+        overwritten: BTreeMap::new(),
+        deleted: deleted_map,
+        total_deleted: deleted,
+    })
+}
+
 /// Every `Tag WHERE Type = 1` row with its tri-state count for `ids` (EDIT-03)
 /// — the Tag Dialog's checklist source. `ids` cannot be empty — an empty
 /// array fails IPC deserialization before this command body ever runs,
@@ -1100,6 +1457,15 @@ pub fn run() {
             color_apply,
             highlight_delete_dry_run,
             highlight_delete_apply,
+            bookmark_delete_dry_run,
+            bookmark_delete_apply,
+            annotation_delete_dry_run,
+            annotation_delete_apply,
+            record_fetch,
+            record_edit_dry_run,
+            record_edit_apply,
+            record_delete_dry_run,
+            record_delete_apply,
             tag_states,
             tag_dry_run,
             tag_apply,

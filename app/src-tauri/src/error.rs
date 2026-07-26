@@ -53,6 +53,8 @@ pub enum ArchiveError {
     CleanFailed { reason: String },
     #[error("mask (privacy scrub) failed: {reason}")]
     MaskFailed { reason: String },
+    #[error("record edit failed: {reason}")]
+    RecordEditFailed { reason: String },
     #[error("jwlCore merge engine is unavailable on this platform")]
     MergeUnavailable,
     #[error("archive merge failed: {reason}")]
@@ -169,6 +171,11 @@ impl ArchiveError {
             // `reason` is internal-only (module docs) — the DTO exposes only
             // the stable code + message_key; the frontend copy is generic.
             ArchiveError::MaskFailed { .. } => ("mask_failed", "error.archive.mask_failed"),
+            // `reason` is internal-only (module docs) — the DTO exposes only
+            // the stable code + message_key; the frontend copy is generic.
+            ArchiveError::RecordEditFailed { .. } => {
+                ("record_edit_failed", "error.archive.record_edit_failed")
+            }
             // A missing/wrong-arch jwlCore binary degrades to a typed error
             // (never the Python `crash_box + sys.exit()` defect) — the DTO
             // exposes only the stable code + generic message_key.

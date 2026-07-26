@@ -136,6 +136,7 @@ struct AnnotationRaw {
     key_symbol: Option<String>,
     meps_language: i64,
     issue: i64,
+    text_tag: String,
     book: Option<i64>,
     chapter: Option<i64>,
 }
@@ -152,7 +153,10 @@ pub fn query_annotations(
             key_symbol: row.get(1)?,
             meps_language: row.get::<_, Option<i64>>(2)?.unwrap_or(0),
             issue: row.get::<_, Option<i64>>(3)?.unwrap_or(0),
-            // col 4 = TextTag: selected verbatim but unused in label synthesis.
+            // col 4 = TextTag: NOT unused — this row's Annotation identity
+            // disambiguator (07-05-PLAN.md; `id` alone is `LocationId`, which
+            // is not unique across TextTags at one location).
+            text_tag: row.get(4)?,
             book: row.get(5)?,
             chapter: row.get(6)?,
             // col 7 = Title: selected verbatim but unused.
@@ -188,6 +192,7 @@ pub fn query_annotations(
             full: label.full,
             type_group: label.type_group,
             independent: false,
+            text_tag: Some(raw.text_tag),
         });
     }
     Ok(rows)
@@ -248,6 +253,7 @@ pub fn query_bookmarks(
             full: label.full,
             type_group: label.type_group,
             independent: false,
+            text_tag: None,
         });
     }
     Ok(rows)
@@ -304,6 +310,7 @@ pub fn query_favorites(
             full: label.full,
             type_group: label.type_group,
             independent: false,
+            text_tag: None,
         });
     }
     Ok(rows)
@@ -368,6 +375,7 @@ pub fn query_highlights(
             full: label.full,
             type_group: label.type_group,
             independent: false,
+            text_tag: None,
         });
     }
     Ok(rows)
@@ -415,6 +423,7 @@ pub fn query_playlists(
             full: "* OTHER *".to_string(),
             type_group: "Other".to_string(),
             independent: false,
+            text_tag: None,
         });
     }
     Ok(rows)

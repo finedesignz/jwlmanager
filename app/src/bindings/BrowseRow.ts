@@ -44,4 +44,14 @@ modified: string | null, year: string | null, detail1: string | null, detail2: s
  * frontend can render the `* INDEPENDENT *` affordance without
  * re-deriving it from `type_group`. Only Notes sets this true.
  */
-independent: boolean, };
+independent: boolean, 
+/**
+ * The Annotation's own `InputField.TextTag` (07-05-PLAN.md, EDIT-07).
+ * `Some` ONLY for Annotations rows — `id` alone is `LocationId`, which
+ * is NOT unique across Annotation rows (one Location can carry several
+ * `InputField`s, one per `TextTag`); this field disambiguates them so
+ * the record editor can key its `(LocationId, TextTag)` single-record
+ * edit/delete (D7-09/rule #10) precisely. `None` for every other
+ * category.
+ */
+text_tag: string | null, };

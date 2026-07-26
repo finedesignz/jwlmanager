@@ -214,6 +214,186 @@ pub fn dry_run_delete_highlights(
     Ok(report)
 }
 
+/// A non-empty selection of `Bookmark.BookmarkId` values — the Bookmarks
+/// identity PK (`browse.rs:33-37`, NOT the first-SELECTed `LocationId` — the
+/// load-bearing pitfall this phase's research called out). Constructed only
+/// via `TryFrom<Vec<i64>>`/serde's `try_from` container attribute, mirroring
+/// [`NonEmptyNoteIds`] exactly.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(try_from = "Vec<i64>")]
+#[ts(export, export_to = "../../src/bindings/NonEmptyBookmarkIds.ts")]
+pub struct NonEmptyBookmarkIds(Vec<i64>);
+
+impl TryFrom<Vec<i64>> for NonEmptyBookmarkIds {
+    type Error = String;
+
+    fn try_from(ids: Vec<i64>) -> Result<Self, Self::Error> {
+        if ids.is_empty() {
+            Err("selection must not be empty".to_string())
+        } else {
+            Ok(NonEmptyBookmarkIds(ids))
+        }
+    }
+}
+
+impl NonEmptyBookmarkIds {
+    pub fn iter(&self) -> impl Iterator<Item = &i64> {
+        self.0.iter()
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// Always `false` by construction — kept only to satisfy
+    /// `clippy::len_without_is_empty`.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+/// Deletes EXACTLY the selected `Bookmark` rows — `DELETE FROM Bookmark
+/// WHERE BookmarkId IN (...)` (D7-10, `JWLManager.py:3658-3671`'s Bookmarks
+/// branch). Runs inside the caller's transaction (SAFE-04).
+pub fn delete_bookmarks(
+    tx: &Transaction,
+    ids: &NonEmptyBookmarkIds,
+) -> Result<usize, ArchiveError> {
+    let placeholders: String = std::iter::repeat_n("?", ids.len())
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!("DELETE FROM Bookmark WHERE BookmarkId IN ({placeholders})");
+    tx.execute(&sql, rusqlite::params_from_iter(ids.iter()))
+        .map_err(|e| map_sqlite_err(e, "delete_bookmarks"))
+}
+
+/// Runs the REAL `delete_bookmarks` + `trim_sweep` inside a transaction that
+/// is NEVER committed (SAFE-01) and returns a SEMANTIC [`DryRunReport`] over
+/// the default [`crate::db::edit::TRACKED_TABLES`] set (which already
+/// includes `("Bookmark", "BookmarkId")`, 07-01-PLAN.md Task 1).
+pub fn dry_run_delete_bookmarks(
+    conn: &mut Connection,
+    ids: &NonEmptyBookmarkIds,
+) -> Result<DryRunReport, ArchiveError> {
+    let guard = PragmaGuard::new(conn).map_err(|e| map_sqlite_err(e, "snapshotting pragmas"))?;
+
+    conn.execute_batch(
+        "PRAGMA temp_store = 'MEMORY'; \
+         PRAGMA synchronous = 'OFF'; \
+         PRAGMA journal_mode = 'MEMORY'; \
+         PRAGMA foreign_keys = 'OFF';",
+    )
+    .map_err(|e| map_sqlite_err(e, "setting dry-run pragmas"))?;
+
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| map_sqlite_err(e, "opening dry-run transaction"))?;
+
+    let before = snapshot_all(&tx)?;
+    delete_bookmarks(&tx, ids)?;
+    trim_sweep(&tx)?;
+    let after = snapshot_all(&tx)?;
+
+    let report = diff_snapshots(&before, &after);
+
+    drop(tx);
+    drop(guard);
+
+    Ok(report)
+}
+
+/// A non-empty selection of Annotation `LocationId` values — the browse-list
+/// Annotations identity (`browse.rs:28-31`). Deleting by `LocationId`
+/// removes ALL `InputField` rows at that location — an INTENTIONAL
+/// over-deletion (rule #10, `JWLManager.py:3669`), distinct from the
+/// record-editor's own `(LocationId, TextTag)`-scoped single delete
+/// (`crate::db::record_edit::apply_record_delete`). The two paths must never
+/// be crossed.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(try_from = "Vec<i64>")]
+#[ts(export, export_to = "../../src/bindings/NonEmptyLocationIds.ts")]
+pub struct NonEmptyLocationIds(Vec<i64>);
+
+impl TryFrom<Vec<i64>> for NonEmptyLocationIds {
+    type Error = String;
+
+    fn try_from(ids: Vec<i64>) -> Result<Self, Self::Error> {
+        if ids.is_empty() {
+            Err("selection must not be empty".to_string())
+        } else {
+            Ok(NonEmptyLocationIds(ids))
+        }
+    }
+}
+
+impl NonEmptyLocationIds {
+    pub fn iter(&self) -> impl Iterator<Item = &i64> {
+        self.0.iter()
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// Always `false` by construction — kept only to satisfy
+    /// `clippy::len_without_is_empty`.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+/// Deletes ALL `InputField` rows at every selected `LocationId` — see
+/// [`NonEmptyLocationIds`]'s docs for the deliberate over-deletion this
+/// implements (rule #10). Runs inside the caller's transaction (SAFE-04).
+pub fn delete_annotations(
+    tx: &Transaction,
+    ids: &NonEmptyLocationIds,
+) -> Result<usize, ArchiveError> {
+    let placeholders: String = std::iter::repeat_n("?", ids.len())
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!("DELETE FROM InputField WHERE LocationId IN ({placeholders})");
+    tx.execute(&sql, rusqlite::params_from_iter(ids.iter()))
+        .map_err(|e| map_sqlite_err(e, "delete_annotations"))
+}
+
+/// Runs the REAL `delete_annotations` + `trim_sweep` inside a transaction
+/// that is NEVER committed (SAFE-01) and returns a SEMANTIC [`DryRunReport`]
+/// over the default [`crate::db::edit::TRACKED_TABLES`] set (which already
+/// includes `("InputField", "rowid")`, 07-01-PLAN.md Task 1) — so the
+/// preview shows the TRUE row count when more than one `InputField` is
+/// removed at a location (rule #10).
+pub fn dry_run_delete_annotations(
+    conn: &mut Connection,
+    ids: &NonEmptyLocationIds,
+) -> Result<DryRunReport, ArchiveError> {
+    let guard = PragmaGuard::new(conn).map_err(|e| map_sqlite_err(e, "snapshotting pragmas"))?;
+
+    conn.execute_batch(
+        "PRAGMA temp_store = 'MEMORY'; \
+         PRAGMA synchronous = 'OFF'; \
+         PRAGMA journal_mode = 'MEMORY'; \
+         PRAGMA foreign_keys = 'OFF';",
+    )
+    .map_err(|e| map_sqlite_err(e, "setting dry-run pragmas"))?;
+
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| map_sqlite_err(e, "opening dry-run transaction"))?;
+
+    let before = snapshot_all(&tx)?;
+    delete_annotations(&tx, ids)?;
+    trim_sweep(&tx)?;
+    let after = snapshot_all(&tx)?;
+
+    let report = diff_snapshots(&before, &after);
+
+    drop(tx);
+    drop(guard);
+
+    Ok(report)
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {

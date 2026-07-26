@@ -53,6 +53,14 @@ pub struct BrowseRow {
     /// frontend can render the `* INDEPENDENT *` affordance without
     /// re-deriving it from `type_group`. Only Notes sets this true.
     pub independent: bool,
+    /// The Annotation's own `InputField.TextTag` (07-05-PLAN.md, EDIT-07).
+    /// `Some` ONLY for Annotations rows — `id` alone is `LocationId`, which
+    /// is NOT unique across Annotation rows (one Location can carry several
+    /// `InputField`s, one per `TextTag`); this field disambiguates them so
+    /// the record editor can key its `(LocationId, TextTag)` single-record
+    /// edit/delete (D7-09/rule #10) precisely. `None` for every other
+    /// category.
+    pub text_tag: Option<String>,
 }
 
 /// Base located-Note query — `JWLManager.py:751-757`'s main SQL shape (no
@@ -146,6 +154,7 @@ fn query_located_notes(
             full,
             type_group,
             independent: false,
+            text_tag: None,
         });
     }
     Ok(rows)
@@ -195,6 +204,7 @@ fn query_independent_notes(conn: &Connection) -> Result<Vec<BrowseRow>, ArchiveE
             full: "* OTHER *".to_string(),
             type_group: "* INDEPENDENT *".to_string(),
             independent: true,
+            text_tag: None,
         });
     }
     Ok(rows)

@@ -12,6 +12,7 @@ pub mod highlights;
 pub mod labels;
 pub mod notes;
 pub mod pragma_guard;
+pub mod record_edit;
 pub mod reorder;
 pub mod resources;
 pub mod scrub;
