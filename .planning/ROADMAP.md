@@ -182,9 +182,9 @@
   2. User can import a file the Python app produced, for any category, with data landing correctly
   3. Imported items recycle ID gaps the same way the Python app does, verified by round-trip test
 
-**Plans**: 6 plans (6 waves)
+**Plans**: 1/6 plans executed
 
-- [ ] 08-01-PLAN.md — Tracer: wire-format spine (header writer, `join_row`, ID-gap recycler, `DryRunReport.skipped`) proven end-to-end on Favorites export+import (Wave 1)
+- [x] 08-01-PLAN.md — Tracer: wire-format spine (header writer, `join_row`, ID-gap recycler, `DryRunReport.skipped`) proven end-to-end on Favorites export+import (Wave 1)
 - [ ] 08-02-PLAN.md — Bookmarks (`¦` escaping, no end sentinel) + Annotations (bracket tags, `{END}`) export+import (Wave 2)
 - [ ] 08-03-PLAN.md — Highlights export+import; first production call site of the Phase 7 range union-merge primitive (Wave 3)
 - [ ] 08-04-PLAN.md — Notes export+import (multi-range `RANGE`, opt-in bucket delete) + five-category semantic round-trip (Wave 4)
@@ -244,7 +244,7 @@
 | 5. Two-Archive Merge | 3/3 | Complete | SHIP |
 | 6. Full Data Browsing | 4/4 | In Progress|  |
 | 7. Full Editing | 5/5 | In Progress|  |
-| 8. Import / Export Parity | 0/TBD | Not started | - |
+| 8. Import / Export Parity | 1/6 | In Progress|  |
 | 9. Incremental Export | 0/TBD | Not started | - |
 | 10. N-Way Merge Fold | 0/TBD | Not started | - |
 | 11. Platform Polish | 0/TBD | Not started | - |

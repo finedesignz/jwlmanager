@@ -58,9 +58,9 @@
 
 ### Import / Export (IO)
 
-- [ ] **IO-01**: User can export any category to the Python app's existing formats, preserving its wire warts (`'None'` null sentinel, `|`→`¦` escaping, `==={END}===` sentinel, UTF-8 header forcing)
-- [ ] **IO-02**: User can import any category from files the Python app produces
-- [ ] **IO-03**: Import recycles ID gaps as the Python app does
+- [x] **IO-01**: User can export any category to the Python app's existing formats, preserving its wire warts (`'None'` null sentinel, `|`→`¦` escaping, `==={END}===` sentinel, UTF-8 header forcing)
+- [x] **IO-02**: User can import any category from files the Python app produces
+- [x] **IO-03**: Import recycles ID gaps as the Python app does
 - [ ] **IO-04**: User can export only items changed since a chosen point (incremental export), with note identity resolved by content hashing rather than vendor timestamps
 
 ### Safety (SAFE)
