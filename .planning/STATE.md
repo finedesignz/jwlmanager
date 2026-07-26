@@ -5,13 +5,13 @@ milestone_name: milestone
 current_phase: 1
 current_phase_name: Foundation Slice
 status: verifying
-stopped_at: Completed 09-01-PLAN.md
-last_updated: "2026-07-26T20:13:58.752Z"
+stopped_at: Completed 10-01-PLAN.md (fold tracer)
+last_updated: "2026-07-26T21:35:36.984Z"
 progress:
-  total_phases: 9
+  total_phases: 10
   completed_phases: 6
-  total_plans: 41
-  completed_plans: 35
+  total_plans: 45
+  completed_plans: 39
 ---
 
 # Project State — JWL Manager (Tauri)
@@ -28,7 +28,7 @@ Plan: 3 of 3 complete (delete preview/confirm UI)
 **Phase:** 1 of 11 — Open, View, Save (Foundation Slice)
 **Plan:** 7 of 7
 **Status:** Phase complete — ready for verification
-**Progress:** [█████████░] 85%
+**Progress:** [█████████░] 87%
 
 ## Performance Metrics
 
@@ -49,6 +49,7 @@ Plan: 3 of 3 complete (delete preview/confirm UI)
 | Phase 07 P05 | single session | 3 tasks | 26 files |
 | Phase 08 P01 | 1 session | 3 tasks | 30 files |
 | Phase 08 P03 | 1 session | 2 tasks | 18 files |
+| Phase 10 P01 | 55min | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -91,6 +92,8 @@ Plan: 3 of 3 complete (delete preview/confirm UI)
 - [Phase ?]: D7-03 resolved strict Python parity: merge_block_ranges ships standalone, recolor never invokes it
 - [Phase ?]: D7-05: reorder reuses redensify_tag_positions staging technique (not Python's two-pass) — identical observable contract, verified via adversarial fixture + idempotent composition test
 - [Phase ?]: record_edit.rs reuses db::color::apply_color's Notes branch verbatim for UserMark synthesis; RecordEditor added record_fetch + BrowseRow.text_tag beyond the plan's named surface since BrowseRow never carried editable Note/Annotation content or per-TextTag identity
+- [Phase ?]: Fold order is real (D10-01): fold(A,B,C) != fold(A,C,B) by design, proven with a contested-identity fixture
+- [Phase ?]: run_fold_chain shared by dry-run and commit; single atomic promote after last step, media folded back every step (D10-04)
 
 ### Todos
 
@@ -106,6 +109,6 @@ Plan: 3 of 3 complete (delete preview/confirm UI)
 
 **Resume file:** None
 
-**Last session:** 2026-07-26T20:13:58.724Z
-**Stopped at:** Completed 09-01-PLAN.md
+**Last session:** 2026-07-26T21:35:36.958Z
+**Stopped at:** Completed 10-01-PLAN.md (fold tracer)
 **Next action:** Execute 03-03-PLAN.md (Python differential test against real v14 owner archives), then Phase 3 verification.
