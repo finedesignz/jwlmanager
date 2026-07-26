@@ -326,3 +326,121 @@ body {
   background: var(--destructive);
   color: var(--text-primary);
 }
+
+/* Favorite Dialog ("Add Favorite", EDIT-05 mark, 07-01-PLAN.md Task 3).
+   Reuses .edit-preview-overlay for its backdrop; the card below matches
+   .edit-preview-dialog's radius/surface/padding scale, extended with its
+   own form-field + edition-list layout — no new radius, spacing, or color
+   value beyond what 07-UI-SPEC.md names. */
+.favorite-dialog {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-hairline);
+  border-radius: 12px;
+  padding: var(--space-lg);
+  max-width: 32em;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.favorite-dialog-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.favorite-dialog-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.favorite-dialog-field label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* First form-input styling in the app (UI-SPEC Spacing Scale exceptions):
+   --bg-tertiary background, 44px min-height, --space-md horizontal padding,
+   --brand-primary focus ring — matches .toolbar-button's box metrics. */
+.favorite-dialog-select {
+  min-height: 44px;
+  padding: 0 var(--space-md);
+  border-radius: 8px;
+  border: none;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.favorite-dialog-select:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 2px;
+}
+
+/* Bounded, non-virtualized scroll within a ~60vh dialog body (UI-SPEC
+   "populated" consideration — tens of editions, not thousands). */
+.favorite-dialog-editions {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.favorite-dialog-edition-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.favorite-dialog-edition-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 44px;
+  padding: 0 var(--space-md);
+  border: none;
+  border-left: 4px solid transparent;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.favorite-dialog-edition-row:hover {
+  background: var(--bg-tertiary);
+}
+
+.favorite-dialog-edition-row:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: -2px;
+}
+
+/* Selected-row accent: left border + subtle background tint (UI-SPEC
+   "reuses Phase 1's exact selected/active row treatment") — synthesized
+   from two ALREADY-existing values, since no literal left-border-accent row
+   class exists yet to reuse verbatim: the 4px border-left width already
+   used by .error-banner-security, recolored to --brand-primary (an
+   already-reserved accent role, not a new color), plus the same
+   --bg-tertiary tint .category-switcher-option[aria-pressed="true"] uses
+   for its own active state. */
+.favorite-dialog-edition-row-selected {
+  border-left-color: var(--brand-primary);
+  background: var(--bg-tertiary);
+}
+
+.favorite-dialog-empty,
+.favorite-dialog-loading {
+  margin: 0;
+  padding: var(--space-md) 0;
+  color: var(--text-muted);
+}
+
+.favorite-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+}

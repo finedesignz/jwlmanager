@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { invoke } from "@tauri-apps/api/core";
 import type { BrowseRow } from "../bindings/BrowseRow";
@@ -6,6 +6,7 @@ import type { Category } from "../bindings/Category";
 import type { DryRunReport } from "../bindings/DryRunReport";
 import type { ErrorDto } from "../bindings/ErrorDto";
 import EditPreviewDialog from "./EditPreviewDialog";
+import FavoriteAddDialog from "./FavoriteAddDialog";
 import { operationSet, type Op } from "../lib/operations";
 
 /**
@@ -73,6 +74,21 @@ function resolveLabel(row: BrowseRow, category: Category): string {
   return parts.length > 0 ? parts.join(" — ") : row.symbol;
 }
 
+/**
+ * Resolve the operation-bar button label for `op` given `category` — same
+ * category-specific-override PATTERN `resolveLabel` demonstrates for row
+ * labels (most ops render the generic {@link OP_LABEL} verbatim; Favorites'
+ * `add` gets "Add Favorite" instead of the generic "Add", which reads as
+ * ambiguous alone — 07-UI-SPEC.md). Playlists' `add` (still deferred, media
+ * add is Phase 8) keeps the generic "Add" label unchanged.
+ */
+function resolveOpLabel(op: Op, category: Category): string {
+  if (op === "add" && category === "Favorites") {
+    return "Add Favorite";
+  }
+  return OP_LABEL[op];
+}
+
 interface CategoryListProps {
   rows: BrowseRow[];
   category: Category;
@@ -116,13 +132,32 @@ export default function CategoryList({
   const [selected, setSelected] = useState<Set<bigint>>(new Set());
   const [report, setReport] = useState<DryRunReport | null>(null);
   const [dryRunPending, setDryRunPending] = useState(false);
+  // Favorites "Add Favorite" (EDIT-05 mark) — a selection-INDEPENDENT op, so
+  // it gets its own show/hide flag rather than reusing `report` (which is
+  // scoped to the selection-scoped delete flow above).
+  const [showFavoriteDialog, setShowFavoriteDialog] = useState(false);
 
   // D6-05: switching categories clears stale integer keys that would collide
   // across categories (a BookmarkId means nothing in the Highlights list).
-  useEffect(() => {
+  // Also closes any in-flight Favorite-add dialog — its own overlay blocks
+  // category-switching in practice, but this is the same belt-and-suspenders
+  // reset the rest of this effect already applies.
+  //
+  // Reset via the "adjust state during render" pattern (not useEffect):
+  // `category` and `rows` change together, in the SAME commit, once
+  // `App.handleSelectCategory`'s `list_category` await resolves — a
+  // useEffect-based reset lands one commit LATER, which is a real race a
+  // caller reading `selected` immediately after the rows swap (e.g. this
+  // component's own tests) can observe as stale. Resetting synchronously
+  // during render, in the render where `category` itself changes, closes
+  // that window entirely.
+  const [renderedCategory, setRenderedCategory] = useState(category);
+  if (category !== renderedCategory) {
+    setRenderedCategory(category);
     setSelected(new Set());
     setReport(null);
-  }, [category]);
+    setShowFavoriteDialog(false);
+  }
 
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -183,13 +218,13 @@ export default function CategoryList({
 
   const ops = operationSet(category, selected.size);
 
-  if (rows.length === 0) {
-    return (
-      <p className="notes-list-empty" data-testid="category-list-empty">
-        No {category} in this archive.
-      </p>
-    );
-  }
+  // NOTE: unlike the pre-Phase-7 shape, the empty-rows case no longer
+  // early-returns before the toolbar — Favorites' "Add Favorite" (EDIT-05
+  // mark) is selection-INDEPENDENT and must stay reachable even when the
+  // category currently has zero rows (a very common starting state: a
+  // fresh archive's Favorites list starts empty, and without this the op
+  // would be permanently unreachable). Only the ROW-LIST portion below
+  // conditionally renders the empty message instead of the virtualized list.
 
   const virtualRows = virtualizer.getVirtualItems();
 
@@ -222,6 +257,25 @@ export default function CategoryList({
               </button>
             );
           }
+          // Favorites' "Add Favorite" (EDIT-05 mark) — selection-independent
+          // (state.enabled is always true once LIVE, since `add` is not in
+          // operations.ts's NEEDS_SELECTION set), so this never gates on
+          // `selected.size`. Opens FavoriteAddDialog, which owns its own
+          // dry-run/preview/apply flow internally.
+          if (state.op === "add" && !state.deferred) {
+            return (
+              <button
+                key={state.op}
+                type="button"
+                className="toolbar-button category-list-add-button"
+                onClick={() => setShowFavoriteDialog(true)}
+                disabled={!state.enabled}
+                data-testid="category-list-add-button"
+              >
+                {resolveOpLabel(state.op, category)}
+              </button>
+            );
+          }
           // Every other op is surfaced-but-deferred (no backend mutation yet).
           return (
             <button
@@ -233,11 +287,16 @@ export default function CategoryList({
               data-testid={`category-list-op-${state.op}`}
               title="Coming soon"
             >
-              {OP_LABEL[state.op]} (soon)
+              {resolveOpLabel(state.op, category)} (soon)
             </button>
           );
         })}
       </div>
+      {rows.length === 0 ? (
+        <p className="notes-list-empty" data-testid="category-list-empty">
+          No {category} in this archive.
+        </p>
+      ) : (
       <div
         ref={parentRef}
         className="notes-list-viewport"
@@ -305,11 +364,22 @@ export default function CategoryList({
           })}
         </ul>
       </div>
+      )}
       {report && (
         <EditPreviewDialog
           report={report}
           onConfirm={handleConfirm}
           onCancel={handleCancel}
+        />
+      )}
+      {showFavoriteDialog && (
+        <FavoriteAddDialog
+          onApplied={(freshRows) => {
+            setShowFavoriteDialog(false);
+            onRowsChanged?.(freshRows);
+          }}
+          onCancel={() => setShowFavoriteDialog(false)}
+          onError={(err) => onError?.(err)}
         />
       )}
     </div>
