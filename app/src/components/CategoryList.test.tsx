@@ -381,3 +381,78 @@ describe("CategoryList — Favorites import flow (IO-02, 08-01-PLAN.md)", () => 
     );
   });
 });
+
+describe("CategoryList — Notes incremental export flow (IO-04, 09-01-PLAN.md)", () => {
+  it("the action is absent for a category with no incremental export command", () => {
+    render(<CategoryList rows={[]} category="Favorites" />);
+    expect(screen.queryByTestId("category-list-export-incremental-button")).not.toBeInTheDocument();
+  });
+
+  it("the action is present for Notes", () => {
+    render(<CategoryList rows={[]} category="Notes" />);
+    expect(screen.getByTestId("category-list-export-incremental-button")).toBeInTheDocument();
+  });
+
+  it("cancelling the prior-file picker makes no backend call", async () => {
+    openMock.mockResolvedValue(null);
+    render(<CategoryList rows={[]} category="Notes" />);
+
+    fireEvent.click(screen.getByTestId("category-list-export-incremental-button"));
+
+    await vi.waitFor(() => expect(openMock).toHaveBeenCalled());
+    expect(saveMock).not.toHaveBeenCalled();
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("cancelling the target-file save makes no backend call", async () => {
+    openMock.mockResolvedValue("/tmp/notes_prior.txt");
+    saveMock.mockResolvedValue(null);
+    render(<CategoryList rows={[]} category="Notes" />);
+
+    fireEvent.click(screen.getByTestId("category-list-export-incremental-button"));
+
+    await vi.waitFor(() => expect(saveMock).toHaveBeenCalled());
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("a successful run invokes export_notes_incremental and renders all three counts plus the removals caveat", async () => {
+    openMock.mockResolvedValue("/tmp/notes_prior.txt");
+    saveMock.mockResolvedValue("/tmp/notes-changed.txt");
+    invokeMock.mockResolvedValue({ added: 2, modified: 1, deleted_candidates: 3, exported: 3 });
+    render(<CategoryList rows={[]} category="Notes" />);
+
+    fireEvent.click(screen.getByTestId("category-list-export-incremental-button"));
+
+    await vi.waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("export_notes_incremental", {
+        path: "/tmp/notes-changed.txt",
+        priorPath: "/tmp/notes_prior.txt",
+      }),
+    );
+
+    const summary = await screen.findByTestId("incremental-export-summary-counts");
+    expect(summary.textContent).toContain("2 new records");
+    expect(summary.textContent).toContain("1 changed record");
+    expect(summary.textContent).toContain("3 records in the prior export");
+    expect(summary.textContent).toContain("cannot be represented in this file format");
+  });
+
+  it("a rejected invoke surfaces through onError", async () => {
+    openMock.mockResolvedValue("/tmp/notes_prior.txt");
+    saveMock.mockResolvedValue("/tmp/notes-changed.txt");
+    const err = {
+      code: "import_malformed",
+      operation: "export_notes_incremental",
+      safe_file_name: "notes_prior.txt",
+      message_key: "error.archive.import_malformed",
+    };
+    invokeMock.mockRejectedValue(err);
+    const onError = vi.fn();
+    render(<CategoryList rows={[]} category="Notes" onError={onError} />);
+
+    fireEvent.click(screen.getByTestId("category-list-export-incremental-button"));
+
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledWith(err));
+    expect(screen.queryByTestId("incremental-export-summary")).not.toBeInTheDocument();
+  });
+});

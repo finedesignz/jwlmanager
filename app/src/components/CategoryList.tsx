@@ -6,6 +6,7 @@ import type { BrowseRow } from "../bindings/BrowseRow";
 import type { Category } from "../bindings/Category";
 import type { DryRunReport } from "../bindings/DryRunReport";
 import type { ErrorDto } from "../bindings/ErrorDto";
+import type { IncrementalExportSummary } from "../bindings/IncrementalExportSummary";
 import type { NotesImportPreview } from "../bindings/NotesImportPreview";
 import type { PlaylistDeleteReport } from "../bindings/PlaylistDeleteReport";
 import type { PlaylistImportPreview } from "../bindings/PlaylistImportPreview";
@@ -64,6 +65,16 @@ const EXPORT_COMMANDS: Partial<Record<Category, string>> = {
   Highlights: "export_highlights",
   Notes: "export_notes",
   Playlists: "export_playlist",
+};
+
+/**
+ * The Tauri command backing "Export changed…" (IO-04, 09-01-PLAN.md) — a
+ * prior-file-then-target-file flow distinct from [`EXPORT_COMMANDS`]'s
+ * plain export. Notes-only this plan; plans 02-04 add the remaining
+ * categories to this SAME map, never a parallel one.
+ */
+const INCREMENTAL_EXPORT_COMMANDS: Partial<Record<Category, string>> = {
+  Notes: "export_notes_incremental",
 };
 
 /**
@@ -237,6 +248,14 @@ export default function CategoryList({
   const [exportPending, setExportPending] = useState(false);
   const [exportFlash, setExportFlash] = useState(false);
   const exportFlashTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // "Export changed…" (IO-04, 09-01-PLAN.md) — a prior-file picker THEN a
+  // target-file save, then the returned added/modified/deleted-candidate
+  // counts rendered in a small dismissible summary (no preview dialog: like
+  // "Export…", this never mutates the archive, so there is nothing to
+  // confirm — only a result to show).
+  const [incrementalExportPending, setIncrementalExportPending] = useState(false);
+  const [incrementalExportSummary, setIncrementalExportSummary] =
+    useState<IncrementalExportSummary | null>(null);
   // "Import…" (IO-02, 08-01-PLAN.md) — dry-run parses the picked file and
   // returns the would-be result; a malformed file surfaces through
   // `onError` BEFORE this ever opens (D8-04 fail-fast — `importPreview`
@@ -293,6 +312,7 @@ export default function CategoryList({
     setShowMediaAddDialog(false);
     setImportPreview(null);
     setBucketDeleteOptIn(false);
+    setIncrementalExportSummary(null);
   }
 
   const virtualizer = useVirtualizer({
@@ -404,6 +424,48 @@ export default function CategoryList({
       setExportPending(false);
     }
   }, [exportPending, exportCommand, category, selected, onError]);
+
+  const incrementalExportCommand = INCREMENTAL_EXPORT_COMMANDS[category];
+
+  // "Export changed…" (IO-04): a prior-file picker FIRST — cancelling it
+  // aborts the whole action (never "no prior file", which is a distinct,
+  // explicit choice `export_notes_incremental` only makes when `prior_path`
+  // is truly absent) — then the usual target-file save dialog, then the
+  // command, then the counts summary. No dry-run/preview step: like plain
+  // "Export…", this never mutates the archive.
+  const handleIncrementalExportClick = useCallback(async () => {
+    if (incrementalExportPending || !incrementalExportCommand) {
+      return;
+    }
+    const priorFile = await open({
+      multiple: false,
+      directory: false,
+      filters: [{ name: "Text files", extensions: ["txt"] }],
+      title: `Select a prior ${category} export…`,
+    });
+    if (typeof priorFile !== "string") {
+      return; // cancelled — no backend call
+    }
+    const target = await save({
+      filters: [{ name: "Text files", extensions: ["txt"] }],
+      defaultPath: `${category}-changed.txt`,
+    });
+    if (typeof target !== "string") {
+      return; // cancelled — no backend call
+    }
+    setIncrementalExportPending(true);
+    try {
+      const summary = await invoke<IncrementalExportSummary>(incrementalExportCommand, {
+        path: target,
+        priorPath: priorFile,
+      });
+      setIncrementalExportSummary(summary);
+    } catch (err) {
+      onError?.(err as ErrorDto);
+    } finally {
+      setIncrementalExportPending(false);
+    }
+  }, [incrementalExportPending, incrementalExportCommand, category, onError]);
 
   const importCommands = IMPORT_COMMANDS[category];
 
@@ -566,17 +628,34 @@ export default function CategoryList({
           // permanent helper text).
           if (state.op === "export" && !state.deferred) {
             return (
-              <button
-                key={state.op}
-                type="button"
-                className="toolbar-button category-list-export-button"
-                onClick={handleExportClick}
-                disabled={!state.enabled || exportPending}
-                title={selected.size === 0 ? `No rows selected — exports all ${category}.` : undefined}
-                data-testid="category-list-export-button"
-              >
-                {exportPending ? "Exporting…" : exportFlash ? "Exported" : resolveOpLabel(state.op, category)}
-              </button>
+              <span key={state.op} style={{ display: "contents" }}>
+                <button
+                  type="button"
+                  className="toolbar-button category-list-export-button"
+                  onClick={handleExportClick}
+                  disabled={!state.enabled || exportPending}
+                  title={selected.size === 0 ? `No rows selected — exports all ${category}.` : undefined}
+                  data-testid="category-list-export-button"
+                >
+                  {exportPending ? "Exporting…" : exportFlash ? "Exported" : resolveOpLabel(state.op, category)}
+                </button>
+                {/* "Export changed…" (IO-04, 09-01-PLAN.md) — sits next to
+                    plain "Export…", present only for a category in
+                    INCREMENTAL_EXPORT_COMMANDS (Notes only this plan). No
+                    dry-run; the prior-file picker (cancel = abort) then the
+                    save-target picker (cancel = abort) gate the invoke. */}
+                {incrementalExportCommand && (
+                  <button
+                    type="button"
+                    className="toolbar-button category-list-export-incremental-button"
+                    onClick={handleIncrementalExportClick}
+                    disabled={incrementalExportPending}
+                    data-testid="category-list-export-incremental-button"
+                  >
+                    {incrementalExportPending ? "Exporting…" : "Export changed…"}
+                  </button>
+                )}
+              </span>
             );
           }
           // "Import…" (IO-02) — archive-wide-into-category, never
@@ -866,6 +945,53 @@ export default function CategoryList({
             </>
           }
         />
+      )}
+      {incrementalExportSummary && (
+        <div
+          className="edit-preview-overlay"
+          role="presentation"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) {
+              setIncrementalExportSummary(null);
+            }
+          }}
+        >
+          <div
+            className="edit-preview-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Export changed ${category}`}
+            data-testid="incremental-export-summary"
+          >
+            <h2 className="edit-preview-title">Export changed {category}</h2>
+            <p className="edit-preview-summary" data-testid="incremental-export-summary-counts">
+              {incrementalExportSummary.added} new record
+              {incrementalExportSummary.added === 1 ? "" : "s"} and{" "}
+              {incrementalExportSummary.modified} changed record
+              {incrementalExportSummary.modified === 1 ? "" : "s"} were written to the file.
+              {incrementalExportSummary.deleted_candidates > 0 && (
+                <>
+                  {" "}
+                  {incrementalExportSummary.deleted_candidates} record
+                  {incrementalExportSummary.deleted_candidates === 1 ? "" : "s"} in the prior
+                  export {incrementalExportSummary.deleted_candidates === 1 ? "is" : "are"} no
+                  longer present in this archive — removals since the prior export cannot be
+                  represented in this file format and are NOT written to it.
+                </>
+              )}
+            </p>
+            <div className="edit-preview-actions">
+              <button
+                type="button"
+                className="toolbar-button edit-preview-confirm"
+                onClick={() => setIncrementalExportSummary(null)}
+                data-testid="incremental-export-summary-dismiss"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       {showFavoriteDialog && (
         <FavoriteAddDialog

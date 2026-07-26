@@ -8,10 +8,11 @@
 
 mod common;
 
+use jwlmanager_lib::db::ids::compute_available_ids;
 use jwlmanager_lib::db::io::diff::export_notes_incremental;
 use jwlmanager_lib::db::io::export::export_notes;
 use jwlmanager_lib::db::io::header::ExportHeaderCtx;
-use jwlmanager_lib::db::io::import::parse_notes_file;
+use jwlmanager_lib::db::io::import::{apply_import_notes, parse_notes_file};
 use jwlmanager_lib::db::resources::{dev_resources_db_path, ResourceCatalog};
 use jwlmanager_lib::error::ArchiveError;
 use rusqlite::Connection;
@@ -288,4 +289,79 @@ fn malformed_prior_file_aborts() {
         !incremental_path.exists(),
         "a malformed prior file must abort BEFORE any output file is created"
     );
+}
+
+/// Exports incrementally against a baseline prior file, imports that output
+/// back into the SAME archive, then exports incrementally AGAIN — this time
+/// using the just-produced (and just-reimported) output itself as the prior
+/// — and asserts the second run reports zero added and zero modified: the
+/// archive and its own most recent export are, by construction, identical.
+///
+/// NOTE (09-01-PLAN.md Task 3): the Highlights `UserMark`-growth property
+/// Phase 8's round-trip suite accepted (a re-imported `UserMark` can grow a
+/// `BlockRange` without changing semantic content) does NOT apply to Notes —
+/// Notes' `apply_import_notes` writes `Content`/`Title`/tags/range verbatim
+/// with no growth-only merge behavior. Plan 09-02 owns re-proving
+/// convergence for Highlights against that different shape.
+#[test]
+fn incremental_export_converges() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_one_note(&db_path, "Title", "Original content");
+
+    let out_dir = TempDir::new().expect("tempdir");
+    let baseline_path = out_dir.path().join("baseline.txt");
+    let baseline_prior_text = export_baseline(&db_path, &baseline_path);
+
+    {
+        let conn = Connection::open(&db_path).expect("open db");
+        conn.execute("UPDATE Note SET Content = 'Changed content'", [])
+            .expect("change content");
+    }
+
+    // First incremental export: against the ORIGINAL baseline — this is the
+    // one real diff in this test (modified=1).
+    let first_output_path = out_dir.path().join("first_incremental.txt");
+    let conn = Connection::open(&db_path).expect("open db");
+    let first_summary = export_notes_incremental(
+        &conn,
+        Some(&baseline_prior_text),
+        &catalog(),
+        &pinned_header(),
+        "2099-01-01T00:00:00Z",
+        &first_output_path,
+    )
+    .expect("first incremental export");
+    assert_eq!(first_summary.modified, 1);
+    drop(conn);
+
+    let first_output_text =
+        std::fs::read_to_string(&first_output_path).expect("read first incremental output");
+
+    // Re-import that output into the SAME archive.
+    {
+        let (bucket, records) = parse_notes_file(&first_output_text).expect("parse first output");
+        let mut conn = Connection::open(&db_path).expect("reopen db");
+        let tx = conn.transaction().expect("begin tx");
+        let mut available = compute_available_ids(&tx).expect("compute available ids");
+        apply_import_notes(&tx, bucket, &records, &mut available, 1, "2099-01-01T00:00:00Z")
+            .expect("apply re-import");
+        tx.commit().expect("commit re-import");
+    }
+
+    // Second incremental export: against the FIRST output (now also the
+    // archive's own current state, after re-import) — must converge.
+    let conn = Connection::open(&db_path).expect("open db after re-import");
+    let second_output_path = out_dir.path().join("second_incremental.txt");
+    let second_summary = export_notes_incremental(
+        &conn,
+        Some(&first_output_text),
+        &catalog(),
+        &pinned_header(),
+        "2099-01-01T00:00:00Z",
+        &second_output_path,
+    )
+    .expect("second incremental export");
+
+    assert_eq!(second_summary.added, 0, "second run must converge to zero added");
+    assert_eq!(second_summary.modified, 0, "second run must converge to zero modified");
 }
