@@ -56,6 +56,10 @@ export function describeError(err: ErrorDto): string {
       return "Couldn't update tags for the selected items — the archive is unchanged. Try again, or close and reopen the archive if the problem continues.";
     case "reorder_failed":
       return "Couldn't sort tags — the archive is unchanged. Try again, or close and reopen the archive if the problem continues.";
+    case "clean_failed":
+      return "Couldn't clean this archive — the archive is unchanged. Try again, or close and reopen the archive if the problem continues.";
+    case "mask_failed":
+      return "Couldn't mask this archive — the archive is unchanged. Try again, or close and reopen the archive if the problem continues.";
     case "merge_unavailable":
       return "Couldn't merge — the merge engine isn't available on this device (for example on Windows on Arm, which has no merge build yet). Your open archive is unchanged.";
     case "merge_failed":

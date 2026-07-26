@@ -18,6 +18,14 @@ interface EditPreviewDialogProps {
   /** Confirm button label while the confirm handler is in flight. Defaults to
    * "Deleting…". */
   confirmPendingLabel?: string;
+  /** When set, gates BOTH the typed-confirm input AND the destructive
+   * top-border accent (07-UI-SPEC.md) — no caller can get the stronger
+   * visual without also requiring the typed match. Confirm stays disabled
+   * until the input's value is an EXACT (case-sensitive, untrimmed) match
+   * for this string; `mask`, `Mask`, and ` MASK ` are all still disabled for
+   * `requireTypedConfirm="MASK"`. Mask is the only caller of this prop —
+   * every other dialog stays as restrained as the shipped delete preview. */
+  requireTypedConfirm?: string;
 }
 
 /**
@@ -51,13 +59,21 @@ export default function EditPreviewDialog({
   summary,
   confirmLabel = "Delete",
   confirmPendingLabel = "Deleting…",
+  requireTypedConfirm,
 }: EditPreviewDialogProps) {
   const [pending, setPending] = useState(false);
+  const [typedValue, setTypedValue] = useState("");
   const busyRef = useRef(false);
+  // Exact, case-sensitive, UNTRIMMED match — " MASK " must stay disabled.
+  const typedConfirmSatisfied =
+    requireTypedConfirm === undefined || typedValue === requireTypedConfirm;
 
   const handleConfirm = useCallback(async () => {
     if (busyRef.current) {
       return; // double-click guard: no-op, not a duplicate invoke
+    }
+    if (!typedConfirmSatisfied) {
+      return; // typed-confirm gate: never fires apply on a non-exact match
     }
     busyRef.current = true;
     setPending(true);
@@ -67,7 +83,16 @@ export default function EditPreviewDialog({
       busyRef.current = false;
       setPending(false);
     }
-  }, [onConfirm]);
+  }, [onConfirm, typedConfirmSatisfied]);
+
+  const handleTypedInputKeyDown = useCallback((event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter") {
+      // Enter must never bypass the typed-confirm gate — there is no <form>
+      // here (so no implicit submit), but this makes the non-bypassability
+      // explicit and directly testable rather than relying on that absence.
+      event.preventDefault();
+    }
+  }, []);
 
   const handleCancel = useCallback(() => {
     if (busyRef.current) {
@@ -110,7 +135,11 @@ export default function EditPreviewDialog({
       onClick={handleOverlayClick}
     >
       <div
-        className="edit-preview-dialog"
+        className={
+          requireTypedConfirm !== undefined
+            ? "edit-preview-dialog edit-preview-dialog-destructive"
+            : "edit-preview-dialog"
+        }
         role="dialog"
         aria-modal="true"
         aria-label={ariaLabel}
@@ -126,6 +155,18 @@ export default function EditPreviewDialog({
             </>
           )}
         </p>
+        {requireTypedConfirm !== undefined && (
+          <input
+            type="text"
+            className="edit-preview-typed-confirm-input"
+            value={typedValue}
+            onChange={(event) => setTypedValue(event.target.value)}
+            onKeyDown={handleTypedInputKeyDown}
+            disabled={pending}
+            aria-label={`Type ${requireTypedConfirm} to confirm`}
+            data-testid="edit-preview-typed-confirm-input"
+          />
+        )}
         <div className="edit-preview-actions">
           <button
             type="button"
@@ -140,7 +181,7 @@ export default function EditPreviewDialog({
             type="button"
             className="toolbar-button edit-preview-confirm"
             onClick={handleConfirm}
-            disabled={pending}
+            disabled={pending || !typedConfirmSatisfied}
             aria-busy={pending}
             data-testid="edit-preview-confirm"
           >

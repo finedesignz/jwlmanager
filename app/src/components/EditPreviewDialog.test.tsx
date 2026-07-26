@@ -110,4 +110,85 @@ describe("EditPreviewDialog", () => {
 
     expect(onCancel).not.toHaveBeenCalled();
   });
+
+  it("without requireTypedConfirm, no typed-confirm input renders and Confirm is not gated by it", () => {
+    render(<EditPreviewDialog report={makeReport()} onConfirm={vi.fn()} onCancel={vi.fn()} />);
+
+    expect(screen.queryByTestId("edit-preview-typed-confirm-input")).not.toBeInTheDocument();
+    expect(screen.getByTestId("edit-preview-confirm")).not.toBeDisabled();
+  });
+
+  it("requireTypedConfirm keeps Confirm disabled for near-miss values", () => {
+    render(
+      <EditPreviewDialog
+        report={makeReport()}
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+        requireTypedConfirm="MASK"
+      />,
+    );
+
+    const input = screen.getByTestId("edit-preview-typed-confirm-input");
+    const confirmButton = screen.getByTestId("edit-preview-confirm");
+    expect(confirmButton).toBeDisabled();
+
+    for (const value of ["mask", "Mask", " MASK "]) {
+      fireEvent.change(input, { target: { value } });
+      expect(confirmButton).toBeDisabled();
+    }
+  });
+
+  it("requireTypedConfirm enables Confirm only on an exact match", () => {
+    render(
+      <EditPreviewDialog
+        report={makeReport()}
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+        requireTypedConfirm="MASK"
+      />,
+    );
+
+    const input = screen.getByTestId("edit-preview-typed-confirm-input");
+    const confirmButton = screen.getByTestId("edit-preview-confirm");
+
+    fireEvent.change(input, { target: { value: "MASK" } });
+    expect(confirmButton).not.toBeDisabled();
+  });
+
+  it("Enter in the typed-confirm input never fires onConfirm while the value doesn't match", () => {
+    const onConfirm = vi.fn();
+    render(
+      <EditPreviewDialog
+        report={makeReport()}
+        onConfirm={onConfirm}
+        onCancel={vi.fn()}
+        requireTypedConfirm="MASK"
+      />,
+    );
+
+    const input = screen.getByTestId("edit-preview-typed-confirm-input");
+    fireEvent.change(input, { target: { value: "mask" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it("the destructive accent class is absent when requireTypedConfirm is unset and present when it is set", () => {
+    const { rerender } = render(
+      <EditPreviewDialog report={makeReport()} onConfirm={vi.fn()} onCancel={vi.fn()} />,
+    );
+    expect(screen.getByTestId("edit-preview-dialog")).not.toHaveClass(
+      "edit-preview-dialog-destructive",
+    );
+
+    rerender(
+      <EditPreviewDialog
+        report={makeReport()}
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+        requireTypedConfirm="MASK"
+      />,
+    );
+    expect(screen.getByTestId("edit-preview-dialog")).toHaveClass("edit-preview-dialog-destructive");
+  });
 });

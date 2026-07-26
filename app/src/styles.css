@@ -328,6 +328,40 @@ body {
   color: var(--text-primary);
 }
 
+.edit-preview-confirm:disabled {
+  border-color: var(--border-hairline);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+/* Mask's strengthened guard (D7-08, 07-04-PLAN.md) — gated on
+   requireTypedConfirm ONLY, never present for any other EditPreviewDialog
+   caller (Sort Tags, Clean, Delete, Favorite, Tag, Merge, v14-save all stay
+   as restrained as the original shipped dialog). A 2px destructive top
+   border, restrained (no full red-flooded modal, per 01-UI-SPEC). */
+.edit-preview-dialog-destructive {
+  border-top: 2px solid var(--destructive);
+}
+
+/* First typed-confirm input in the app (07-UI-SPEC.md Spacing Scale
+   exceptions) — same box metrics as .toolbar-button/.favorite-dialog-select
+   (44px min-height, --space-md horizontal padding, --bg-tertiary, no
+   visible border at rest, --brand-primary focus ring). */
+.edit-preview-typed-confirm-input {
+  min-height: 44px;
+  padding: 0 var(--space-md);
+  border-radius: 8px;
+  border: none;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.edit-preview-typed-confirm-input:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 2px;
+}
+
 /* Favorite Dialog ("Add Favorite", EDIT-05 mark, 07-01-PLAN.md Task 3).
    Reuses .edit-preview-overlay for its backdrop; the card below matches
    .edit-preview-dialog's radius/surface/padding scale, extended with its
