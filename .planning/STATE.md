@@ -5,13 +5,13 @@ milestone_name: milestone
 current_phase: 1
 current_phase_name: Foundation Slice
 status: verifying
-stopped_at: Completed 07-02-PLAN.md
-last_updated: "2026-07-26T14:35:07.133Z"
+stopped_at: Completed 07-03-PLAN.md
+last_updated: "2026-07-26T14:59:39.859Z"
 progress:
   total_phases: 7
   completed_phases: 6
   total_plans: 29
-  completed_plans: 25
+  completed_plans: 26
 ---
 
 # Project State — JWL Manager (Tauri)
@@ -28,7 +28,7 @@ Plan: 3 of 3 complete (delete preview/confirm UI)
 **Phase:** 1 of 11 — Open, View, Save (Foundation Slice)
 **Plan:** 7 of 7
 **Status:** Phase complete — ready for verification
-**Progress:** [█████████░] 86%
+**Progress:** [█████████░] 90%
 
 ## Performance Metrics
 
@@ -44,6 +44,7 @@ Plan: 3 of 3 complete (delete preview/confirm UI)
 | Phase 06 P04 | ~8m | 2 tasks | 3 files |
 | Phase 07 P01 | resumed | 3 tasks | 13 files |
 | Phase 07 P02 | single session | 3 tasks | 16 files |
+| Phase 07 P03 | single session | 3 tasks | 21 files |
 
 ## Accumulated Context
 
@@ -84,6 +85,7 @@ Plan: 3 of 3 complete (delete preview/confirm UI)
 - [Phase ?]: 06-02: five category getters (db/browse.rs) surface the correct identity PK as row.id (Bookmark=BookmarkId, Favorite=TagMapId, Highlight=BlockRangeId, Annotation=LocationId, Playlist=PlaylistItemId), never the join's LocationId
 - [Phase ?]: 06-02: one generic list_category(Category) command dispatches all six getters keyed by the ts-rs enum, not six commands nor a translated display string
 - [Phase ?]: D7-03 resolved strict Python parity: merge_block_ranges ships standalone, recolor never invokes it
+- [Phase ?]: D7-05: reorder reuses redensify_tag_positions staging technique (not Python's two-pass) — identical observable contract, verified via adversarial fixture + idempotent composition test
 
 ### Todos
 
@@ -99,6 +101,6 @@ Plan: 3 of 3 complete (delete preview/confirm UI)
 
 **Resume file:** None
 
-**Last session:** 2026-07-26T14:35:07.107Z
-**Stopped at:** Completed 07-02-PLAN.md
+**Last session:** 2026-07-26T14:59:39.833Z
+**Stopped at:** Completed 07-03-PLAN.md
 **Next action:** Execute 03-03-PLAN.md (Python differential test against real v14 owner archives), then Phase 3 verification.
