@@ -5,13 +5,23 @@
 
 mod common;
 
-use common::fresh_v16_db_for_favorites_io;
-use jwlmanager_lib::db::io::import::parse_favorites_file;
+use common::{fresh_v16_db, fresh_v16_db_for_favorites_io};
+use jwlmanager_lib::db::io::import::{parse_annotations_file, parse_bookmarks_file, parse_favorites_file};
 use jwlmanager_lib::error::ArchiveError;
 use rusqlite::Connection;
 
 fn tagmap_count(conn: &Connection) -> i64 {
     conn.query_row("SELECT COUNT(*) FROM TagMap", [], |r| r.get(0))
+        .expect("count")
+}
+
+fn bookmark_count(conn: &Connection) -> i64 {
+    conn.query_row("SELECT COUNT(*) FROM Bookmark", [], |r| r.get(0))
+        .expect("count")
+}
+
+fn inputfield_count(conn: &Connection) -> i64 {
+    conn.query_row("SELECT COUNT(*) FROM InputField", [], |r| r.get(0))
         .expect("count")
 }
 
@@ -72,4 +82,82 @@ fn earlier_well_formed_lines_do_not_partially_apply_before_a_later_malformed_lin
         ArchiveError::ImportMalformed { line, .. } => assert_eq!(line, 3),
         other => panic!("expected ImportMalformed, got {other:?}"),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Bookmarks (08-02-PLAN.md Task 1, D8-04)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn bookmarks_missing_tag_line_is_rejected_at_line_1() {
+    let (_dir, db_path) = fresh_v16_db();
+    let conn = Connection::open(&db_path).expect("open db");
+    let before = bookmark_count(&conn);
+
+    let text = "no tag line here\n1|1|None|0|nwt|0|0|0|Title|None|None|None";
+    let err = parse_bookmarks_file(text).expect_err("must reject a missing {BOOKMARKS} tag line");
+    match err {
+        ArchiveError::ImportMalformed { category, line, .. } => {
+            assert_eq!(category, "Bookmarks");
+            assert_eq!(line, 1);
+        }
+        other => panic!("expected ImportMalformed, got {other:?}"),
+    }
+    assert_eq!(bookmark_count(&conn), before, "a rejected parse must never touch the archive");
+}
+
+#[test]
+fn bookmarks_eleven_field_line_is_rejected_and_leaves_row_count_unchanged() {
+    let (_dir, db_path) = fresh_v16_db();
+    let conn = Connection::open(&db_path).expect("open db");
+    let before = bookmark_count(&conn);
+
+    // 11 pipe-delimited fields instead of the required 12.
+    let text = "{BOOKMARKS}\n1|1|None|0|nwt|0|0|0|Title|None|None";
+    let err = parse_bookmarks_file(text).expect_err("must reject an 11-field line");
+    match err {
+        ArchiveError::ImportMalformed { line, reason, .. } => {
+            assert_eq!(line, 2);
+            assert!(reason.contains("11"), "reason should name the actual field count: {reason}");
+        }
+        other => panic!("expected ImportMalformed, got {other:?}"),
+    }
+    assert_eq!(bookmark_count(&conn), before, "a rejected parse must never touch the archive");
+}
+
+#[test]
+fn bookmarks_thirteen_field_line_is_rejected() {
+    let text = "{BOOKMARKS}\n1|1|None|0|nwt|0|0|0|Title|None|None|None|extra";
+    let err = parse_bookmarks_file(text).expect_err("must reject a 13-field line");
+    assert!(matches!(err, ArchiveError::ImportMalformed { .. }));
+}
+
+// ---------------------------------------------------------------------------
+// Annotations (08-02-PLAN.md Task 2, D8-04)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn annotations_missing_tag_line_is_rejected_at_record_1() {
+    let (_dir, db_path) = fresh_v16_db();
+    let conn = Connection::open(&db_path).expect("open db");
+    let before = inputfield_count(&conn);
+
+    let text = "no tag line\n==={PUB=w}{DOC=None}{LABEL=tag1}===\nValue\n==={END}===";
+    let err = parse_annotations_file(text).expect_err("must reject a missing {ANNOTATIONS} tag line");
+    match err {
+        ArchiveError::ImportMalformed { category, line, .. } => {
+            assert_eq!(category, "Annotations");
+            assert_eq!(line, 1);
+        }
+        other => panic!("expected ImportMalformed, got {other:?}"),
+    }
+    assert_eq!(inputfield_count(&conn), before, "a rejected parse must never touch the archive");
+}
+
+#[test]
+fn annotations_record_missing_required_key_is_rejected() {
+    // No {DOC=...} attribute at all.
+    let text = "{ANNOTATIONS}\n \nheader\n==={PUB=w}{LABEL=tag1}===\nValue\n==={END}===";
+    let err = parse_annotations_file(text).expect_err("must reject a header missing {DOC=...}");
+    assert!(matches!(err, ArchiveError::ImportMalformed { .. }));
 }

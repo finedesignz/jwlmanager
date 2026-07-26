@@ -55,14 +55,18 @@ const OP_LABEL: Record<Op, string> = {
  */
 const EXPORT_COMMANDS: Partial<Record<Category, string>> = {
   Favorites: "export_favorites",
+  Bookmarks: "export_bookmarks",
+  Annotations: "export_annotations",
 };
 
 /**
  * The `(dryRun, apply)` Tauri command pair backing the LIVE "import" op for
- * each category (08-01-PLAN.md Task 3).
+ * each category (08-01-PLAN.md Task 3, 08-02-PLAN.md Tasks 1-2).
  */
 const IMPORT_COMMANDS: Partial<Record<Category, { dryRun: string; apply: string }>> = {
   Favorites: { dryRun: "import_favorites_dry_run", apply: "import_favorites_apply" },
+  Bookmarks: { dryRun: "import_bookmarks_dry_run", apply: "import_bookmarks_apply" },
+  Annotations: { dryRun: "import_annotations_dry_run", apply: "import_annotations_apply" },
 };
 
 /** Sums a `Record<string, number>`-shaped `DryRunReport` field's values. */

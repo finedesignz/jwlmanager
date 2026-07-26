@@ -20,13 +20,16 @@
 //! forbids reproducing even for import compatibility.
 
 use super::export::{join_row, read_favorite_lines};
-use crate::db::edit::{diff_snapshots, snapshot_tables, DryRunReport, FAVORITE_SNAPSHOT_TABLES};
+use crate::db::edit::{
+    diff_snapshots, snapshot_tables, DryRunReport, ANNOTATION_SNAPSHOT_TABLES,
+    BOOKMARK_SNAPSHOT_TABLES, FAVORITE_SNAPSHOT_TABLES,
+};
 use crate::db::ids::{compute_available_ids, take_id};
 use crate::db::pragma_guard::PragmaGuard;
 use crate::db::trim::trim_sweep;
 use crate::error::ArchiveError;
 use rusqlite::{Connection, OptionalExtension, Transaction};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 fn map_sqlite_err(err: rusqlite::Error, context: &str) -> ArchiveError {
     ArchiveError::ImportFailed {
@@ -337,6 +340,659 @@ pub fn dry_run_import_favorites(
     if skipped > 0 {
         report.skipped.insert("TagMap".to_string(), skipped);
     }
+
+    drop(tx);
+    drop(guard);
+
+    Ok(report)
+}
+
+// ---------------------------------------------------------------------------
+// Bookmarks (08-02-PLAN.md Task 1) — flat pipe rows, `¦` escaping wart, three
+// distinct location-dedup predicates, upsert on `(PublicationLocationId,
+// Slot)`. Ports `import_bookmarks` (`JWLManager.py:1958-2043`).
+// ---------------------------------------------------------------------------
+
+/// The 5 field positions Python unwraps the literal `'None'` string to
+/// `None` on (`JWLManager.py:2021`): BookNumber(0), ChapterNumber(1),
+/// DocumentId(2), Snippet(9), BlockIdentifier(11). Every OTHER field
+/// (IssueTagNumber(3), KeySymbol(4), MepsLanguage(5), Type(6), Slot(7),
+/// Title(8), BlockType(10)) is left as the raw string verbatim — Python
+/// genuinely does not unwrap those, so a literal `'None'` in one of them
+/// would be stored as the four-character TEXT `'None'`, not SQL NULL. Port
+/// this asymmetry exactly; "fixing" it into a uniform per-field None-check
+/// would diverge from Python.
+const BOOKMARK_NULL_UNWRAP_INDICES: [usize; 5] = [0, 1, 2, 9, 11];
+
+/// One parsed Bookmarks data row, fields in wire-format column order
+/// (`JWLManager.py:1444`). Kept as raw `Option<String>` for the same reason
+/// [`FavoriteRecord`] is — SQLite's column-affinity coercion on INSERT does
+/// the string->int work, exactly like Python's own untyped bind.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BookmarkRecord {
+    pub book_number: Option<String>,
+    pub chapter_number: Option<String>,
+    pub document_id: Option<String>,
+    pub issue_tag_number: Option<String>,
+    pub key_symbol: Option<String>,
+    pub meps_language: Option<String>,
+    /// The `Type` column — named `kind` because `type` is a Rust keyword.
+    pub kind: Option<String>,
+    pub slot: Option<String>,
+    pub title: Option<String>,
+    /// A literal `¦` (U+00A6) here is NEVER un-escaped back to `|` — Pitfall
+    /// 2, `JWLManager.py:2020` never touches this substitution on import.
+    pub snippet: Option<String>,
+    pub block_type: Option<String>,
+    pub block_identifier: Option<String>,
+}
+
+/// Parses a whole Bookmarks `.txt` file's TEXT into records, entirely BEFORE
+/// any transaction opens (D8-04) — same two-stage shape as
+/// [`parse_favorites_file`]. Line 1 must contain `{BOOKMARKS}`; every
+/// subsequent line containing a `|` must split into EXACTLY 12
+/// pipe-delimited fields (`JWLManager.py:2020`) or the whole parse fails,
+/// naming the exact 1-indexed line.
+pub fn parse_bookmarks_file(text: &str) -> Result<Vec<BookmarkRecord>, ArchiveError> {
+    let mut lines = text.split('\n');
+    let first_line = lines.next().unwrap_or("");
+    if !first_line.contains("{BOOKMARKS}") {
+        return Err(ArchiveError::ImportMalformed {
+            category: "Bookmarks".to_string(),
+            line: 1,
+            reason: "missing {BOOKMARKS} tag line".to_string(),
+        });
+    }
+
+    let mut records = Vec::new();
+    for (offset, raw_line) in lines.enumerate() {
+        let line_no = offset + 2;
+        let line = raw_line.trim_end_matches('\r');
+        if !line.contains('|') {
+            continue;
+        }
+        let fields: Vec<&str> = line.split('|').collect();
+        if fields.len() != 12 {
+            return Err(ArchiveError::ImportMalformed {
+                category: "Bookmarks".to_string(),
+                line: line_no,
+                reason: format!("expected 12 pipe-delimited fields, found {}", fields.len()),
+            });
+        }
+        let mut opts = fields.into_iter().enumerate().map(|(i, f)| {
+            if BOOKMARK_NULL_UNWRAP_INDICES.contains(&i) && f == "None" {
+                None
+            } else {
+                Some(f.to_string())
+            }
+        });
+        // `unwrap_or(None)` is safe here: `opts` always yields exactly 12
+        // items (the length check above already guaranteed it).
+        records.push(BookmarkRecord {
+            book_number: opts.next().unwrap_or(None),
+            chapter_number: opts.next().unwrap_or(None),
+            document_id: opts.next().unwrap_or(None),
+            issue_tag_number: opts.next().unwrap_or(None),
+            key_symbol: opts.next().unwrap_or(None),
+            meps_language: opts.next().unwrap_or(None),
+            kind: opts.next().unwrap_or(None),
+            slot: opts.next().unwrap_or(None),
+            title: opts.next().unwrap_or(None),
+            snippet: opts.next().unwrap_or(None),
+            block_type: opts.next().unwrap_or(None),
+            block_identifier: opts.next().unwrap_or(None),
+        });
+    }
+    Ok(records)
+}
+
+/// Finds-or-inserts a SCRIPTURE `Location` for a Bookmark record — ports
+/// `add_scripture_location` (`JWLManager.py:1970-1980`). Dedup key:
+/// `KeySymbol + MepsLanguage + BookNumber + ChapterNumber` — DISTINCT from
+/// [`find_or_insert_bookmark_publication_location`] and
+/// [`find_or_insert_bookmark_container_location`] (D8-04: three separate
+/// predicates, never collapsed into one generic helper).
+fn find_or_insert_bookmark_scripture_location(
+    tx: &Transaction,
+    record: &BookmarkRecord,
+    available: &mut HashMap<&'static str, Vec<i64>>,
+) -> Result<i64, ArchiveError> {
+    let existing: Option<i64> = tx
+        .query_row(
+            "SELECT LocationId FROM Location \
+             WHERE KeySymbol = ? AND MepsLanguage = ? AND BookNumber = ? AND ChapterNumber = ?",
+            rusqlite::params![
+                record.key_symbol,
+                record.meps_language,
+                record.book_number,
+                record.chapter_number
+            ],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| map_sqlite_err(e, "find_or_insert_bookmark_scripture_location: select"))?;
+    if let Some(id) = existing {
+        return Ok(id);
+    }
+
+    if let Some(id) = take_id(available, "Location") {
+        tx.execute(
+            "INSERT INTO Location (LocationId, KeySymbol, MepsLanguage, BookNumber, ChapterNumber, Type) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                id,
+                record.key_symbol,
+                record.meps_language,
+                record.book_number,
+                record.chapter_number,
+                record.kind
+            ],
+        )
+        .map_err(|e| map_sqlite_err(e, "find_or_insert_bookmark_scripture_location: insert recycled id"))?;
+        Ok(id)
+    } else {
+        tx.execute(
+            "INSERT INTO Location (KeySymbol, MepsLanguage, BookNumber, ChapterNumber, Type) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![
+                record.key_symbol,
+                record.meps_language,
+                record.book_number,
+                record.chapter_number,
+                record.kind
+            ],
+        )
+        .map_err(|e| map_sqlite_err(e, "find_or_insert_bookmark_scripture_location: insert autoincrement"))?;
+        Ok(tx.last_insert_rowid())
+    }
+}
+
+/// Finds-or-inserts a PUBLICATION `Location` for a Bookmark record — ports
+/// `add_publication_location` (`JWLManager.py:1982-1992`). Dedup key:
+/// `KeySymbol + MepsLanguage + IssueTagNumber + DocumentId + Type` —
+/// DISTINCT from the scripture predicate above.
+fn find_or_insert_bookmark_publication_location(
+    tx: &Transaction,
+    record: &BookmarkRecord,
+    available: &mut HashMap<&'static str, Vec<i64>>,
+) -> Result<i64, ArchiveError> {
+    let existing: Option<i64> = tx
+        .query_row(
+            "SELECT LocationId FROM Location \
+             WHERE KeySymbol = ? AND MepsLanguage = ? AND IssueTagNumber = ? AND DocumentId = ? AND Type = ?",
+            rusqlite::params![
+                record.key_symbol,
+                record.meps_language,
+                record.issue_tag_number,
+                record.document_id,
+                record.kind
+            ],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| map_sqlite_err(e, "find_or_insert_bookmark_publication_location: select"))?;
+    if let Some(id) = existing {
+        return Ok(id);
+    }
+
+    if let Some(id) = take_id(available, "Location") {
+        tx.execute(
+            "INSERT INTO Location (LocationId, IssueTagNumber, KeySymbol, MepsLanguage, DocumentId, Type) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                id,
+                record.issue_tag_number,
+                record.key_symbol,
+                record.meps_language,
+                record.document_id,
+                record.kind
+            ],
+        )
+        .map_err(|e| map_sqlite_err(e, "find_or_insert_bookmark_publication_location: insert recycled id"))?;
+        Ok(id)
+    } else {
+        tx.execute(
+            "INSERT INTO Location (IssueTagNumber, KeySymbol, MepsLanguage, DocumentId, Type) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![
+                record.issue_tag_number,
+                record.key_symbol,
+                record.meps_language,
+                record.document_id,
+                record.kind
+            ],
+        )
+        .map_err(|e| map_sqlite_err(e, "find_or_insert_bookmark_publication_location: insert autoincrement"))?;
+        Ok(tx.last_insert_rowid())
+    }
+}
+
+/// Finds-or-inserts the Bookmark's OWN CONTAINER `Location` (`Type = 1`) —
+/// ports the inline resolution inside `add_bookmark`
+/// (`JWLManager.py:1995-2003`). This is the THIRD, distinct dedup predicate:
+/// `KeySymbol + MepsLanguage + Type = 1` with Book/Chapter/DocumentId all
+/// NULL-or-zero.
+fn find_or_insert_bookmark_container_location(
+    tx: &Transaction,
+    record: &BookmarkRecord,
+    available: &mut HashMap<&'static str, Vec<i64>>,
+) -> Result<i64, ArchiveError> {
+    let existing: Option<i64> = tx
+        .query_row(
+            "SELECT LocationId FROM Location \
+             WHERE KeySymbol = ? AND MepsLanguage = ? AND Type = 1 \
+             AND (BookNumber IS NULL OR BookNumber = 0) \
+             AND (ChapterNumber IS NULL OR ChapterNumber = 0) \
+             AND (DocumentId IS NULL OR DocumentId = 0)",
+            rusqlite::params![record.key_symbol, record.meps_language],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| map_sqlite_err(e, "find_or_insert_bookmark_container_location: select"))?;
+    if let Some(id) = existing {
+        return Ok(id);
+    }
+
+    if let Some(id) = take_id(available, "Location") {
+        tx.execute(
+            "INSERT INTO Location (LocationId, KeySymbol, MepsLanguage, Type) VALUES (?1, ?2, ?3, 1)",
+            rusqlite::params![id, record.key_symbol, record.meps_language],
+        )
+        .map_err(|e| map_sqlite_err(e, "find_or_insert_bookmark_container_location: insert recycled id"))?;
+        Ok(id)
+    } else {
+        tx.execute(
+            "INSERT INTO Location (KeySymbol, MepsLanguage, Type) VALUES (?1, ?2, 1)",
+            rusqlite::params![record.key_symbol, record.meps_language],
+        )
+        .map_err(|e| map_sqlite_err(e, "find_or_insert_bookmark_container_location: insert autoincrement"))?;
+        Ok(tx.last_insert_rowid())
+    }
+}
+
+/// Upserts one Bookmark on `(PublicationLocationId, Slot)` — ports
+/// `add_bookmark` (`JWLManager.py:1994-2013`). An existing row at that
+/// `(publication_id, slot)` UPDATEs in place; the Bookmark row count stays
+/// unchanged and `diff_snapshots` reports it under `overwritten` (the PK
+/// survives the UPDATE, landing in both before/after snapshots).
+fn upsert_bookmark(
+    tx: &Transaction,
+    record: &BookmarkRecord,
+    location_id: i64,
+    publication_id: i64,
+    available: &mut HashMap<&'static str, Vec<i64>>,
+) -> Result<(), ArchiveError> {
+    let existing: Option<i64> = tx
+        .query_row(
+            "SELECT BookmarkId FROM Bookmark WHERE PublicationLocationId = ? AND Slot = ?",
+            rusqlite::params![publication_id, record.slot],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| map_sqlite_err(e, "upsert_bookmark: select"))?;
+
+    if let Some(bookmark_id) = existing {
+        tx.execute(
+            "UPDATE Bookmark SET LocationId = ?, Title = ?, Snippet = ?, BlockType = ?, BlockIdentifier = ? \
+             WHERE BookmarkId = ?",
+            rusqlite::params![
+                location_id,
+                record.title,
+                record.snippet,
+                record.block_type,
+                record.block_identifier,
+                bookmark_id
+            ],
+        )
+        .map_err(|e| map_sqlite_err(e, "upsert_bookmark: update"))?;
+        return Ok(());
+    }
+
+    if let Some(id) = take_id(available, "Bookmark") {
+        tx.execute(
+            "INSERT INTO Bookmark (BookmarkId, LocationId, PublicationLocationId, Slot, Title, Snippet, BlockType, BlockIdentifier) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                id,
+                location_id,
+                publication_id,
+                record.slot,
+                record.title,
+                record.snippet,
+                record.block_type,
+                record.block_identifier
+            ],
+        )
+        .map_err(|e| map_sqlite_err(e, "upsert_bookmark: insert recycled id"))?;
+    } else {
+        tx.execute(
+            "INSERT INTO Bookmark (LocationId, PublicationLocationId, Slot, Title, Snippet, BlockType, BlockIdentifier) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![
+                location_id,
+                publication_id,
+                record.slot,
+                record.title,
+                record.snippet,
+                record.block_type,
+                record.block_identifier
+            ],
+        )
+        .map_err(|e| map_sqlite_err(e, "upsert_bookmark: insert autoincrement"))?;
+    }
+    Ok(())
+}
+
+/// Runs the ALREADY-PARSED Bookmarks `records` inside the caller's
+/// transaction (`JWLManager.py:2015-2033`): for each record, resolves the
+/// LOCATED Location (scripture if `BookNumber` is present/non-empty —
+/// Python's own `if attribs[0]:` truthiness check, else publication),
+/// resolves the bookmark's own container Location, then upserts the
+/// Bookmark. Every new id is allocated via [`take_id`] before falling back to
+/// autoincrement (D8-08).
+pub fn apply_import_bookmarks(
+    tx: &Transaction,
+    records: &[BookmarkRecord],
+    available: &mut HashMap<&'static str, Vec<i64>>,
+) -> Result<(), ArchiveError> {
+    for record in records {
+        let is_scripture = record
+            .book_number
+            .as_deref()
+            .map(|s| !s.is_empty())
+            .unwrap_or(false);
+        let location_id = if is_scripture {
+            find_or_insert_bookmark_scripture_location(tx, record, available)?
+        } else {
+            find_or_insert_bookmark_publication_location(tx, record, available)?
+        };
+        let publication_id = find_or_insert_bookmark_container_location(tx, record, available)?;
+        upsert_bookmark(tx, record, location_id, publication_id, available)?;
+    }
+    Ok(())
+}
+
+/// Runs the REAL [`apply_import_bookmarks`] + `trim_sweep` inside a
+/// transaction that is NEVER committed, returning a SEMANTIC [`DryRunReport`]
+/// over [`BOOKMARK_SNAPSHOT_TABLES`] — same shape as
+/// [`dry_run_import_favorites`].
+pub fn dry_run_import_bookmarks(
+    conn: &mut Connection,
+    records: &[BookmarkRecord],
+) -> Result<DryRunReport, ArchiveError> {
+    let guard = PragmaGuard::new(conn).map_err(|e| map_sqlite_err(e, "snapshotting pragmas"))?;
+
+    conn.execute_batch(
+        "PRAGMA temp_store = 'MEMORY'; \
+         PRAGMA synchronous = 'OFF'; \
+         PRAGMA journal_mode = 'MEMORY'; \
+         PRAGMA foreign_keys = 'OFF';",
+    )
+    .map_err(|e| map_sqlite_err(e, "setting dry-run pragmas"))?;
+
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| map_sqlite_err(e, "opening dry-run transaction"))?;
+
+    let mut available = compute_available_ids(&tx)?;
+    let before = snapshot_tables(&tx, BOOKMARK_SNAPSHOT_TABLES)?;
+    apply_import_bookmarks(&tx, records, &mut available)?;
+    trim_sweep(&tx)?;
+    let after = snapshot_tables(&tx, BOOKMARK_SNAPSHOT_TABLES)?;
+
+    let report = diff_snapshots(&before, &after);
+
+    drop(tx);
+    drop(guard);
+
+    Ok(report)
+}
+
+// ---------------------------------------------------------------------------
+// Annotations (08-02-PLAN.md Task 2) — bracket-tag records, `{END}`
+// sentinel, conditional `{ISSUE}` bracket. Ports `import_annotations`
+// (`JWLManager.py:1871-1956`).
+// ---------------------------------------------------------------------------
+
+/// One parsed Annotations record. `issue`/`doc` are `None` exactly when the
+/// header omitted the bracket / wrote the literal `None` string
+/// (`JWLManager.py:1922`'s `fill_null(0)` happens later, at insert time, in
+/// [`find_or_insert_annotation_location`] — kept out of the record itself so
+/// the record is a faithful, unmodified capture of the file's content).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnnotationRecord {
+    pub pub_sym: String,
+    pub issue: Option<i64>,
+    pub doc: Option<i64>,
+    pub label: String,
+    /// The captured record body — NOT trimmed at parse time (Python:
+    /// `attribs['VALUE'] = item.group(2)`, `:1897`); trimming happens at
+    /// insert time (`.strip()`, `:1930`), in [`apply_import_annotations`].
+    pub value: String,
+}
+
+/// Scans one record's header text for `{KEY=value}` pairs — ports
+/// `process_header`'s `regex.findall('{(.*?)=(.*?)}', line)`
+/// (`JWLManager.py:1883-1887`) as an explicit forward scan (no lookahead
+/// needed here, unlike the record-boundary scan below).
+fn parse_header_attrs(header: &str) -> BTreeMap<String, String> {
+    let mut attrs = BTreeMap::new();
+    let mut rest = header;
+    while let Some(open) = rest.find('{') {
+        let after_open = &rest[open + 1..];
+        let Some(close) = after_open.find('}') else {
+            break;
+        };
+        let inner = &after_open[..close];
+        if let Some(eq) = inner.find('=') {
+            attrs.insert(inner[..eq].to_string(), inner[eq + 1..].to_string());
+        }
+        rest = &after_open[close + 1..];
+    }
+    attrs
+}
+
+/// Parses a whole Annotations `.txt` file's TEXT into records, entirely
+/// BEFORE any transaction opens (D8-04). Line 1 must contain `{ANNOTATIONS}`.
+///
+/// Record boundaries are found via an explicit forward scan for the literal
+/// 5-byte sequence `\n==={` — Rust's `regex` crate has no lookahead, so this
+/// replaces Python's `regex.finditer('^===({.*?})===\n(.*?)(?=\n==={)', ...)`
+/// (`JWLManager.py:1892`) with the equivalent boundary-list approach: each
+/// occurrence of `\n==={` starts a new record (or, for the LAST occurrence,
+/// terminates the preceding record as the `{END}` sentinel — the sentinel is
+/// NEVER itself parsed as a data record, matching Python's lookahead
+/// behavior exactly, RESEARCH `## Wire Formats` Annotations subsection).
+/// A header lacking `PUB`/`DOC`/`LABEL`, or a record with no `===\n` header
+/// terminator, is `ImportMalformed` naming the 1-indexed record number (the
+/// `line` field is reused to carry a record index here, since bracket-tag
+/// records have no single meaningful source line).
+pub fn parse_annotations_file(text: &str) -> Result<Vec<AnnotationRecord>, ArchiveError> {
+    let first_line_end = text.find('\n').unwrap_or(text.len());
+    let first_line = &text[..first_line_end];
+    if !first_line.contains("{ANNOTATIONS}") {
+        return Err(ArchiveError::ImportMalformed {
+            category: "Annotations".to_string(),
+            line: 1,
+            reason: "missing {ANNOTATIONS} tag line".to_string(),
+        });
+    }
+    let rest = if first_line_end < text.len() {
+        &text[first_line_end + 1..]
+    } else {
+        ""
+    };
+
+    let boundaries: Vec<usize> = rest
+        .match_indices("\n===")
+        .filter(|(idx, _)| rest[*idx + 4..].starts_with('{'))
+        .map(|(idx, _)| idx)
+        .collect();
+
+    let mut records = Vec::new();
+    if boundaries.len() < 2 {
+        // Zero complete records (no data, or a dangling record with no
+        // {END} terminator) — Python's regex simply yields no matches here
+        // too; not an error.
+        return Ok(records);
+    }
+
+    for (i, window) in boundaries.windows(2).enumerate() {
+        let (start, end) = (window[0], window[1]);
+        let chunk = &rest[start + 4..end]; // skip the leading "\n==="
+        let record_no = i + 1;
+
+        let Some(header_end) = chunk.find("===\n") else {
+            return Err(ArchiveError::ImportMalformed {
+                category: "Annotations".to_string(),
+                line: record_no,
+                reason: "unterminated record header".to_string(),
+            });
+        };
+        let header = &chunk[..header_end];
+        let body = &chunk[header_end + 4..];
+
+        let attrs = parse_header_attrs(header);
+        let malformed = |reason: &str| ArchiveError::ImportMalformed {
+            category: "Annotations".to_string(),
+            line: record_no,
+            reason: reason.to_string(),
+        };
+
+        let pub_sym = attrs
+            .get("PUB")
+            .cloned()
+            .ok_or_else(|| malformed("missing {PUB=...} attribute"))?;
+        let doc_raw = attrs
+            .get("DOC")
+            .ok_or_else(|| malformed("missing {DOC=...} attribute"))?;
+        let doc = if doc_raw == "None" {
+            None
+        } else {
+            Some(
+                doc_raw
+                    .parse::<i64>()
+                    .map_err(|_| malformed(&format!("unparseable DOC value: {doc_raw}")))?,
+            )
+        };
+        let label = attrs
+            .get("LABEL")
+            .cloned()
+            .ok_or_else(|| malformed("missing {LABEL=...} attribute"))?;
+        let issue = match attrs.get("ISSUE") {
+            Some(raw) => Some(
+                raw.parse::<i64>()
+                    .map_err(|_| malformed(&format!("unparseable ISSUE value: {raw}")))?,
+            ),
+            None => None,
+        };
+
+        records.push(AnnotationRecord {
+            pub_sym,
+            issue,
+            doc,
+            label,
+            value: body.to_string(),
+        });
+    }
+    Ok(records)
+}
+
+/// Finds-or-inserts the Annotation's `Location` — ports `add_location`
+/// (`JWLManager.py:1909-1919`). Dedup key: `DocumentId + IssueTagNumber +
+/// KeySymbol + MepsLanguage IS NULL + Type = 0`, with a missing `ISSUE`
+/// bracket filled to `0` (never NULL) BEFORE the query, matching
+/// `fill_null(0)` (`:1922`).
+fn find_or_insert_annotation_location(
+    tx: &Transaction,
+    record: &AnnotationRecord,
+    available: &mut HashMap<&'static str, Vec<i64>>,
+) -> Result<i64, ArchiveError> {
+    let issue = record.issue.unwrap_or(0);
+    let existing: Option<i64> = tx
+        .query_row(
+            "SELECT LocationId FROM Location \
+             WHERE DocumentId = ? AND IssueTagNumber = ? AND KeySymbol = ? AND MepsLanguage IS NULL AND Type = 0",
+            rusqlite::params![record.doc, issue, record.pub_sym],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| map_sqlite_err(e, "find_or_insert_annotation_location: select"))?;
+    if let Some(id) = existing {
+        return Ok(id);
+    }
+
+    if let Some(id) = take_id(available, "Location") {
+        tx.execute(
+            "INSERT INTO Location (LocationId, DocumentId, IssueTagNumber, KeySymbol, MepsLanguage, Type) \
+             VALUES (?1, ?2, ?3, ?4, NULL, 0)",
+            rusqlite::params![id, record.doc, issue, record.pub_sym],
+        )
+        .map_err(|e| map_sqlite_err(e, "find_or_insert_annotation_location: insert recycled id"))?;
+        Ok(id)
+    } else {
+        tx.execute(
+            "INSERT INTO Location (DocumentId, IssueTagNumber, KeySymbol, MepsLanguage, Type) \
+             VALUES (?1, ?2, ?3, NULL, 0)",
+            rusqlite::params![record.doc, issue, record.pub_sym],
+        )
+        .map_err(|e| map_sqlite_err(e, "find_or_insert_annotation_location: insert autoincrement"))?;
+        Ok(tx.last_insert_rowid())
+    }
+}
+
+/// Runs the ALREADY-PARSED Annotations `records` inside the caller's
+/// transaction (`JWLManager.py:1926-1935`): resolves/creates each record's
+/// `Location`, then upserts `InputField` on `(LocationId, TextTag)` — a
+/// re-imported annotation UPDATEs `Value` in place rather than duplicating.
+/// The `Value` is trimmed HERE, at insert time (`.strip()`, `:1930`), not at
+/// parse time.
+pub fn apply_import_annotations(
+    tx: &Transaction,
+    records: &[AnnotationRecord],
+    available: &mut HashMap<&'static str, Vec<i64>>,
+) -> Result<(), ArchiveError> {
+    for record in records {
+        let location_id = find_or_insert_annotation_location(tx, record, available)?;
+        tx.execute(
+            "INSERT INTO InputField (LocationId, TextTag, Value) VALUES (?1, ?2, ?3) \
+             ON CONFLICT(LocationId, TextTag) DO UPDATE SET Value = excluded.Value",
+            rusqlite::params![location_id, record.label, record.value.trim()],
+        )
+        .map_err(|e| map_sqlite_err(e, "apply_import_annotations: upsert InputField"))?;
+    }
+    Ok(())
+}
+
+/// Runs the REAL [`apply_import_annotations`] + `trim_sweep` inside a
+/// transaction that is NEVER committed, returning a SEMANTIC [`DryRunReport`]
+/// over [`ANNOTATION_SNAPSHOT_TABLES`] — same shape as
+/// [`dry_run_import_favorites`]/[`dry_run_import_bookmarks`].
+pub fn dry_run_import_annotations(
+    conn: &mut Connection,
+    records: &[AnnotationRecord],
+) -> Result<DryRunReport, ArchiveError> {
+    let guard = PragmaGuard::new(conn).map_err(|e| map_sqlite_err(e, "snapshotting pragmas"))?;
+
+    conn.execute_batch(
+        "PRAGMA temp_store = 'MEMORY'; \
+         PRAGMA synchronous = 'OFF'; \
+         PRAGMA journal_mode = 'MEMORY'; \
+         PRAGMA foreign_keys = 'OFF';",
+    )
+    .map_err(|e| map_sqlite_err(e, "setting dry-run pragmas"))?;
+
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| map_sqlite_err(e, "opening dry-run transaction"))?;
+
+    let mut available = compute_available_ids(&tx)?;
+    let before = snapshot_tables(&tx, ANNOTATION_SNAPSHOT_TABLES)?;
+    apply_import_annotations(&tx, records, &mut available)?;
+    trim_sweep(&tx)?;
+    let after = snapshot_tables(&tx, ANNOTATION_SNAPSHOT_TABLES)?;
+
+    let report = diff_snapshots(&before, &after);
 
     drop(tx);
     drop(guard);

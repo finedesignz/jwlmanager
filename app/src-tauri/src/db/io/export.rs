@@ -7,6 +7,7 @@
 //! never a normalized/parsed comparison.
 
 use super::header::{build_export_header, ExportHeaderCtx};
+use crate::db::delete::{NonEmptyBookmarkIds, NonEmptyLocationIds};
 use crate::db::favorites::NonEmptyTagMapIds;
 use crate::error::ArchiveError;
 use rusqlite::types::Value;
@@ -129,6 +130,210 @@ pub fn export_favorites(
     }
 
     Ok(lines.len())
+}
+
+/// Bookmarks never writes an `==={END}===` sentinel (flat row format, same
+/// asymmetry as [`FAVORITES_WRITES_END_SENTINEL`]) — Annotations, below,
+/// DOES (RESEARCH Pitfall 1). Kept as a named, documented constant rather
+/// than a bare `false` literal at the call site so a future refactor can't
+/// silently drop the fact.
+#[allow(dead_code)] // documented fact, referenced by module docs/tests rather than code
+pub(crate) const BOOKMARKS_WRITES_END_SENTINEL: bool = false;
+
+/// Annotations DOES write an `==={END}===` sentinel — the counterpart to
+/// [`BOOKMARKS_WRITES_END_SENTINEL`]/[`FAVORITES_WRITES_END_SENTINEL`].
+#[allow(dead_code)] // documented fact, referenced by module docs/tests rather than code
+pub(crate) const ANNOTATIONS_WRITES_END_SENTINEL: bool = true;
+
+/// Reads every Bookmark row (or, when `ids` is given, exactly the selected
+/// `BookmarkId`s) formatted via [`join_row`], applying the SAME `|`->`¦`
+/// (U+00A6 BROKEN BAR) substitution Python's SQL `REPLACE()` performs on
+/// `Title`/`Snippet` ONLY (`JWLManager.py:1444`) — done IN SQL, not Rust
+/// string code, so the substitution happens at the identical layer/collation
+/// as Python (RESEARCH `## Wire Formats` Bookmarks subsection). No `ORDER
+/// BY` — Python's own `export_bookmarks` has none either, so row order is
+/// whatever SQLite's natural scan order yields.
+fn read_bookmark_lines(
+    conn: &Connection,
+    ids: Option<&NonEmptyBookmarkIds>,
+) -> Result<Vec<String>, ArchiveError> {
+    let base_sql = "SELECT l.BookNumber, l.ChapterNumber, l.DocumentId, l.IssueTagNumber, \
+         l.KeySymbol, l.MepsLanguage, l.Type, Slot, REPLACE(b.Title, \"|\", \"\u{A6}\"), \
+         REPLACE(Snippet, \"|\", \"\u{A6}\"), BlockType, BlockIdentifier \
+         FROM Bookmark b LEFT JOIN Location l USING (LocationId)";
+
+    let (sql, bound): (String, Vec<i64>) = match ids {
+        Some(ids) => {
+            let placeholders: String = std::iter::repeat_n("?", ids.len())
+                .collect::<Vec<_>>()
+                .join(",");
+            (
+                format!("{base_sql} WHERE BookmarkId IN ({placeholders})"),
+                ids.iter().copied().collect(),
+            )
+        }
+        None => (base_sql.to_string(), Vec::new()),
+    };
+
+    let mut stmt = conn
+        .prepare(&sql)
+        .map_err(|e| map_sqlite_err(e, "read_bookmark_lines: prepare"))?;
+    let rows = stmt
+        .query_map(rusqlite::params_from_iter(bound.iter()), |row| {
+            let mut fields = Vec::with_capacity(12);
+            for i in 0..12 {
+                let value: Value = row.get(i)?;
+                fields.push(value);
+            }
+            Ok(fields)
+        })
+        .map_err(|e| map_sqlite_err(e, "read_bookmark_lines: query"))?;
+
+    let mut lines = Vec::new();
+    for row in rows {
+        let fields = row.map_err(|e| map_sqlite_err(e, "read_bookmark_lines: read row"))?;
+        let fields: Vec<Option<String>> = fields.into_iter().map(value_to_field).collect();
+        lines.push(join_row(&fields));
+    }
+    Ok(lines)
+}
+
+/// Exports Bookmarks (whole category when `ids` is `None`, D8-10
+/// selection-optional) to `path` as a `.txt` file: [`build_export_header`]
+/// tagged `{BOOKMARKS}`, then one `\n`-prefixed 12-field data row per
+/// bookmark. Writes NO `==={END}===` sentinel
+/// ([`BOOKMARKS_WRITES_END_SENTINEL`]). Never mutates the archive (D8-09).
+pub fn export_bookmarks(
+    conn: &Connection,
+    ids: Option<&NonEmptyBookmarkIds>,
+    header: &ExportHeaderCtx,
+    path: &Path,
+) -> Result<usize, ArchiveError> {
+    let lines = read_bookmark_lines(conn, ids)?;
+
+    let mut file = std::fs::File::create(path).map_err(ArchiveError::from)?;
+    file.write_all(build_export_header(header).as_bytes())
+        .map_err(ArchiveError::from)?;
+    for line in &lines {
+        file.write_all(b"\n").map_err(ArchiveError::from)?;
+        file.write_all(line.as_bytes()).map_err(ArchiveError::from)?;
+    }
+
+    Ok(lines.len())
+}
+
+/// One exported Annotation record's already-formatted attributes, ordered
+/// per `JWLManager.py:1394-1404`.
+struct AnnotationExportRow {
+    label: String,
+    value: String,
+    /// `str(DocumentId)` — literally the four-character string `None` when
+    /// NULL (`JWLManager.py:1418`'s `str(item['DOC'])`), unlike `pub_sym`
+    /// below which is never wrapped in `str()` by Python.
+    doc: String,
+    /// `IssueTagNumber` when `> 10000000`, else omitted entirely (never
+    /// rendered as `{ISSUE=None}` or `{ISSUE=0}`) — `JWLManager.py:1400-1403`.
+    issue: Option<i64>,
+    /// The raw `KeySymbol` string. Python concatenates this directly
+    /// (`'{PUB='+item['PUB']+'}'`, NOT `str()`-wrapped) — a NULL `KeySymbol`
+    /// would raise a `TypeError` and crash Python's own export; this is a
+    /// pathological/corrupt-archive case no valid data hits, so Rust renders
+    /// an empty string rather than reproducing a crash (a documented,
+    /// harmless strengthening, not a behavior Rust needs "parity" with).
+    pub_sym: String,
+}
+
+/// Reads every Annotation (`InputField`) row (or, when `ids` is given,
+/// exactly the selected `LocationId`s — the Annotations browse-list identity,
+/// `db::delete::NonEmptyLocationIds`'s doc comment) into
+/// [`AnnotationExportRow`]s, `ORDER BY doc, i` exactly as Python's SQL
+/// (`JWLManager.py:1378-1392`) — `i` is the numeric suffix parsed out of
+/// `TextTag` via `CAST(TRIM(TextTag, 'abcdefghijklmnopqrstuvwxyz') AS INT)`.
+fn read_annotation_rows(
+    conn: &Connection,
+    ids: Option<&NonEmptyLocationIds>,
+) -> Result<Vec<AnnotationExportRow>, ArchiveError> {
+    let base_sql = "SELECT TextTag, Value, l.DocumentId doc, l.IssueTagNumber, l.KeySymbol, \
+         CAST(TRIM(TextTag, 'abcdefghijklmnopqrstuvwxyz') AS INT) i \
+         FROM InputField LEFT JOIN Location l USING (LocationId) \
+         WHERE Value <> '' AND Value IS NOT NULL";
+
+    let (sql, bound): (String, Vec<i64>) = match ids {
+        Some(ids) => {
+            let placeholders: String = std::iter::repeat_n("?", ids.len())
+                .collect::<Vec<_>>()
+                .join(",");
+            (
+                format!("{base_sql} AND LocationId IN ({placeholders}) ORDER BY doc, i"),
+                ids.iter().copied().collect(),
+            )
+        }
+        None => (format!("{base_sql} ORDER BY doc, i"), Vec::new()),
+    };
+
+    let mut stmt = conn
+        .prepare(&sql)
+        .map_err(|e| map_sqlite_err(e, "read_annotation_rows: prepare"))?;
+    let rows = stmt
+        .query_map(rusqlite::params_from_iter(bound.iter()), |row| {
+            let label: String = row.get(0)?;
+            let value: String = row.get(1)?;
+            let doc: Option<i64> = row.get(2)?;
+            let issue_tag_number: Option<i64> = row.get(3)?;
+            let pub_sym: Option<String> = row.get(4)?;
+            Ok((label, value, doc, issue_tag_number, pub_sym))
+        })
+        .map_err(|e| map_sqlite_err(e, "read_annotation_rows: query"))?;
+
+    let mut out = Vec::new();
+    for row in rows {
+        let (label, value, doc, issue_tag_number, pub_sym) =
+            row.map_err(|e| map_sqlite_err(e, "read_annotation_rows: read row"))?;
+        out.push(AnnotationExportRow {
+            label,
+            value: value.trim().to_string(),
+            doc: doc.map(|d| d.to_string()).unwrap_or_else(|| "None".to_string()),
+            issue: issue_tag_number.filter(|n| *n > 10_000_000),
+            pub_sym: pub_sym.unwrap_or_default(),
+        });
+    }
+    Ok(out)
+}
+
+/// Exports Annotations (whole category when `ids` is `None`, D8-10
+/// selection-optional) to `path` as a `.txt` file: [`build_export_header`]
+/// tagged `{ANNOTATIONS}`, then per record
+/// `\n==={PUB=…}[{ISSUE=…}]{DOC=…}{LABEL=…}===\n<Value>`, then the literal
+/// `\n==={END}===` with NO trailing newline
+/// ([`ANNOTATIONS_WRITES_END_SENTINEL`], the counterpart to Bookmarks'
+/// `false` — RESEARCH Pitfall 1). Never mutates the archive (D8-09).
+pub fn export_annotations(
+    conn: &Connection,
+    ids: Option<&NonEmptyLocationIds>,
+    header: &ExportHeaderCtx,
+    path: &Path,
+) -> Result<usize, ArchiveError> {
+    let rows = read_annotation_rows(conn, ids)?;
+
+    let mut file = std::fs::File::create(path).map_err(ArchiveError::from)?;
+    file.write_all(build_export_header(header).as_bytes())
+        .map_err(ArchiveError::from)?;
+    for row in &rows {
+        file.write_all(b"\n===").map_err(ArchiveError::from)?;
+        file.write_all(format!("{{PUB={}}}", row.pub_sym).as_bytes())
+            .map_err(ArchiveError::from)?;
+        if let Some(issue) = row.issue {
+            file.write_all(format!("{{ISSUE={issue}}}").as_bytes())
+                .map_err(ArchiveError::from)?;
+        }
+        file.write_all(format!("{{DOC={}}}{{LABEL={}}}===\n", row.doc, row.label).as_bytes())
+            .map_err(ArchiveError::from)?;
+        file.write_all(row.value.as_bytes())
+            .map_err(ArchiveError::from)?;
+    }
+    file.write_all(b"\n==={END}===").map_err(ArchiveError::from)?;
+
+    Ok(rows.len())
 }
 
 #[cfg(test)]

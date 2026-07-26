@@ -8,8 +8,9 @@
 
 mod common;
 
+use jwlmanager_lib::db::delete::{NonEmptyBookmarkIds, NonEmptyLocationIds};
 use jwlmanager_lib::db::favorites::NonEmptyTagMapIds;
-use jwlmanager_lib::db::io::export::export_favorites;
+use jwlmanager_lib::db::io::export::{export_annotations, export_bookmarks, export_favorites};
 use jwlmanager_lib::db::io::header::ExportHeaderCtx;
 use rusqlite::Connection;
 use tempfile::TempDir;
@@ -135,4 +136,270 @@ fn selection_scoped_export_contains_only_the_selected_rows() {
     let text = std::fs::read_to_string(&out_path).expect("read exported file");
     assert!(text.contains("None|5|0|pub-x|0|0"));
     assert!(!text.contains("None|None|0|nwt|0|1"));
+}
+
+// ---------------------------------------------------------------------------
+// Bookmarks (08-02-PLAN.md Task 1, IO-01): 12 flat pipe fields, `¦` escaping
+// on Title/Snippet ONLY, no `{END}` sentinel.
+// ---------------------------------------------------------------------------
+
+fn pinned_bookmarks_header() -> ExportHeaderCtx<'static> {
+    ExportHeaderCtx {
+        category_tag: "{BOOKMARKS}",
+        archive_name: "MyArchive.jwlibrary".to_string(),
+        app_version: "0.1.0".to_string(),
+        timestamp: "2026-01-01 @ 00:00:00".to_string(),
+    }
+}
+
+/// Seeds the exact two-bookmark fixture `bookmarks_golden.txt` was
+/// hand-authored against: a scripture bookmark (Location Type=0,
+/// Book/Chapter present) whose Title contains a literal `|`, and a
+/// publication bookmark (Location Type=0, DocumentId present) whose Snippet
+/// contains a literal `|` — both must export with `¦` in place of `|`.
+fn seed_bookmarks_golden_fixture_rows(db_path: &std::path::Path) -> (i64, i64) {
+    let conn = Connection::open(db_path).expect("open fixture db");
+    conn.execute_batch("PRAGMA foreign_keys = OFF").expect("fk off");
+
+    conn.execute(
+        "INSERT INTO Location (BookNumber, ChapterNumber, DocumentId, Track, IssueTagNumber, KeySymbol, MepsLanguage, Type) \
+         VALUES (1, 1, NULL, NULL, 0, 'nwt', 0, 0)",
+        [],
+    )
+    .expect("insert scripture Location");
+    let scripture_loc = conn.last_insert_rowid();
+
+    conn.execute(
+        "INSERT INTO Location (BookNumber, ChapterNumber, DocumentId, Track, IssueTagNumber, KeySymbol, MepsLanguage, Type) \
+         VALUES (NULL, NULL, 1001, NULL, 0, 'pub-x', 0, 0)",
+        [],
+    )
+    .expect("insert publication Location");
+    let pub_loc = conn.last_insert_rowid();
+
+    conn.execute(
+        "INSERT INTO Location (KeySymbol, MepsLanguage, Type) VALUES ('nwt', 0, 1)",
+        [],
+    )
+    .expect("insert scripture container Location");
+    let scripture_container = conn.last_insert_rowid();
+
+    conn.execute(
+        "INSERT INTO Location (KeySymbol, MepsLanguage, Type) VALUES ('pub-x', 0, 1)",
+        [],
+    )
+    .expect("insert publication container Location");
+    let pub_container = conn.last_insert_rowid();
+
+    conn.execute(
+        "INSERT INTO Bookmark (LocationId, PublicationLocationId, Slot, Title, Snippet, BlockType, BlockIdentifier) \
+         VALUES (?1, ?2, 0, 'Genesis | Note', NULL, 1, 5)",
+        rusqlite::params![scripture_loc, scripture_container],
+    )
+    .expect("insert scripture Bookmark");
+    let bookmark1 = conn.last_insert_rowid();
+
+    conn.execute(
+        "INSERT INTO Bookmark (LocationId, PublicationLocationId, Slot, Title, Snippet, BlockType, BlockIdentifier) \
+         VALUES (?1, ?2, 1, 'Pub Bookmark', 'Has a | pipe too', 0, NULL)",
+        rusqlite::params![pub_loc, pub_container],
+    )
+    .expect("insert publication Bookmark");
+    let bookmark2 = conn.last_insert_rowid();
+
+    (bookmark1, bookmark2)
+}
+
+#[test]
+fn exported_bookmarks_match_golden_fixture_exactly() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_bookmarks_golden_fixture_rows(&db_path);
+    let conn = Connection::open(&db_path).expect("open db");
+
+    let out_dir = TempDir::new().expect("tempdir");
+    let out_path = out_dir.path().join("bookmarks_out.txt");
+    let count =
+        export_bookmarks(&conn, None, &pinned_bookmarks_header(), &out_path).expect("export");
+    assert_eq!(count, 2);
+
+    let actual = common::read_file_bytes(&out_path);
+    let golden_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/wire/bookmarks_golden.txt");
+    let golden = common::read_file_bytes(&golden_path);
+    assert_eq!(actual, golden, "exported Bookmarks bytes must byte-match the golden fixture");
+}
+
+#[test]
+fn exported_bookmarks_never_contain_end_sentinel() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_bookmarks_golden_fixture_rows(&db_path);
+    let conn = Connection::open(&db_path).expect("open db");
+
+    let out_dir = TempDir::new().expect("tempdir");
+    let out_path = out_dir.path().join("bookmarks_out.txt");
+    export_bookmarks(&conn, None, &pinned_bookmarks_header(), &out_path).expect("export");
+
+    let text = std::fs::read_to_string(&out_path).expect("read exported file");
+    assert!(!text.contains("==={END}==="), "Bookmarks export must never write an {{END}} sentinel");
+}
+
+#[test]
+fn bookmark_title_pipe_exports_as_broken_bar() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_bookmarks_golden_fixture_rows(&db_path);
+    let conn = Connection::open(&db_path).expect("open db");
+
+    let out_dir = TempDir::new().expect("tempdir");
+    let out_path = out_dir.path().join("bookmarks_out.txt");
+    export_bookmarks(&conn, None, &pinned_bookmarks_header(), &out_path).expect("export");
+
+    let text = std::fs::read_to_string(&out_path).expect("read exported file");
+    assert!(text.contains("Genesis \u{A6} Note"), "a literal | in Title must export as \u{A6}");
+    assert!(!text.contains("Genesis | Note"), "the literal | must not survive export");
+}
+
+#[test]
+fn bookmarks_selection_scoped_export_contains_only_the_selected_row() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    let (bookmark1, _bookmark2) = seed_bookmarks_golden_fixture_rows(&db_path);
+    let conn = Connection::open(&db_path).expect("open db");
+
+    let ids = NonEmptyBookmarkIds::try_from(vec![bookmark1]).expect("non-empty selection");
+    let out_dir = TempDir::new().expect("tempdir");
+    let out_path = out_dir.path().join("bookmarks_selected.txt");
+    let count =
+        export_bookmarks(&conn, Some(&ids), &pinned_bookmarks_header(), &out_path).expect("export");
+    assert_eq!(count, 1);
+
+    let text = std::fs::read_to_string(&out_path).expect("read exported file");
+    assert!(text.contains("Genesis \u{A6} Note"));
+    assert!(!text.contains("Pub Bookmark"));
+}
+
+// ---------------------------------------------------------------------------
+// Annotations (08-02-PLAN.md Task 2, IO-01): bracket-tag records, `{END}`
+// sentinel, conditional `{ISSUE}` bracket.
+// ---------------------------------------------------------------------------
+
+fn pinned_annotations_header() -> ExportHeaderCtx<'static> {
+    ExportHeaderCtx {
+        category_tag: "{ANNOTATIONS}",
+        archive_name: "MyArchive.jwlibrary".to_string(),
+        app_version: "0.1.0".to_string(),
+        timestamp: "2026-01-01 @ 00:00:00".to_string(),
+    }
+}
+
+/// Seeds the exact two-record fixture `annotations_golden.txt` was
+/// hand-authored against: one WITH an `{ISSUE}` bracket (IssueTagNumber
+/// 20240101 > 10000000), one WITHOUT (1234 <= 10000000), and a multi-line
+/// Value on the second, padded on the first to prove `.trim()` at export.
+fn seed_annotations_golden_fixture_rows(db_path: &std::path::Path) -> (i64, i64) {
+    let conn = Connection::open(db_path).expect("open fixture db");
+    conn.execute_batch("PRAGMA foreign_keys = OFF").expect("fk off");
+
+    conn.execute(
+        "INSERT INTO Location (BookNumber, ChapterNumber, DocumentId, Track, IssueTagNumber, KeySymbol, MepsLanguage, Type) \
+         VALUES (NULL, NULL, NULL, 1, 20240101, 'w', 0, 0)",
+        [],
+    )
+    .expect("insert issue Location");
+    let issue_loc = conn.last_insert_rowid();
+
+    conn.execute(
+        "INSERT INTO Location (BookNumber, ChapterNumber, DocumentId, Track, IssueTagNumber, KeySymbol, MepsLanguage, Type) \
+         VALUES (NULL, NULL, NULL, 1, 1234, 'w', 0, 0)",
+        [],
+    )
+    .expect("insert non-issue Location");
+    let plain_loc = conn.last_insert_rowid();
+
+    conn.execute(
+        "INSERT INTO InputField (LocationId, TextTag, Value) VALUES (?1, 'heading001', ' Some heading value ')",
+        rusqlite::params![issue_loc],
+    )
+    .expect("insert heading InputField");
+
+    conn.execute(
+        "INSERT INTO InputField (LocationId, TextTag, Value) VALUES (?1, 'note002', 'Line one\nLine two')",
+        rusqlite::params![plain_loc],
+    )
+    .expect("insert note InputField");
+
+    (issue_loc, plain_loc)
+}
+
+#[test]
+fn exported_annotations_match_golden_fixture_exactly() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_annotations_golden_fixture_rows(&db_path);
+    let conn = Connection::open(&db_path).expect("open db");
+
+    let out_dir = TempDir::new().expect("tempdir");
+    let out_path = out_dir.path().join("annotations_out.txt");
+    let count =
+        export_annotations(&conn, None, &pinned_annotations_header(), &out_path).expect("export");
+    assert_eq!(count, 2);
+
+    let actual = common::read_file_bytes(&out_path);
+    let golden_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/wire/annotations_golden.txt");
+    let golden = common::read_file_bytes(&golden_path);
+    assert_eq!(actual, golden, "exported Annotations bytes must byte-match the golden fixture");
+}
+
+#[test]
+fn exported_annotations_end_with_end_sentinel_and_no_trailing_newline() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_annotations_golden_fixture_rows(&db_path);
+    let conn = Connection::open(&db_path).expect("open db");
+
+    let out_dir = TempDir::new().expect("tempdir");
+    let out_path = out_dir.path().join("annotations_out.txt");
+    export_annotations(&conn, None, &pinned_annotations_header(), &out_path).expect("export");
+
+    let bytes = common::read_file_bytes(&out_path);
+    let text = String::from_utf8(bytes).expect("utf8");
+    assert!(text.ends_with("\n==={END}==="), "Annotations export must end with the {{END}} sentinel");
+    assert!(!text.ends_with('\n'), "no trailing newline after the {{END}} sentinel");
+}
+
+#[test]
+fn issue_bracket_present_only_above_ten_million() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_annotations_golden_fixture_rows(&db_path);
+    let conn = Connection::open(&db_path).expect("open db");
+
+    let out_dir = TempDir::new().expect("tempdir");
+    let out_path = out_dir.path().join("annotations_out.txt");
+    export_annotations(&conn, None, &pinned_annotations_header(), &out_path).expect("export");
+
+    let text = std::fs::read_to_string(&out_path).expect("read exported file");
+    assert!(text.contains("{ISSUE=20240101}"));
+    // The non-issue record's header must carry no {ISSUE at all.
+    let note_header_start = text.find("{LABEL=note002}").expect("find note002 header");
+    let preceding = &text[..note_header_start];
+    let last_boundary = preceding.rfind("\n===").expect("find record boundary");
+    assert!(
+        !preceding[last_boundary..].contains("{ISSUE"),
+        "the 1234 IssueTagNumber must not produce an {{ISSUE}} bracket"
+    );
+}
+
+#[test]
+fn annotations_selection_scoped_export_contains_only_the_selected_location() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    let (issue_loc, _plain_loc) = seed_annotations_golden_fixture_rows(&db_path);
+    let conn = Connection::open(&db_path).expect("open db");
+
+    let ids = NonEmptyLocationIds::try_from(vec![issue_loc]).expect("non-empty selection");
+    let out_dir = TempDir::new().expect("tempdir");
+    let out_path = out_dir.path().join("annotations_selected.txt");
+    let count = export_annotations(&conn, Some(&ids), &pinned_annotations_header(), &out_path)
+        .expect("export");
+    assert_eq!(count, 1);
+
+    let text = std::fs::read_to_string(&out_path).expect("read exported file");
+    assert!(text.contains("heading001"));
+    assert!(!text.contains("note002"));
 }

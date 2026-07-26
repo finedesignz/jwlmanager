@@ -118,6 +118,31 @@ pub(crate) const FAVORITE_SNAPSHOT_TABLES: &[(&str, &str)] = &[
     ("TagMap", "TagMapId"),
 ];
 
+/// Bookmarks import (08-02-PLAN.md Task 1) affected-table set: `Location`
+/// (the scripture/publication/bookmark-container Locations `apply_import_bookmarks`
+/// finds-or-inserts) and `Bookmark` (the upserted row itself). Same
+/// narrow-set-over-`TRACKED_TABLES` precedent as [`FAVORITE_SNAPSHOT_TABLES`]
+/// — narrowing keeps `diff_snapshots`'s `overwritten` count meaningful (an
+/// UPDATEd Bookmark keeps its PK, so it lands in the before/after
+/// intersection) without unrelated pre-existing rows in OTHER tables
+/// polluting the count.
+pub(crate) const BOOKMARK_SNAPSHOT_TABLES: &[(&str, &str)] = &[
+    ("Location", "LocationId"),
+    ("Bookmark", "BookmarkId"),
+];
+
+/// Annotations import (08-02-PLAN.md Task 2) affected-table set: `Location`
+/// (the dedup'd publication Location) and `InputField` (via its `rowid` —
+/// `InputField`'s real PK, `(LocationId, TextTag)`, is non-integer, same
+/// precedent as [`TRACKED_TABLES`]'s own `("InputField", "rowid")` entry). An
+/// `ON CONFLICT DO UPDATE`'d `InputField` row keeps the same `rowid` (an
+/// UPDATE, not a delete+insert), so it lands in the before/after
+/// intersection and reports as `overwritten`.
+pub(crate) const ANNOTATION_SNAPSHOT_TABLES: &[(&str, &str)] = &[
+    ("Location", "LocationId"),
+    ("InputField", "rowid"),
+];
+
 pub(crate) fn snapshot_pks(
     tx: &Transaction,
     table: &str,

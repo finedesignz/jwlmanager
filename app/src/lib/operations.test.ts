@@ -33,13 +33,13 @@ describe("operationSet (D6-08 capability descriptor)", () => {
     expect(del).toMatchObject({ deferred: false, enabled: true });
   });
 
-  it("Bookmarks at 3 selected: Bookmarks:delete is live and enabled (D7-10, 07-05-PLAN.md); export/import stay deferred", () => {
+  it("Bookmarks at 3 selected: Bookmarks:delete/export/import are live and enabled (D7-10, 08-02-PLAN.md)", () => {
     const ops = operationSet("Bookmarks", 3);
     expect(ops.length).toBeGreaterThan(0);
     const del = ops.find((o) => o.op === "delete");
     expect(del).toMatchObject({ deferred: false, enabled: true });
     for (const o of ops) {
-      if (o.op === "delete") continue;
+      if (o.op === "delete" || o.op === "export" || o.op === "import") continue;
       expect(o.deferred, `${o.op} should be deferred`).toBe(true);
       expect(o.enabled, `${o.op} should be disabled`).toBe(false);
     }
@@ -92,8 +92,12 @@ describe("operationSet (D6-08 capability descriptor)", () => {
       "Highlights:color",
       "Highlights:delete",
       "Bookmarks:delete",
+      "Bookmarks:export",
+      "Bookmarks:import",
       "Annotations:delete",
       "Annotations:view",
+      "Annotations:export",
+      "Annotations:import",
     ]);
     for (const cat of [
       "Notes",

@@ -1,0 +1,11 @@
+{ANNOTATIONS}
+ 
+Exported from MyArchive.jwlibrary
+by JWL Manager (0.1.0) on 2026-01-01 @ 00:00:00
+****************************************************************************
+==={PUB=w}{ISSUE=20240101}{DOC=None}{LABEL=heading001}===
+Some heading value
+==={PUB=w}{DOC=None}{LABEL=note002}===
+Line one
+Line two
+==={END}===

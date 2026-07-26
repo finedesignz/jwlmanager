@@ -18,9 +18,16 @@ use db::delete::{NonEmptyBookmarkIds, NonEmptyLocationIds, NonEmptyNoteIds};
 use db::edit::DryRunReport;
 use db::favorites::{FavoriteEditionRef, NonEmptyTagMapIds};
 use db::ids::compute_available_ids;
-use db::io::export::export_favorites as export_favorites_impl;
+use db::io::export::{
+    export_annotations as export_annotations_impl, export_bookmarks as export_bookmarks_impl,
+    export_favorites as export_favorites_impl,
+};
 use db::io::header::ExportHeaderCtx;
-use db::io::import::{apply_import_favorites, dry_run_import_favorites, parse_favorites_file};
+use db::io::import::{
+    apply_import_annotations, apply_import_bookmarks, apply_import_favorites,
+    dry_run_import_annotations, dry_run_import_bookmarks, dry_run_import_favorites,
+    parse_annotations_file, parse_bookmarks_file, parse_favorites_file,
+};
 use db::notes::BrowseRow;
 use db::record_edit::{RecordEditFields, RecordEditPayload, RecordIdentity};
 use db::tags::TagState;
@@ -1584,6 +1591,271 @@ fn import_favorites_apply(
     Ok(report)
 }
 
+/// Exports Bookmarks to `path` (whole category when `ids` is `None`, D8-10
+/// selection-optional) as a `.txt` file — same shape as [`export_favorites`].
+#[tauri::command]
+fn export_bookmarks(
+    path: String,
+    ids: Option<NonEmptyBookmarkIds>,
+    state: tauri::State<SessionState>,
+) -> Result<usize, ErrorDto> {
+    let guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("export_bookmarks", None))?;
+    let session = guard
+        .as_ref()
+        .ok_or_else(|| error::ArchiveError::MissingUserDataBackup.to_dto("export_bookmarks", None))?;
+
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("export_bookmarks", Some(session.target_path.as_path()))
+    })?;
+
+    let archive_name = session
+        .target_path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "NEW ARCHIVE".to_string());
+    let header = ExportHeaderCtx {
+        category_tag: "{BOOKMARKS}",
+        archive_name,
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        timestamp: time::now_export_header_timestamp(),
+    };
+
+    let out_path = PathBuf::from(&path);
+    export_bookmarks_impl(&conn, ids.as_ref(), &header, &out_path)
+        .map_err(|err| err.to_dto("export_bookmarks", Some(out_path.as_path())))
+}
+
+/// Previews a Bookmarks `.txt` import (IO-02) — same shape as
+/// [`import_favorites_dry_run`].
+#[tauri::command]
+fn import_bookmarks_dry_run(
+    path: String,
+    state: tauri::State<SessionState>,
+) -> Result<DryRunReport, ErrorDto> {
+    let guard = state.lock().map_err(|_| {
+        error::ArchiveError::StatePoisoned.to_dto("import_bookmarks_dry_run", None)
+    })?;
+    let session = guard.as_ref().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("import_bookmarks_dry_run", None)
+    })?;
+
+    let in_path = PathBuf::from(&path);
+    let text = std::fs::read_to_string(&in_path).map_err(|err| {
+        error::ArchiveError::from(err).to_dto("import_bookmarks_dry_run", Some(in_path.as_path()))
+    })?;
+    let records = parse_bookmarks_file(&text)
+        .map_err(|err| err.to_dto("import_bookmarks_dry_run", Some(in_path.as_path())))?;
+
+    let mut conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("import_bookmarks_dry_run", Some(session.target_path.as_path()))
+    })?;
+
+    dry_run_import_bookmarks(&mut conn, &records).map_err(|err| {
+        err.to_dto("import_bookmarks_dry_run", Some(session.target_path.as_path()))
+    })
+}
+
+/// Applies a Bookmarks `.txt` import (IO-02/IO-03) — same shape as
+/// [`import_favorites_apply`].
+#[tauri::command]
+fn import_bookmarks_apply(
+    path: String,
+    state: tauri::State<SessionState>,
+) -> Result<DryRunReport, ErrorDto> {
+    let mut guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("import_bookmarks_apply", None))?;
+    let session = guard.as_mut().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("import_bookmarks_apply", None)
+    })?;
+
+    let in_path = PathBuf::from(&path);
+    let text = std::fs::read_to_string(&in_path).map_err(|err| {
+        error::ArchiveError::from(err).to_dto("import_bookmarks_apply", Some(in_path.as_path()))
+    })?;
+    let records = parse_bookmarks_file(&text)
+        .map_err(|err| err.to_dto("import_bookmarks_apply", Some(in_path.as_path())))?;
+
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("import_bookmarks_apply", Some(session.target_path.as_path()))
+    })?;
+
+    let guard_pragma = db::pragma_guard::PragmaGuard::new(&conn).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("import_bookmarks_apply", Some(session.target_path.as_path()))
+    })?;
+    conn.execute_batch("PRAGMA foreign_keys = 'OFF';")
+        .map_err(|err| {
+            error::ArchiveError::from(err)
+                .to_dto("import_bookmarks_apply", Some(session.target_path.as_path()))
+        })?;
+
+    let tx = conn.unchecked_transaction().map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("import_bookmarks_apply", Some(session.target_path.as_path()))
+    })?;
+
+    let mut available = compute_available_ids(&tx)
+        .map_err(|err| err.to_dto("import_bookmarks_apply", Some(session.target_path.as_path())))?;
+    let before = db::edit::snapshot_tables(&tx, db::edit::BOOKMARK_SNAPSHOT_TABLES)
+        .map_err(|err| err.to_dto("import_bookmarks_apply", Some(session.target_path.as_path())))?;
+    apply_import_bookmarks(&tx, &records, &mut available)
+        .map_err(|err| err.to_dto("import_bookmarks_apply", Some(session.target_path.as_path())))?;
+    let after = db::edit::snapshot_tables(&tx, db::edit::BOOKMARK_SNAPSHOT_TABLES)
+        .map_err(|err| err.to_dto("import_bookmarks_apply", Some(session.target_path.as_path())))?;
+
+    tx.commit().map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("import_bookmarks_apply", Some(session.target_path.as_path()))
+    })?;
+    drop(guard_pragma);
+
+    session.dirty = true;
+
+    Ok(db::edit::diff_snapshots(&before, &after))
+}
+
+/// Exports Annotations to `path` (whole category when `ids` is `None`,
+/// D8-10 selection-optional) as a `.txt` file — same shape as
+/// [`export_favorites`], selection typed over `LocationId` (the Annotations
+/// browse-list identity — `db::delete::NonEmptyLocationIds`).
+#[tauri::command]
+fn export_annotations(
+    path: String,
+    ids: Option<NonEmptyLocationIds>,
+    state: tauri::State<SessionState>,
+) -> Result<usize, ErrorDto> {
+    let guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("export_annotations", None))?;
+    let session = guard.as_ref().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("export_annotations", None)
+    })?;
+
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("export_annotations", Some(session.target_path.as_path()))
+    })?;
+
+    let archive_name = session
+        .target_path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "NEW ARCHIVE".to_string());
+    let header = ExportHeaderCtx {
+        category_tag: "{ANNOTATIONS}",
+        archive_name,
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        timestamp: time::now_export_header_timestamp(),
+    };
+
+    let out_path = PathBuf::from(&path);
+    export_annotations_impl(&conn, ids.as_ref(), &header, &out_path)
+        .map_err(|err| err.to_dto("export_annotations", Some(out_path.as_path())))
+}
+
+/// Previews an Annotations `.txt` import (IO-02) — same shape as
+/// [`import_favorites_dry_run`].
+#[tauri::command]
+fn import_annotations_dry_run(
+    path: String,
+    state: tauri::State<SessionState>,
+) -> Result<DryRunReport, ErrorDto> {
+    let guard = state.lock().map_err(|_| {
+        error::ArchiveError::StatePoisoned.to_dto("import_annotations_dry_run", None)
+    })?;
+    let session = guard.as_ref().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("import_annotations_dry_run", None)
+    })?;
+
+    let in_path = PathBuf::from(&path);
+    let text = std::fs::read_to_string(&in_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("import_annotations_dry_run", Some(in_path.as_path()))
+    })?;
+    let records = parse_annotations_file(&text)
+        .map_err(|err| err.to_dto("import_annotations_dry_run", Some(in_path.as_path())))?;
+
+    let mut conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("import_annotations_dry_run", Some(session.target_path.as_path()))
+    })?;
+
+    dry_run_import_annotations(&mut conn, &records).map_err(|err| {
+        err.to_dto("import_annotations_dry_run", Some(session.target_path.as_path()))
+    })
+}
+
+/// Applies an Annotations `.txt` import (IO-02/IO-03) — same shape as
+/// [`import_favorites_apply`].
+#[tauri::command]
+fn import_annotations_apply(
+    path: String,
+    state: tauri::State<SessionState>,
+) -> Result<DryRunReport, ErrorDto> {
+    let mut guard = state.lock().map_err(|_| {
+        error::ArchiveError::StatePoisoned.to_dto("import_annotations_apply", None)
+    })?;
+    let session = guard.as_mut().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("import_annotations_apply", None)
+    })?;
+
+    let in_path = PathBuf::from(&path);
+    let text = std::fs::read_to_string(&in_path).map_err(|err| {
+        error::ArchiveError::from(err).to_dto("import_annotations_apply", Some(in_path.as_path()))
+    })?;
+    let records = parse_annotations_file(&text)
+        .map_err(|err| err.to_dto("import_annotations_apply", Some(in_path.as_path())))?;
+
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("import_annotations_apply", Some(session.target_path.as_path()))
+    })?;
+
+    let guard_pragma = db::pragma_guard::PragmaGuard::new(&conn).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("import_annotations_apply", Some(session.target_path.as_path()))
+    })?;
+    conn.execute_batch("PRAGMA foreign_keys = 'OFF';")
+        .map_err(|err| {
+            error::ArchiveError::from(err)
+                .to_dto("import_annotations_apply", Some(session.target_path.as_path()))
+        })?;
+
+    let tx = conn.unchecked_transaction().map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("import_annotations_apply", Some(session.target_path.as_path()))
+    })?;
+
+    let mut available = compute_available_ids(&tx).map_err(|err| {
+        err.to_dto("import_annotations_apply", Some(session.target_path.as_path()))
+    })?;
+    let before = db::edit::snapshot_tables(&tx, db::edit::ANNOTATION_SNAPSHOT_TABLES).map_err(
+        |err| err.to_dto("import_annotations_apply", Some(session.target_path.as_path())),
+    )?;
+    apply_import_annotations(&tx, &records, &mut available).map_err(|err| {
+        err.to_dto("import_annotations_apply", Some(session.target_path.as_path()))
+    })?;
+    let after = db::edit::snapshot_tables(&tx, db::edit::ANNOTATION_SNAPSHOT_TABLES).map_err(
+        |err| err.to_dto("import_annotations_apply", Some(session.target_path.as_path())),
+    )?;
+
+    tx.commit().map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("import_annotations_apply", Some(session.target_path.as_path()))
+    })?;
+    drop(guard_pragma);
+
+    session.dirty = true;
+
+    Ok(db::edit::diff_snapshots(&before, &after))
+}
+
 /// Tauri builder wiring for the Walking Skeleton.
 ///
 /// `open_archive` (01-07) and `check_jwlcore` (01-03) are registered here.
@@ -1640,7 +1912,13 @@ pub fn run() {
             list_category,
             export_favorites,
             import_favorites_dry_run,
-            import_favorites_apply
+            import_favorites_apply,
+            export_bookmarks,
+            import_bookmarks_dry_run,
+            import_bookmarks_apply,
+            export_annotations,
+            import_annotations_dry_run,
+            import_annotations_apply
         ])
         .run(tauri::generate_context!())
     {

@@ -67,10 +67,13 @@ const NEEDS_SELECTION: ReadonlySet<Op> = new Set<Op>([
  * `Playlists:delete` (ref-counted media) stay deferred — Phase 8
  * (D7-06/D7-10).
  *
- * `Favorites:export`/`Favorites:import` (IO-01/IO-02, 08-01-PLAN.md) land
+ * `Favorites:export`/`Favorites:import` (IO-01/IO-02, 08-01-PLAN.md) landed
  * this phase's tracer — the simplest of the five `.txt` categories, proving
- * the whole export/import spine end to end before Plans 02-05 flip the
- * remaining four categories' `export`/`import` pairs LIVE.
+ * the whole export/import spine end to end. `Bookmarks:export`/`import` and
+ * `Annotations:export`/`import` (08-02-PLAN.md) are the next two categories
+ * to flip LIVE, covering both wire-format SHAPES (flat pipe rows vs.
+ * bracket-tag records) and both `{END}`-sentinel states before Highlights
+ * and Notes (which add range-merge risk) follow.
  *
  * Sort Tags (EDIT-04) is ARCHIVE-WIDE, never selection-scoped, so it
  * deliberately does NOT enter this descriptor at all — it lives entirely
@@ -93,6 +96,10 @@ const LIVE: ReadonlySet<string> = new Set<string>([
   "Annotations:view",
   "Favorites:export",
   "Favorites:import",
+  "Bookmarks:export",
+  "Bookmarks:import",
+  "Annotations:export",
+  "Annotations:import",
 ]);
 
 /** A single entry in the contextual operation bar. */
