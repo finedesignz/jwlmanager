@@ -942,3 +942,76 @@ body {
   background: var(--destructive);
   color: var(--text-primary);
 }
+
+/* Fold Merge Dialog ("Merge Multiple Archives…", MERGE-03, 10-03-PLAN.md
+   Task 1). Reuses .edit-preview-overlay for its backdrop; the card matches
+   .edit-preview-dialog's/.tag-dialog's radius/surface/padding scale --
+   no new radius, spacing, or color value. Rows follow .media-add-file-row's
+   44px flex-row shape, extended with the reorder/remove controls this
+   dialog needs. */
+.fold-merge-dialog {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-hairline);
+  border-radius: 12px;
+  padding: var(--space-lg);
+  max-width: 32em;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.fold-merge-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.fold-merge-order-note {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.fold-merge-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 40vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.fold-merge-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-height: 44px;
+  padding: 0 var(--space-sm);
+}
+
+.fold-merge-row-position {
+  flex-shrink: 0;
+  width: 1.5em;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.fold-merge-row-label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fold-merge-reason {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.fold-merge-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+}
