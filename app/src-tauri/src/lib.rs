@@ -19,6 +19,7 @@ use db::edit::DryRunReport;
 use db::favorites::{FavoriteEditionRef, NonEmptyTagMapIds};
 use db::ids::compute_available_ids;
 use db::io::diff::{
+    export_annotations_incremental as export_annotations_incremental_impl,
     export_bookmarks_incremental as export_bookmarks_incremental_impl,
     export_favorites_incremental as export_favorites_incremental_impl,
     export_highlights_incremental as export_highlights_incremental_impl,
@@ -1865,6 +1866,57 @@ fn export_annotations(
         .map_err(|err| err.to_dto("export_annotations", Some(out_path.as_path())))
 }
 
+/// Exports only the Annotations changed since a prior export (IO-04,
+/// 09-03-PLAN.md) — same shape as [`export_favorites_incremental`]. Because
+/// [`export_annotations`] can only select by `LocationId`, a changed
+/// annotation's unchanged siblings at the same `LocationId` are written
+/// alongside it (a disclosed over-selection, not a bug): the returned
+/// summary's `exported` count is the exporter's OWN written-record count,
+/// which can therefore exceed `added + modified` — see
+/// `export_annotations_incremental`'s doc comment in `db::io::diff`.
+#[tauri::command]
+fn export_annotations_incremental(
+    path: String,
+    prior_path: Option<String>,
+    state: tauri::State<SessionState>,
+) -> Result<IncrementalExportSummary, ErrorDto> {
+    let guard = state.lock().map_err(|_| {
+        error::ArchiveError::StatePoisoned.to_dto("export_annotations_incremental", None)
+    })?;
+    let session = guard.as_ref().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("export_annotations_incremental", None)
+    })?;
+
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("export_annotations_incremental", Some(session.target_path.as_path()))
+    })?;
+
+    let archive_name = session
+        .target_path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "NEW ARCHIVE".to_string());
+    let header = ExportHeaderCtx {
+        category_tag: "{ANNOTATIONS}",
+        archive_name,
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        timestamp: time::now_export_header_timestamp(),
+    };
+
+    let prior_text = match &prior_path {
+        Some(p) => Some(std::fs::read_to_string(p).map_err(|err| {
+            error::ArchiveError::from(err)
+                .to_dto("export_annotations_incremental", Some(Path::new(p)))
+        })?),
+        None => None,
+    };
+
+    let out_path = PathBuf::from(&path);
+    export_annotations_incremental_impl(&conn, prior_text.as_deref(), &header, &out_path)
+        .map_err(|err| err.to_dto("export_annotations_incremental", Some(out_path.as_path())))
+}
+
 /// Previews an Annotations `.txt` import (IO-02) — same shape as
 /// [`import_favorites_dry_run`].
 #[tauri::command]
@@ -2849,6 +2901,7 @@ pub fn run() {
             import_bookmarks_dry_run,
             import_bookmarks_apply,
             export_annotations,
+            export_annotations_incremental,
             import_annotations_dry_run,
             import_annotations_apply,
             export_highlights,

@@ -10,14 +10,16 @@ mod common;
 
 use jwlmanager_lib::db::ids::compute_available_ids;
 use jwlmanager_lib::db::io::diff::{
-    export_bookmarks_incremental, export_favorites_incremental, export_highlights_incremental,
-    export_notes_incremental,
+    export_annotations_incremental, export_bookmarks_incremental, export_favorites_incremental,
+    export_highlights_incremental, export_notes_incremental,
 };
-use jwlmanager_lib::db::io::export::{export_bookmarks, export_favorites, export_highlights, export_notes};
+use jwlmanager_lib::db::io::export::{
+    export_annotations, export_bookmarks, export_favorites, export_highlights, export_notes,
+};
 use jwlmanager_lib::db::io::header::ExportHeaderCtx;
 use jwlmanager_lib::db::io::import::{
-    apply_import_highlights, apply_import_notes, parse_bookmarks_file, parse_favorites_file,
-    parse_highlights_file, parse_notes_file,
+    apply_import_annotations, apply_import_highlights, apply_import_notes, parse_annotations_file,
+    parse_bookmarks_file, parse_favorites_file, parse_highlights_file, parse_notes_file,
 };
 use jwlmanager_lib::db::resources::{dev_resources_db_path, ResourceCatalog};
 use jwlmanager_lib::error::ArchiveError;
@@ -950,6 +952,357 @@ fn highlights_incremental_converges() {
         &conn,
         Some(&first_output_text),
         &pinned_header_for("{HIGHLIGHTS}"),
+        &second_output_path,
+    )
+    .expect("second incremental export");
+
+    assert_eq!(second_summary.added, 0, "second run must converge to zero added");
+    assert_eq!(second_summary.modified, 0, "second run must converge to zero modified");
+}
+
+// ---------------------------------------------------------------------------
+// Annotations (09-03-PLAN.md Task 2) — the composite-identity case: identity
+// is the wire-recoverable (DOC, LABEL) pair, and export_annotations' own
+// LocationId selection means a changed annotation's unchanged siblings ride
+// along into the output (disclosed over-selection, never hidden).
+// ---------------------------------------------------------------------------
+
+/// Seeds one Annotation whose record is `==={PUB=w}{DOC=None}{LABEL=p1}===`
+/// / `Some value` — matches `tests/fixtures/wire/annotations_prior.txt`'s
+/// single record exactly, so tests can assert a checked-in STATIC prior file
+/// against a live archive. Returns the shared `LocationId`.
+fn seed_one_annotation(db_path: &std::path::Path) -> i64 {
+    let conn = Connection::open(db_path).expect("open fixture db");
+    // DocumentId is set (non-NULL, non-zero) rather than NULL: SQL `=` never
+    // matches NULL, so `find_or_insert_annotation_location`'s existing-
+    // Location lookup can only find a match (rather than always falling
+    // through to a fresh insert) when DocumentId is a concrete value —
+    // needed for `annotations_incremental_converges`' re-import to reuse the
+    // SAME LocationId rather than growing a new one every run.
+    conn.execute(
+        "INSERT INTO Location (LocationId, DocumentId, IssueTagNumber, KeySymbol, MepsLanguage, Type) \
+         VALUES (930, 1001, 0, 'w', NULL, 0)",
+        [],
+    )
+    .expect("insert annotation Location");
+    conn.execute(
+        "INSERT INTO InputField (LocationId, TextTag, Value) VALUES (930, 'p1', 'Some value')",
+        [],
+    )
+    .expect("insert annotation InputField");
+    930
+}
+
+/// Seeds a SECOND annotation at the SAME `LocationId` as
+/// [`seed_one_annotation`], with a DIFFERENT `TextTag` — the composite-
+/// identity collision case (`annotations_composite_identity` below).
+fn seed_second_annotation_at_same_location(db_path: &std::path::Path) {
+    let conn = Connection::open(db_path).expect("open fixture db");
+    conn.execute(
+        "INSERT INTO InputField (LocationId, TextTag, Value) VALUES (930, 'p2', 'Sibling value')",
+        [],
+    )
+    .expect("insert sibling annotation InputField");
+}
+
+fn read_annotations_prior_fixture() -> String {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/wire/annotations_prior.txt");
+    std::fs::read_to_string(path).expect("read annotations_prior.txt fixture")
+}
+
+#[test]
+fn annotations_no_change_reports_zero_and_writes_valid_empty_output() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_one_annotation(&db_path);
+    let prior_text = read_annotations_prior_fixture();
+
+    let conn = Connection::open(&db_path).expect("open db");
+    let out_dir = TempDir::new().expect("tempdir");
+    let incremental_path = out_dir.path().join("incremental.txt");
+    let summary = export_annotations_incremental(
+        &conn,
+        Some(&prior_text),
+        &pinned_header_for("{ANNOTATIONS}"),
+        &incremental_path,
+    )
+    .expect("incremental export");
+
+    assert_eq!(summary.added, 0);
+    assert_eq!(summary.modified, 0);
+    assert_eq!(summary.deleted_candidates, 0);
+    assert_eq!(summary.exported, 0);
+
+    let text = std::fs::read_to_string(&incremental_path).expect("read incremental export");
+    let records = parse_annotations_file(&text).expect("output must itself be a valid Annotations file");
+    assert!(records.is_empty(), "output file must contain zero records");
+    assert!(text.ends_with("==={END}==="), "the end sentinel must still be written");
+}
+
+#[test]
+fn annotations_value_change_included() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_one_annotation(&db_path);
+    let prior_text = read_annotations_prior_fixture();
+
+    {
+        let conn = Connection::open(&db_path).expect("open db");
+        conn.execute(
+            "UPDATE InputField SET Value = 'Changed value' WHERE LocationId = 930 AND TextTag = 'p1'",
+            [],
+        )
+        .expect("change value");
+    }
+
+    let conn = Connection::open(&db_path).expect("open db");
+    let out_dir = TempDir::new().expect("tempdir");
+    let incremental_path = out_dir.path().join("incremental.txt");
+    let summary = export_annotations_incremental(
+        &conn,
+        Some(&prior_text),
+        &pinned_header_for("{ANNOTATIONS}"),
+        &incremental_path,
+    )
+    .expect("incremental export");
+
+    assert_eq!(summary.added, 0);
+    assert_eq!(summary.modified, 1);
+    assert_eq!(summary.exported, 1);
+
+    let text = std::fs::read_to_string(&incremental_path).expect("read incremental export");
+    assert!(text.contains("Changed value"));
+}
+
+#[test]
+fn annotations_added_included() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_one_annotation(&db_path);
+    let prior_text = read_annotations_prior_fixture();
+
+    seed_second_annotation_at_same_location(&db_path);
+
+    let conn = Connection::open(&db_path).expect("open db");
+    let out_dir = TempDir::new().expect("tempdir");
+    let incremental_path = out_dir.path().join("incremental.txt");
+    let summary = export_annotations_incremental(
+        &conn,
+        Some(&prior_text),
+        &pinned_header_for("{ANNOTATIONS}"),
+        &incremental_path,
+    )
+    .expect("incremental export");
+
+    assert_eq!(summary.added, 1);
+    assert_eq!(summary.modified, 0);
+    // LocationId over-selection: p1 (unchanged) rides along with the newly
+    // added p2 because both share LocationId 930 (disclosed, not hidden).
+    assert_eq!(summary.exported, 2);
+
+    let text = std::fs::read_to_string(&incremental_path).expect("read incremental export");
+    assert!(text.contains("Sibling value"));
+}
+
+#[test]
+fn annotations_deleted_candidate_not_exported() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_one_annotation(&db_path);
+    let prior_text = read_annotations_prior_fixture();
+
+    {
+        let conn = Connection::open(&db_path).expect("open db");
+        conn.execute("DELETE FROM InputField WHERE LocationId = 930 AND TextTag = 'p1'", [])
+            .expect("delete annotation");
+    }
+
+    let conn = Connection::open(&db_path).expect("open db");
+    let out_dir = TempDir::new().expect("tempdir");
+    let incremental_path = out_dir.path().join("incremental.txt");
+    let summary = export_annotations_incremental(
+        &conn,
+        Some(&prior_text),
+        &pinned_header_for("{ANNOTATIONS}"),
+        &incremental_path,
+    )
+    .expect("incremental export");
+
+    assert_eq!(summary.added, 0);
+    assert_eq!(summary.modified, 0);
+    assert_eq!(summary.exported, 0);
+    assert_eq!(summary.deleted_candidates, 1);
+}
+
+#[test]
+fn annotations_no_prior_file_exports_all() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_one_annotation(&db_path);
+    let conn = Connection::open(&db_path).expect("open db");
+
+    let out_dir = TempDir::new().expect("tempdir");
+    let full_path = out_dir.path().join("full.txt");
+    let incremental_path = out_dir.path().join("incremental.txt");
+
+    export_annotations(&conn, None, &pinned_header_for("{ANNOTATIONS}"), &full_path).expect("full export");
+    let summary = export_annotations_incremental(
+        &conn,
+        None,
+        &pinned_header_for("{ANNOTATIONS}"),
+        &incremental_path,
+    )
+    .expect("incremental export with no prior file");
+
+    assert_eq!(
+        common::read_file_bytes(&full_path),
+        common::read_file_bytes(&incremental_path),
+        "no prior file must export the whole category, byte-identical to a full export (D9-05)"
+    );
+    assert_eq!(summary.added, 1);
+    assert_eq!(summary.exported, 1);
+}
+
+#[test]
+fn annotations_malformed_prior_file_aborts() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_one_annotation(&db_path);
+    let conn = Connection::open(&db_path).expect("open db");
+
+    let out_dir = TempDir::new().expect("tempdir");
+    let incremental_path = out_dir.path().join("incremental.txt");
+    let result = export_annotations_incremental(
+        &conn,
+        Some("this is not a valid Annotations export file at all"),
+        &pinned_header_for("{ANNOTATIONS}"),
+        &incremental_path,
+    );
+
+    match result {
+        Err(ArchiveError::ImportMalformed { .. }) => {}
+        other => panic!("expected ImportMalformed, got {other:?}"),
+    }
+    assert!(!incremental_path.exists());
+}
+
+/// The composite-identity collision test (RESEARCH's sharpest correctness
+/// trap): two annotations at the SAME `LocationId` but DIFFERENT `TextTag`s.
+/// Editing only one must report exactly ONE modified — proving the two are
+/// diffed independently, never collapsed into one `LocationId`-keyed identity
+/// — while the WRITTEN record count is TWO, because `export_annotations`
+/// selects by `LocationId` and pulls the unchanged sibling in. Neither
+/// annotation is omitted, and the two counts (`modified` vs `exported`) do
+/// not contradict each other — the disclosed over-selection this plan exists
+/// to prove.
+#[test]
+fn annotations_composite_identity() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_one_annotation(&db_path);
+    seed_second_annotation_at_same_location(&db_path);
+
+    let conn = Connection::open(&db_path).expect("open db");
+    let out_dir = TempDir::new().expect("tempdir");
+    let baseline_path = out_dir.path().join("baseline.txt");
+    export_annotations(&conn, None, &pinned_header_for("{ANNOTATIONS}"), &baseline_path)
+        .expect("baseline export");
+    let baseline_text = std::fs::read_to_string(&baseline_path).expect("read baseline export");
+    drop(conn);
+
+    // Edit ONLY the first annotation (p1); p2 (the sibling at the same
+    // LocationId) stays untouched.
+    {
+        let conn = Connection::open(&db_path).expect("open db");
+        conn.execute(
+            "UPDATE InputField SET Value = 'Changed value' WHERE LocationId = 930 AND TextTag = 'p1'",
+            [],
+        )
+        .expect("change p1's value");
+    }
+
+    let conn = Connection::open(&db_path).expect("open db");
+    let incremental_path = out_dir.path().join("incremental.txt");
+    let summary = export_annotations_incremental(
+        &conn,
+        Some(&baseline_text),
+        &pinned_header_for("{ANNOTATIONS}"),
+        &incremental_path,
+    )
+    .expect("incremental export");
+
+    assert_eq!(
+        summary.modified, 1,
+        "only p1 changed — the two TextTags must be diffed independently, never collapsed into one identity"
+    );
+    assert_eq!(summary.added, 0);
+    assert_eq!(
+        summary.exported, 2,
+        "LocationId over-selection pulls p2 (the unchanged sibling) into the same output file"
+    );
+
+    let text = std::fs::read_to_string(&incremental_path).expect("read incremental export");
+    let records = parse_annotations_file(&text).expect("output must itself be a valid Annotations file");
+    assert_eq!(records.len(), 2, "neither annotation is omitted");
+    assert!(text.contains("Changed value"), "the changed record is present");
+    assert!(text.contains("Sibling value"), "the unchanged sibling rides along, disclosed, never hidden");
+}
+
+/// Convergence (09-03-PLAN.md Task 2): export changed, re-import that output
+/// into the SAME archive, export changed again against the same prior file —
+/// must report zero modified. This is the case where the Phase 8 upsert on
+/// the `(LocationId, TextTag)` conflict target
+/// (`apply_import_annotations`'s `ON CONFLICT(LocationId, TextTag) DO UPDATE`)
+/// is what makes convergence hold, so this test asserts it rather than
+/// assuming it.
+#[test]
+fn annotations_incremental_converges() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_one_annotation(&db_path);
+
+    let out_dir = TempDir::new().expect("tempdir");
+    let baseline_path = out_dir.path().join("baseline.txt");
+    let baseline_prior_text = {
+        let conn = Connection::open(&db_path).expect("open db");
+        export_annotations(&conn, None, &pinned_header_for("{ANNOTATIONS}"), &baseline_path)
+            .expect("baseline export");
+        std::fs::read_to_string(&baseline_path).expect("read baseline export")
+    };
+
+    {
+        let conn = Connection::open(&db_path).expect("open db");
+        conn.execute(
+            "UPDATE InputField SET Value = 'Changed value' WHERE LocationId = 930 AND TextTag = 'p1'",
+            [],
+        )
+        .expect("change value");
+    }
+
+    let first_output_path = out_dir.path().join("first_incremental.txt");
+    let conn = Connection::open(&db_path).expect("open db");
+    let first_summary = export_annotations_incremental(
+        &conn,
+        Some(&baseline_prior_text),
+        &pinned_header_for("{ANNOTATIONS}"),
+        &first_output_path,
+    )
+    .expect("first incremental export");
+    assert_eq!(first_summary.modified, 1);
+    drop(conn);
+
+    let first_output_text =
+        std::fs::read_to_string(&first_output_path).expect("read first incremental output");
+
+    // Re-import that output into the SAME archive.
+    {
+        let records = parse_annotations_file(&first_output_text).expect("parse first output");
+        let mut conn = Connection::open(&db_path).expect("reopen db");
+        let tx = conn.transaction().expect("begin tx");
+        let mut available = compute_available_ids(&tx).expect("compute available ids");
+        apply_import_annotations(&tx, &records, &mut available).expect("apply re-import");
+        tx.commit().expect("commit re-import");
+    }
+
+    let conn = Connection::open(&db_path).expect("open db after re-import");
+    let second_output_path = out_dir.path().join("second_incremental.txt");
+    let second_summary = export_annotations_incremental(
+        &conn,
+        Some(&first_output_text),
+        &pinned_header_for("{ANNOTATIONS}"),
         &second_output_path,
     )
     .expect("second incremental export");

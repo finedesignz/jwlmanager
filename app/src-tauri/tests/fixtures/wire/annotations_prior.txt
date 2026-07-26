@@ -1,0 +1,8 @@
+{ANNOTATIONS}
+
+Exported from MyArchive.jwlibrary
+by JWL Manager (0.1.0) on 2026-01-01 @ 00:00:00
+****************************************************************************
+==={PUB=w}{DOC=1001}{LABEL=p1}===
+Some value
+==={END}===
