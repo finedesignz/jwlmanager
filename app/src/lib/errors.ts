@@ -70,6 +70,10 @@ export function describeError(err: ErrorDto): string {
       return "Couldn't read this file — it doesn't look like a file exported from JW Library or JWL Manager. Choose a different file.";
     case "import_failed":
       return "Couldn't import this file — the archive is unchanged. Try again, or close and reopen the archive if the problem continues.";
+    case "playlist_export_failed":
+      return "Couldn't export this playlist — the archive is unchanged. Check that the destination folder is writable, then try again.";
+    case "playlist_import_failed":
+      return "Couldn't import this playlist — the archive is unchanged. Try again, or close and reopen the archive if the problem continues.";
     default:
       return `Couldn't complete this operation (${err.operation}). Choose a different file or try again.`;
   }

@@ -65,6 +65,10 @@ pub enum ArchiveError {
     },
     #[error("import failed: {reason}")]
     ImportFailed { reason: String },
+    #[error("playlist export failed: {reason}")]
+    PlaylistExportFailed { reason: String },
+    #[error("playlist import failed: {reason}")]
+    PlaylistImportFailed { reason: String },
     #[error("jwlCore merge engine is unavailable on this platform")]
     MergeUnavailable,
     #[error("archive merge failed: {reason}")]
@@ -202,6 +206,16 @@ impl ArchiveError {
             // `reason` is internal-only (module docs) — the DTO exposes only
             // the stable code + message_key; the frontend copy is generic.
             ArchiveError::ImportFailed { .. } => ("import_failed", "error.archive.import_failed"),
+            // `reason` is internal-only (module docs) — the DTO exposes only
+            // the stable code + message_key; the frontend copy is generic.
+            ArchiveError::PlaylistExportFailed { .. } => {
+                ("playlist_export_failed", "error.archive.playlist_export_failed")
+            }
+            // `reason` is internal-only (module docs) — the DTO exposes only
+            // the stable code + message_key; the frontend copy is generic.
+            ArchiveError::PlaylistImportFailed { .. } => {
+                ("playlist_import_failed", "error.archive.playlist_import_failed")
+            }
             // A missing/wrong-arch jwlCore binary degrades to a typed error
             // (never the Python `crash_box + sys.exit()` defect) — the DTO
             // exposes only the stable code + generic message_key.

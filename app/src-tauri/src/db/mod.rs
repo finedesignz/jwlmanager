@@ -13,6 +13,7 @@ pub mod ids;
 pub mod io;
 pub mod labels;
 pub mod notes;
+pub mod playlist_io;
 pub mod pragma_guard;
 pub mod record_edit;
 pub mod reorder;

@@ -175,6 +175,24 @@ pub(crate) const NOTE_IMPORT_SNAPSHOT_TABLES: &[(&str, &str)] = &[
     ("TagMap", "TagMapId"),
 ];
 
+/// `.jwlplaylist` import (08-05-PLAN.md Task 2) affected-table set: `Tag`
+/// (the playlist tag, created at most once per playlist name), `TagMap` (the
+/// item's tag association), `PlaylistItem` (the re-keyed item row itself —
+/// a reused/skipped item keeps its PK, landing in `overwritten`), `Location`
+/// (the scripture/publication Location `apply_import_playlist`
+/// finds-or-inserts), and `IndependentMedia` (the deduped-by-hash media
+/// rows). `PlaylistItemMarker`, `PlaylistItemAccuracy` and the composite-key
+/// junction tables (`PlaylistItem*Map`) have no meaningful single-column
+/// identity for this diff and stay out of scope, same precedent as
+/// [`TRACKED_TABLES`]'s own composite-key exclusions.
+pub(crate) const PLAYLIST_IMPORT_SNAPSHOT_TABLES: &[(&str, &str)] = &[
+    ("Tag", "TagId"),
+    ("TagMap", "TagMapId"),
+    ("PlaylistItem", "PlaylistItemId"),
+    ("Location", "LocationId"),
+    ("IndependentMedia", "IndependentMediaId"),
+];
+
 pub(crate) fn snapshot_pks(
     tx: &Transaction,
     table: &str,

@@ -32,6 +32,7 @@ use db::io::import::{
     parse_highlights_file, parse_notes_file,
 };
 use db::notes::BrowseRow;
+use db::playlist_io::NonEmptyPlaylistItemIds;
 use db::record_edit::{RecordEditFields, RecordEditPayload, RecordIdentity};
 use db::tags::TagState;
 use error::ErrorDto;
@@ -2182,6 +2183,178 @@ fn import_notes_apply(
     Ok(db::edit::diff_snapshots(&before, &after))
 }
 
+/// The Tauri-facing result of a Playlist import preview (IO-02, 08-05-PLAN.md)
+/// — the standard [`DryRunReport`] PLUS the playlist's name and its media
+/// file count, so the frontend can render the leading UI-SPEC clause *"This
+/// adds the playlist "{Name}" and its {N} media file{s}."* before the
+/// standard added/updated/skipped lines.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, export_to = "../../src/bindings/PlaylistImportPreview.ts")]
+struct PlaylistImportPreview {
+    report: DryRunReport,
+    playlist_name: String,
+    media_count: usize,
+}
+
+/// Derives the playlist's name from the imported file's own stem — matches
+/// Python's `playlist_name = Path(file).stem` when the suffix is
+/// `.jwlplaylist` (`JWLManager.py:2622-2623`, this command only ever handles
+/// that suffix).
+fn playlist_name_from_path(path: &std::path::Path) -> String {
+    path.file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "Playlist".to_string())
+}
+
+/// Exports the `PlaylistItem`s in `ids` to `path` as a `.jwlplaylist`
+/// (IO-01) — pure read + file write, never mutates the archive (D8-09).
+#[tauri::command]
+fn export_playlist(
+    path: String,
+    ids: NonEmptyPlaylistItemIds,
+    state: tauri::State<SessionState>,
+) -> Result<db::playlist_io::PlaylistExportReport, ErrorDto> {
+    let guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("export_playlist", None))?;
+    let session = guard
+        .as_ref()
+        .ok_or_else(|| error::ArchiveError::MissingUserDataBackup.to_dto("export_playlist", None))?;
+
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err).to_dto("export_playlist", Some(session.target_path.as_path()))
+    })?;
+
+    let out_path = PathBuf::from(&path);
+    db::playlist_io::export_playlist(
+        &conn,
+        session.temp_dir.path(),
+        &ids,
+        &out_path,
+        APP_NAME,
+        APP_DEVICE_NAME,
+        &time::now_iso8601_utc(),
+    )
+    .map_err(|err| err.to_dto("export_playlist", Some(out_path.as_path())))
+}
+
+/// Previews a `.jwlplaylist` import (IO-02) WITHOUT mutating the working
+/// copy: extracts + validates the container FULLY before any transaction
+/// opens (D8-04 — a zip-slip or missing-member container returns a typed
+/// error here and `EditPreviewDialog` never opens), then runs the real
+/// apply + trim inside a rolled-back transaction.
+#[tauri::command]
+fn import_playlist_dry_run(
+    path: String,
+    state: tauri::State<SessionState>,
+) -> Result<PlaylistImportPreview, ErrorDto> {
+    let guard = state.lock().map_err(|_| {
+        error::ArchiveError::StatePoisoned.to_dto("import_playlist_dry_run", None)
+    })?;
+    let session = guard.as_ref().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("import_playlist_dry_run", None)
+    })?;
+
+    let in_path = PathBuf::from(&path);
+    let playlist_name = playlist_name_from_path(&in_path);
+
+    let container = db::playlist_io::read_playlist_container(&in_path)
+        .map_err(|err| err.to_dto("import_playlist_dry_run", Some(in_path.as_path())))?;
+    let media_count = db::playlist_io::count_container_media(&container)
+        .map_err(|err| err.to_dto("import_playlist_dry_run", Some(in_path.as_path())))?;
+
+    let mut conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("import_playlist_dry_run", Some(session.target_path.as_path()))
+    })?;
+
+    let report = db::playlist_io::dry_run_import_playlist(&mut conn, &container, &playlist_name)
+        .map_err(|err| {
+            err.to_dto("import_playlist_dry_run", Some(session.target_path.as_path()))
+        })?;
+
+    Ok(PlaylistImportPreview {
+        report,
+        playlist_name,
+        media_count,
+    })
+}
+
+/// Applies a `.jwlplaylist` import (IO-02/IO-03) — re-extracts `path`
+/// (D8-10: the double-extraction is accepted, no cached container state
+/// crosses the two IPC calls) and commits the real apply inside one
+/// transaction. Media files are copied into the live session's working
+/// directory only AFTER every DB write is staged (PD-3); a copy failure
+/// aborts before `tx.commit()`, leaving the archive untouched.
+#[tauri::command]
+fn import_playlist_apply(
+    path: String,
+    state: tauri::State<SessionState>,
+) -> Result<DryRunReport, ErrorDto> {
+    let mut guard = state.lock().map_err(|_| {
+        error::ArchiveError::StatePoisoned.to_dto("import_playlist_apply", None)
+    })?;
+    let session = guard.as_mut().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("import_playlist_apply", None)
+    })?;
+
+    let in_path = PathBuf::from(&path);
+    let playlist_name = playlist_name_from_path(&in_path);
+
+    let container = db::playlist_io::read_playlist_container(&in_path)
+        .map_err(|err| err.to_dto("import_playlist_apply", Some(in_path.as_path())))?;
+
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("import_playlist_apply", Some(session.target_path.as_path()))
+    })?;
+
+    let guard_pragma = db::pragma_guard::PragmaGuard::new(&conn).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("import_playlist_apply", Some(session.target_path.as_path()))
+    })?;
+    conn.execute_batch("PRAGMA foreign_keys = 'OFF';")
+        .map_err(|err| {
+            error::ArchiveError::from(err)
+                .to_dto("import_playlist_apply", Some(session.target_path.as_path()))
+        })?;
+
+    let tx = conn.unchecked_transaction().map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("import_playlist_apply", Some(session.target_path.as_path()))
+    })?;
+
+    let mut available = compute_available_ids(&tx).map_err(|err| {
+        err.to_dto("import_playlist_apply", Some(session.target_path.as_path()))
+    })?;
+    let before = db::edit::snapshot_tables(&tx, db::edit::PLAYLIST_IMPORT_SNAPSHOT_TABLES)
+        .map_err(|err| err.to_dto("import_playlist_apply", Some(session.target_path.as_path())))?;
+    let skipped = db::playlist_io::apply_import_playlist(
+        &tx,
+        &container,
+        &playlist_name,
+        Some(session.temp_dir.path()),
+        &mut available,
+    )
+    .map_err(|err| err.to_dto("import_playlist_apply", Some(session.target_path.as_path())))?;
+    let after = db::edit::snapshot_tables(&tx, db::edit::PLAYLIST_IMPORT_SNAPSHOT_TABLES)
+        .map_err(|err| err.to_dto("import_playlist_apply", Some(session.target_path.as_path())))?;
+
+    tx.commit().map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("import_playlist_apply", Some(session.target_path.as_path()))
+    })?;
+    drop(guard_pragma);
+
+    session.dirty = true;
+
+    let mut report = db::edit::diff_snapshots(&before, &after);
+    if skipped > 0 {
+        report.skipped.insert("PlaylistItem".to_string(), skipped);
+    }
+    Ok(report)
+}
+
 /// Tauri builder wiring for the Walking Skeleton.
 ///
 /// `open_archive` (01-07) and `check_jwlcore` (01-03) are registered here.
@@ -2250,7 +2423,10 @@ pub fn run() {
             import_highlights_apply,
             export_notes,
             import_notes_dry_run,
-            import_notes_apply
+            import_notes_apply,
+            export_playlist,
+            import_playlist_dry_run,
+            import_playlist_apply
         ])
         .run(tauri::generate_context!())
     {

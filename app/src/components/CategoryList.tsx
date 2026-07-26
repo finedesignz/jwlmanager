@@ -7,6 +7,7 @@ import type { Category } from "../bindings/Category";
 import type { DryRunReport } from "../bindings/DryRunReport";
 import type { ErrorDto } from "../bindings/ErrorDto";
 import type { NotesImportPreview } from "../bindings/NotesImportPreview";
+import type { PlaylistImportPreview } from "../bindings/PlaylistImportPreview";
 import ColorMenu from "./ColorMenu";
 import EditPreviewDialog from "./EditPreviewDialog";
 import FavoriteAddDialog from "./FavoriteAddDialog";
@@ -60,6 +61,7 @@ const EXPORT_COMMANDS: Partial<Record<Category, string>> = {
   Annotations: "export_annotations",
   Highlights: "export_highlights",
   Notes: "export_notes",
+  Playlists: "export_playlist",
 };
 
 /**
@@ -75,6 +77,7 @@ const IMPORT_COMMANDS: Partial<Record<Category, { dryRun: string; apply: string 
   Annotations: { dryRun: "import_annotations_dry_run", apply: "import_annotations_apply" },
   Highlights: { dryRun: "import_highlights_dry_run", apply: "import_highlights_apply" },
   Notes: { dryRun: "import_notes_dry_run", apply: "import_notes_apply" },
+  Playlists: { dryRun: "import_playlist_dry_run", apply: "import_playlist_apply" },
 };
 
 /** Sums a `Record<string, number>`-shaped `DryRunReport` field's values. */
@@ -222,6 +225,9 @@ export default function CategoryList({
     /** Notes-only (D8-09): the file's own detected bucket-delete character,
      * or `null` when the file names no bucket / the category isn't Notes. */
     bucket: string | null;
+    /** Playlists-only: the playlist's name and media-file count, for the
+     * UI-SPEC leading clause. `null` for every other category. */
+    playlist: { name: string; mediaCount: number } | null;
   } | null>(null);
   const [importPending, setImportPending] = useState(false);
   // Notes-only (D8-09): the explicit user opt-in for the bucket delete the
@@ -331,10 +337,23 @@ export default function CategoryList({
     if (exportPending || !exportCommand) {
       return;
     }
-    const target = await save({
-      filters: [{ name: "Text files", extensions: ["txt"] }],
-      defaultPath: `${category}.txt`,
-    });
+    // Playlists' export requires a concrete `PlaylistItemId` selection
+    // (re-keying a `.jwlplaylist` needs a real row set, unlike the txt
+    // categories' whole-category fallback) — never invoked with an empty
+    // selection.
+    if (category === "Playlists" && selected.size === 0) {
+      return;
+    }
+    const target =
+      category === "Playlists"
+        ? await save({
+            filters: [{ name: "JW Library playlists", extensions: ["jwlplaylist"] }],
+            defaultPath: `${category}.jwlplaylist`,
+          })
+        : await save({
+            filters: [{ name: "Text files", extensions: ["txt"] }],
+            defaultPath: `${category}.txt`,
+          });
     if (typeof target !== "string") {
       return; // cancelled — no backend call
     }
@@ -363,11 +382,18 @@ export default function CategoryList({
     if (importPending || !importCommands) {
       return;
     }
-    const selectedFile = await open({
-      multiple: false,
-      directory: false,
-      filters: [{ name: "Text files", extensions: ["txt"] }],
-    });
+    const selectedFile =
+      category === "Playlists"
+        ? await open({
+            multiple: false,
+            directory: false,
+            filters: [{ name: "JW Library playlists", extensions: ["jwlplaylist"] }],
+          })
+        : await open({
+            multiple: false,
+            directory: false,
+            filters: [{ name: "Text files", extensions: ["txt"] }],
+          });
     if (typeof selectedFile !== "string") {
       return; // cancelled — no backend call
     }
@@ -377,12 +403,27 @@ export default function CategoryList({
         const preview = await invoke<NotesImportPreview>(importCommands.dryRun, {
           path: selectedFile,
         });
-        setImportPreview({ report: preview.report, path: selectedFile, bucket: preview.bucket ?? null });
+        setImportPreview({
+          report: preview.report,
+          path: selectedFile,
+          bucket: preview.bucket ?? null,
+          playlist: null,
+        });
+      } else if (category === "Playlists") {
+        const preview = await invoke<PlaylistImportPreview>(importCommands.dryRun, {
+          path: selectedFile,
+        });
+        setImportPreview({
+          report: preview.report,
+          path: selectedFile,
+          bucket: null,
+          playlist: { name: preview.playlist_name, mediaCount: preview.media_count },
+        });
       } else {
         const dryRunReport = await invoke<DryRunReport>(importCommands.dryRun, {
           path: selectedFile,
         });
-        setImportPreview({ report: dryRunReport, path: selectedFile, bucket: null });
+        setImportPreview({ report: dryRunReport, path: selectedFile, bucket: null, playlist: null });
       }
     } catch (err) {
       onError?.(err as ErrorDto);
@@ -696,12 +737,23 @@ export default function CategoryList({
           report={importPreview.report}
           onConfirm={handleImportConfirm}
           onCancel={handleImportCancel}
-          title={`Import ${category}?`}
-          ariaLabel={`Import ${category}`}
-          confirmLabel={`Import ${category}`}
+          title={category === "Playlists" ? "Import Playlist?" : `Import ${category}?`}
+          ariaLabel={category === "Playlists" ? "Import Playlist" : `Import ${category}`}
+          confirmLabel={category === "Playlists" ? "Import Playlist" : `Import ${category}`}
           confirmPendingLabel="Importing…"
           summary={
             <>
+              {/* Playlists-only leading clause (UI-SPEC): names the playlist
+                  and its media-file count ahead of the standard
+                  added/updated/skipped lines. */}
+              {importPreview.playlist !== null && (
+                <>
+                  This adds the playlist "{importPreview.playlist.name}" and its{" "}
+                  {importPreview.playlist.mediaCount} media file
+                  {importPreview.playlist.mediaCount === 1 ? "" : "s"}.
+                  <br />
+                </>
+              )}
               {/* Notes-only extra clause (D8-09): only when the file names a
                   title-character bucket to bulk-delete first. Rendered from
                   `report.deleted` — never silently applied; requires this
