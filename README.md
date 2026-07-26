@@ -90,6 +90,11 @@ interface language:
 ```
 
 ____
+## Documentation
+
+* [Incremental export ("Export changed...")](docs/incremental-export.md) -- exporting only the records that changed since a prior export file, for Notes, Favorites, Bookmarks, Highlights and Annotations.
+
+____
 ## Feedback, etc.
 
 Feel free to get in touch and post any [issues and/or suggestions](https://github.com/erykjj/jwlmanager/issues).
