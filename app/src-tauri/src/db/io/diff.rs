@@ -14,10 +14,15 @@
 //! Over-export is safe; under-export is the data gap this phase exists to
 //! prevent (see `<the_one_invariant_that_matters>`, 09-01-PLAN.md).
 
-use super::export::{export_notes, read_note_id_records};
+use super::export::{
+    export_bookmarks, export_favorites, export_highlights, export_notes, read_bookmark_id_lines,
+    read_favorite_id_lines, read_highlight_id_lines, read_note_id_records,
+};
 use super::header::ExportHeaderCtx;
-use super::import::parse_notes_file;
-use crate::db::delete::NonEmptyNoteIds;
+use super::import::{parse_bookmarks_file, parse_favorites_file, parse_highlights_file, parse_notes_file};
+use crate::db::color::NonEmptyBlockRangeIds;
+use crate::db::delete::{NonEmptyBookmarkIds, NonEmptyNoteIds};
+use crate::db::favorites::NonEmptyTagMapIds;
 use crate::db::resources::ResourceCatalog;
 use crate::error::ArchiveError;
 use rusqlite::Connection;
@@ -288,6 +293,207 @@ pub(crate) fn split_prior_lines(text: &str) -> Vec<String> {
         .filter(|line| line.contains('|'))
         .map(str::to_string)
         .collect()
+}
+
+/// Exports Favorites changed since `prior_text` (IO-04, 09-02-PLAN.md Task
+/// 2) — read-only, same never-mutates contract as [`export_favorites`].
+/// `prior_text` is `None` for "no prior file" (D9-05): the whole category is
+/// exported, identical to a plain [`export_favorites`] run, and every row
+/// reports as `added`. When `Some`, the text is run through
+/// [`parse_favorites_file`] FIRST as a fail-fast validation gate — its typed
+/// `ImportMalformed` propagates via `?` before ANY output file is written.
+///
+/// Both sides hash the FULL wire line verbatim (the module doc's two-layer
+/// rule) — [`favorites_identity`] is consulted only after a line is already
+/// in the exported set, purely to label it `added` vs `modified` for the
+/// summary. Per the identity specification, every one of Favorites' 6
+/// fields is identity, so `modified` is structurally always 0 — asserted by
+/// `favorites_never_reports_modified` in `incremental_export_tests.rs`.
+pub fn export_favorites_incremental(
+    conn: &Connection,
+    prior_text: Option<&str>,
+    header: &ExportHeaderCtx,
+    out_path: &Path,
+) -> Result<IncrementalExportSummary, ArchiveError> {
+    let prior_hashed: Vec<(String, String)> = match prior_text {
+        Some(text) => {
+            parse_favorites_file(text)?;
+            split_prior_lines(text)
+                .into_iter()
+                .map(|line| (favorites_identity(&line), record_hash(&line)))
+                .collect()
+        }
+        None => Vec::new(),
+    };
+    let prior_hash_set: HashSet<&str> =
+        prior_hashed.iter().map(|(_, hash)| hash.as_str()).collect();
+
+    let live_lines = read_favorite_id_lines(conn, None)?;
+    let live_annotated: Vec<(i64, String, String)> = live_lines
+        .iter()
+        .map(|(id, line)| (*id, favorites_identity(line), record_hash(line)))
+        .collect();
+
+    let selected_ids: Vec<i64> = live_annotated
+        .iter()
+        .filter(|(_, _, hash)| !prior_hash_set.contains(hash.as_str()))
+        .map(|(id, _, _)| *id)
+        .collect();
+
+    let live_hashed: Vec<(String, String)> = live_annotated
+        .into_iter()
+        .map(|(_, key, hash)| (key, hash))
+        .collect();
+    let diff = diff_records(&prior_hashed, &live_hashed);
+
+    match NonEmptyTagMapIds::try_from(selected_ids.clone()) {
+        Ok(ids) => {
+            export_favorites(conn, Some(&ids), header, out_path)?;
+        }
+        Err(_) => {
+            // Empty selection is unrepresentable by `NonEmptyTagMapIds` by
+            // construction — still write a valid, well-formed empty export
+            // via the SAME exporter (D9-01/D9-04 pattern from Notes). `-1`
+            // never matches a real `TagMapId`.
+            let Ok(sentinel) = NonEmptyTagMapIds::try_from(vec![-1_i64]) else {
+                unreachable!("a single-element Vec is always a valid NonEmptyTagMapIds");
+            };
+            export_favorites(conn, Some(&sentinel), header, out_path)?;
+        }
+    }
+
+    Ok(IncrementalExportSummary {
+        added: diff.added.len(),
+        modified: diff.modified.len(),
+        deleted_candidates: diff.deleted_candidates.len(),
+        exported: selected_ids.len(),
+    })
+}
+
+/// Exports Bookmarks changed since `prior_text` — same shape as
+/// [`export_favorites_incremental`], keyed by [`bookmarks_identity`] and
+/// selecting/exporting over `BookmarkId`/[`NonEmptyBookmarkIds`].
+pub fn export_bookmarks_incremental(
+    conn: &Connection,
+    prior_text: Option<&str>,
+    header: &ExportHeaderCtx,
+    out_path: &Path,
+) -> Result<IncrementalExportSummary, ArchiveError> {
+    let prior_hashed: Vec<(String, String)> = match prior_text {
+        Some(text) => {
+            parse_bookmarks_file(text)?;
+            split_prior_lines(text)
+                .into_iter()
+                .map(|line| (bookmarks_identity(&line), record_hash(&line)))
+                .collect()
+        }
+        None => Vec::new(),
+    };
+    let prior_hash_set: HashSet<&str> =
+        prior_hashed.iter().map(|(_, hash)| hash.as_str()).collect();
+
+    let live_lines = read_bookmark_id_lines(conn, None)?;
+    let live_annotated: Vec<(i64, String, String)> = live_lines
+        .iter()
+        .map(|(id, line)| (*id, bookmarks_identity(line), record_hash(line)))
+        .collect();
+
+    let selected_ids: Vec<i64> = live_annotated
+        .iter()
+        .filter(|(_, _, hash)| !prior_hash_set.contains(hash.as_str()))
+        .map(|(id, _, _)| *id)
+        .collect();
+
+    let live_hashed: Vec<(String, String)> = live_annotated
+        .into_iter()
+        .map(|(_, key, hash)| (key, hash))
+        .collect();
+    let diff = diff_records(&prior_hashed, &live_hashed);
+
+    match NonEmptyBookmarkIds::try_from(selected_ids.clone()) {
+        Ok(ids) => {
+            export_bookmarks(conn, Some(&ids), header, out_path)?;
+        }
+        Err(_) => {
+            let Ok(sentinel) = NonEmptyBookmarkIds::try_from(vec![-1_i64]) else {
+                unreachable!("a single-element Vec is always a valid NonEmptyBookmarkIds");
+            };
+            export_bookmarks(conn, Some(&sentinel), header, out_path)?;
+        }
+    }
+
+    Ok(IncrementalExportSummary {
+        added: diff.added.len(),
+        modified: diff.modified.len(),
+        deleted_candidates: diff.deleted_candidates.len(),
+        exported: selected_ids.len(),
+    })
+}
+
+/// Exports Highlights changed since `prior_text` — same shape as
+/// [`export_favorites_incremental`], keyed by [`highlights_identity`] and
+/// selecting/exporting over `BlockRangeId`/[`NonEmptyBlockRangeIds`]. The
+/// prior side's hash always comes from the raw wire line, never a
+/// `parse_highlights_file`-parsed `HighlightRecord` — that parser's blanket
+/// `None`->`""` substitution (`import.rs:1127`) is lossy, so reconstructing a
+/// line from the parsed struct would silently corrupt the comparison
+/// (09-02-PLAN.md `<the_one_invariant_that_matters>`). [`parse_highlights_file`]
+/// is still run first, purely as the fail-fast validation gate.
+pub fn export_highlights_incremental(
+    conn: &Connection,
+    prior_text: Option<&str>,
+    header: &ExportHeaderCtx,
+    out_path: &Path,
+) -> Result<IncrementalExportSummary, ArchiveError> {
+    let prior_hashed: Vec<(String, String)> = match prior_text {
+        Some(text) => {
+            parse_highlights_file(text)?;
+            split_prior_lines(text)
+                .into_iter()
+                .map(|line| (highlights_identity(&line), record_hash(&line)))
+                .collect()
+        }
+        None => Vec::new(),
+    };
+    let prior_hash_set: HashSet<&str> =
+        prior_hashed.iter().map(|(_, hash)| hash.as_str()).collect();
+
+    let live_lines = read_highlight_id_lines(conn, None)?;
+    let live_annotated: Vec<(i64, String, String)> = live_lines
+        .iter()
+        .map(|(id, line)| (*id, highlights_identity(line), record_hash(line)))
+        .collect();
+
+    let selected_ids: Vec<i64> = live_annotated
+        .iter()
+        .filter(|(_, _, hash)| !prior_hash_set.contains(hash.as_str()))
+        .map(|(id, _, _)| *id)
+        .collect();
+
+    let live_hashed: Vec<(String, String)> = live_annotated
+        .into_iter()
+        .map(|(_, key, hash)| (key, hash))
+        .collect();
+    let diff = diff_records(&prior_hashed, &live_hashed);
+
+    match NonEmptyBlockRangeIds::try_from(selected_ids.clone()) {
+        Ok(ids) => {
+            export_highlights(conn, Some(&ids), header, out_path)?;
+        }
+        Err(_) => {
+            let Ok(sentinel) = NonEmptyBlockRangeIds::try_from(vec![-1_i64]) else {
+                unreachable!("a single-element Vec is always a valid NonEmptyBlockRangeIds");
+            };
+            export_highlights(conn, Some(&sentinel), header, out_path)?;
+        }
+    }
+
+    Ok(IncrementalExportSummary {
+        added: diff.added.len(),
+        modified: diff.modified.len(),
+        deleted_candidates: diff.deleted_candidates.len(),
+        exported: selected_ids.len(),
+    })
 }
 
 /// Exports Notes changed since `prior_text` (IO-04, 09-01-PLAN.md Task 2) —

@@ -18,7 +18,12 @@ use db::delete::{NonEmptyBookmarkIds, NonEmptyLocationIds, NonEmptyNoteIds};
 use db::edit::DryRunReport;
 use db::favorites::{FavoriteEditionRef, NonEmptyTagMapIds};
 use db::ids::compute_available_ids;
-use db::io::diff::{export_notes_incremental as export_notes_incremental_impl, IncrementalExportSummary};
+use db::io::diff::{
+    export_bookmarks_incremental as export_bookmarks_incremental_impl,
+    export_favorites_incremental as export_favorites_incremental_impl,
+    export_highlights_incremental as export_highlights_incremental_impl,
+    export_notes_incremental as export_notes_incremental_impl, IncrementalExportSummary,
+};
 use db::io::export::{
     export_annotations as export_annotations_impl, export_bookmarks as export_bookmarks_impl,
     export_favorites as export_favorites_impl, export_highlights as export_highlights_impl,
@@ -1496,6 +1501,55 @@ fn export_favorites(
         .map_err(|err| err.to_dto("export_favorites", Some(out_path.as_path())))
 }
 
+/// Exports only the Favorites changed since a prior export (IO-04,
+/// 09-02-PLAN.md) — same shape as [`export_notes_incremental`], minus the
+/// resources catalog/wall-clock `now` Notes needs (Favorites has no
+/// resource-name lookups on its wire). `prior_path` is `None` for "no prior
+/// file", which exports the whole category exactly as [`export_favorites`]
+/// does (D9-05).
+#[tauri::command]
+fn export_favorites_incremental(
+    path: String,
+    prior_path: Option<String>,
+    state: tauri::State<SessionState>,
+) -> Result<IncrementalExportSummary, ErrorDto> {
+    let guard = state.lock().map_err(|_| {
+        error::ArchiveError::StatePoisoned.to_dto("export_favorites_incremental", None)
+    })?;
+    let session = guard.as_ref().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("export_favorites_incremental", None)
+    })?;
+
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("export_favorites_incremental", Some(session.target_path.as_path()))
+    })?;
+
+    let archive_name = session
+        .target_path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "NEW ARCHIVE".to_string());
+    let header = ExportHeaderCtx {
+        category_tag: "{FAVORITES}",
+        archive_name,
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        timestamp: time::now_export_header_timestamp(),
+    };
+
+    let prior_text = match &prior_path {
+        Some(p) => Some(std::fs::read_to_string(p).map_err(|err| {
+            error::ArchiveError::from(err)
+                .to_dto("export_favorites_incremental", Some(Path::new(p)))
+        })?),
+        None => None,
+    };
+
+    let out_path = PathBuf::from(&path);
+    export_favorites_incremental_impl(&conn, prior_text.as_deref(), &header, &out_path)
+        .map_err(|err| err.to_dto("export_favorites_incremental", Some(out_path.as_path())))
+}
+
 /// Previews a Favorites `.txt` import (IO-02) WITHOUT mutating the working
 /// copy: reads `path` as strict UTF-8, parses it FULLY before any
 /// transaction opens (D8-04 fail-fast — a malformed file returns
@@ -1633,6 +1687,51 @@ fn export_bookmarks(
     let out_path = PathBuf::from(&path);
     export_bookmarks_impl(&conn, ids.as_ref(), &header, &out_path)
         .map_err(|err| err.to_dto("export_bookmarks", Some(out_path.as_path())))
+}
+
+/// Exports only the Bookmarks changed since a prior export (IO-04,
+/// 09-02-PLAN.md) — same shape as [`export_favorites_incremental`].
+#[tauri::command]
+fn export_bookmarks_incremental(
+    path: String,
+    prior_path: Option<String>,
+    state: tauri::State<SessionState>,
+) -> Result<IncrementalExportSummary, ErrorDto> {
+    let guard = state.lock().map_err(|_| {
+        error::ArchiveError::StatePoisoned.to_dto("export_bookmarks_incremental", None)
+    })?;
+    let session = guard.as_ref().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("export_bookmarks_incremental", None)
+    })?;
+
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("export_bookmarks_incremental", Some(session.target_path.as_path()))
+    })?;
+
+    let archive_name = session
+        .target_path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "NEW ARCHIVE".to_string());
+    let header = ExportHeaderCtx {
+        category_tag: "{BOOKMARKS}",
+        archive_name,
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        timestamp: time::now_export_header_timestamp(),
+    };
+
+    let prior_text = match &prior_path {
+        Some(p) => Some(std::fs::read_to_string(p).map_err(|err| {
+            error::ArchiveError::from(err)
+                .to_dto("export_bookmarks_incremental", Some(Path::new(p)))
+        })?),
+        None => None,
+    };
+
+    let out_path = PathBuf::from(&path);
+    export_bookmarks_incremental_impl(&conn, prior_text.as_deref(), &header, &out_path)
+        .map_err(|err| err.to_dto("export_bookmarks_incremental", Some(out_path.as_path())))
 }
 
 /// Previews a Bookmarks `.txt` import (IO-02) — same shape as
@@ -1900,6 +1999,51 @@ fn export_highlights(
     let out_path = PathBuf::from(&path);
     export_highlights_impl(&conn, ids.as_ref(), &header, &out_path)
         .map_err(|err| err.to_dto("export_highlights", Some(out_path.as_path())))
+}
+
+/// Exports only the Highlights changed since a prior export (IO-04,
+/// 09-02-PLAN.md) — same shape as [`export_favorites_incremental`].
+#[tauri::command]
+fn export_highlights_incremental(
+    path: String,
+    prior_path: Option<String>,
+    state: tauri::State<SessionState>,
+) -> Result<IncrementalExportSummary, ErrorDto> {
+    let guard = state.lock().map_err(|_| {
+        error::ArchiveError::StatePoisoned.to_dto("export_highlights_incremental", None)
+    })?;
+    let session = guard.as_ref().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("export_highlights_incremental", None)
+    })?;
+
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("export_highlights_incremental", Some(session.target_path.as_path()))
+    })?;
+
+    let archive_name = session
+        .target_path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "NEW ARCHIVE".to_string());
+    let header = ExportHeaderCtx {
+        category_tag: "{HIGHLIGHTS}",
+        archive_name,
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        timestamp: time::now_export_header_timestamp(),
+    };
+
+    let prior_text = match &prior_path {
+        Some(p) => Some(std::fs::read_to_string(p).map_err(|err| {
+            error::ArchiveError::from(err)
+                .to_dto("export_highlights_incremental", Some(Path::new(p)))
+        })?),
+        None => None,
+    };
+
+    let out_path = PathBuf::from(&path);
+    export_highlights_incremental_impl(&conn, prior_text.as_deref(), &header, &out_path)
+        .map_err(|err| err.to_dto("export_highlights_incremental", Some(out_path.as_path())))
 }
 
 /// Previews a Highlights `.txt` import (IO-02/IO-03) — same shape as
@@ -2697,15 +2841,18 @@ pub fn run() {
             list_notes,
             list_category,
             export_favorites,
+            export_favorites_incremental,
             import_favorites_dry_run,
             import_favorites_apply,
             export_bookmarks,
+            export_bookmarks_incremental,
             import_bookmarks_dry_run,
             import_bookmarks_apply,
             export_annotations,
             import_annotations_dry_run,
             import_annotations_apply,
             export_highlights,
+            export_highlights_incremental,
             import_highlights_dry_run,
             import_highlights_apply,
             export_notes,

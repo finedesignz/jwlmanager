@@ -9,18 +9,31 @@
 mod common;
 
 use jwlmanager_lib::db::ids::compute_available_ids;
-use jwlmanager_lib::db::io::diff::export_notes_incremental;
-use jwlmanager_lib::db::io::export::export_notes;
+use jwlmanager_lib::db::io::diff::{
+    export_bookmarks_incremental, export_favorites_incremental, export_highlights_incremental,
+    export_notes_incremental,
+};
+use jwlmanager_lib::db::io::export::{export_bookmarks, export_favorites, export_highlights, export_notes};
 use jwlmanager_lib::db::io::header::ExportHeaderCtx;
-use jwlmanager_lib::db::io::import::{apply_import_notes, parse_notes_file};
+use jwlmanager_lib::db::io::import::{
+    apply_import_highlights, apply_import_notes, parse_bookmarks_file, parse_favorites_file,
+    parse_highlights_file, parse_notes_file,
+};
 use jwlmanager_lib::db::resources::{dev_resources_db_path, ResourceCatalog};
 use jwlmanager_lib::error::ArchiveError;
 use rusqlite::Connection;
 use tempfile::TempDir;
 
 fn pinned_header() -> ExportHeaderCtx<'static> {
+    pinned_header_for("{NOTES=}")
+}
+
+/// Same pinned deterministic values [`pinned_header`] uses, parameterized
+/// over the category tag — shared by the Favorites/Bookmarks/Highlights
+/// tests below (09-02-PLAN.md Task 2).
+fn pinned_header_for(category_tag: &'static str) -> ExportHeaderCtx<'static> {
     ExportHeaderCtx {
-        category_tag: "{NOTES=}",
+        category_tag,
         archive_name: "MyArchive.jwlibrary".to_string(),
         app_version: "0.1.0".to_string(),
         timestamp: "2026-01-01 @ 00:00:00".to_string(),
@@ -358,6 +371,585 @@ fn incremental_export_converges() {
         &catalog(),
         &pinned_header(),
         "2099-01-01T00:00:00Z",
+        &second_output_path,
+    )
+    .expect("second incremental export");
+
+    assert_eq!(second_summary.added, 0, "second run must converge to zero added");
+    assert_eq!(second_summary.modified, 0, "second run must converge to zero modified");
+}
+
+// ---------------------------------------------------------------------------
+// Favorites / Bookmarks / Highlights (09-02-PLAN.md Task 2) — the three flat
+// pipe-delimited categories, mechanically applying the Notes design above.
+// ---------------------------------------------------------------------------
+
+/// Seeds one Favorite whose wire line is `None|None|0|nwt|0|1` — matches
+/// `tests/fixtures/wire/favorites_prior.txt`'s single data row exactly, so
+/// tests can assert a checked-in STATIC prior file against a live archive.
+/// Relies on `res/blank` pre-seeding `Tag (TagId=1, Type=0, Name='Favorite')`.
+fn seed_one_favorite(db_path: &std::path::Path) -> i64 {
+    let conn = Connection::open(db_path).expect("open fixture db");
+    conn.execute(
+        "INSERT INTO Location (LocationId, DocumentId, Track, IssueTagNumber, KeySymbol, \
+         MepsLanguage, Type) VALUES (900, NULL, NULL, 0, 'nwt', 0, 1)",
+        [],
+    )
+    .expect("insert favorite Location");
+    conn.execute(
+        "INSERT INTO TagMap (TagMapId, PlaylistItemId, LocationId, NoteId, TagId, Position) \
+         VALUES (900, NULL, 900, NULL, 1, 0)",
+        [],
+    )
+    .expect("insert favorite TagMap");
+    900
+}
+
+/// Seeds a SECOND, distinct Favorite (different Location/wire line) for the
+/// "added since prior" case.
+fn seed_second_favorite(db_path: &std::path::Path) -> i64 {
+    let conn = Connection::open(db_path).expect("open fixture db");
+    conn.execute(
+        "INSERT INTO Location (LocationId, DocumentId, Track, IssueTagNumber, KeySymbol, \
+         MepsLanguage, Type) VALUES (901, 1001, 5, 0, 'pub-x', 0, 0)",
+        [],
+    )
+    .expect("insert second favorite Location");
+    conn.execute(
+        "INSERT INTO TagMap (TagMapId, PlaylistItemId, LocationId, NoteId, TagId, Position) \
+         VALUES (901, NULL, 901, NULL, 1, 1)",
+        [],
+    )
+    .expect("insert second favorite TagMap");
+    901
+}
+
+fn read_favorites_prior_fixture() -> String {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/wire/favorites_prior.txt");
+    std::fs::read_to_string(path).expect("read favorites_prior.txt fixture")
+}
+
+#[test]
+fn favorites_no_change_reports_zero_and_writes_valid_empty_output() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_one_favorite(&db_path);
+    let prior_text = read_favorites_prior_fixture();
+
+    let conn = Connection::open(&db_path).expect("open db");
+    let out_dir = TempDir::new().expect("tempdir");
+    let incremental_path = out_dir.path().join("incremental.txt");
+    let summary = export_favorites_incremental(
+        &conn,
+        Some(&prior_text),
+        &pinned_header_for("{FAVORITES}"),
+        &incremental_path,
+    )
+    .expect("incremental export");
+
+    assert_eq!(summary.added, 0);
+    assert_eq!(summary.modified, 0);
+    assert_eq!(summary.deleted_candidates, 0);
+    assert_eq!(summary.exported, 0);
+
+    let text = std::fs::read_to_string(&incremental_path).expect("read incremental export");
+    let records = parse_favorites_file(&text).expect("output must itself be a valid Favorites file");
+    assert!(records.is_empty(), "output file must contain zero records");
+}
+
+#[test]
+fn favorites_added_reports_one_added() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_one_favorite(&db_path);
+    let prior_text = read_favorites_prior_fixture();
+
+    seed_second_favorite(&db_path);
+
+    let conn = Connection::open(&db_path).expect("open db");
+    let out_dir = TempDir::new().expect("tempdir");
+    let incremental_path = out_dir.path().join("incremental.txt");
+    let summary = export_favorites_incremental(
+        &conn,
+        Some(&prior_text),
+        &pinned_header_for("{FAVORITES}"),
+        &incremental_path,
+    )
+    .expect("incremental export");
+
+    assert_eq!(summary.added, 1);
+    assert_eq!(summary.modified, 0);
+    assert_eq!(summary.exported, 1);
+}
+
+#[test]
+fn favorites_removed_reports_deleted_candidate_never_modified() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    let favorite_id = seed_one_favorite(&db_path);
+    let prior_text = read_favorites_prior_fixture();
+
+    {
+        let conn = Connection::open(&db_path).expect("open db");
+        conn.execute(
+            "DELETE FROM TagMap WHERE TagMapId = ?1",
+            rusqlite::params![favorite_id],
+        )
+        .expect("remove favorite");
+    }
+
+    let conn = Connection::open(&db_path).expect("open db");
+    let out_dir = TempDir::new().expect("tempdir");
+    let incremental_path = out_dir.path().join("incremental.txt");
+    let summary = export_favorites_incremental(
+        &conn,
+        Some(&prior_text),
+        &pinned_header_for("{FAVORITES}"),
+        &incremental_path,
+    )
+    .expect("incremental export");
+
+    assert_eq!(summary.added, 0);
+    assert_eq!(summary.modified, 0, "IO-04: Favorites has no mutable wire field, modified is always 0");
+    assert_eq!(summary.exported, 0);
+    assert_eq!(summary.deleted_candidates, 1);
+}
+
+/// Structural property from `<identity_key_specification>`: every field of
+/// a Favorite's 6-field wire line is identity, so no possible archive
+/// mutation can EVER surface as `modified` — only `added`/`deleted_candidates`.
+#[test]
+fn favorites_never_reports_modified() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    let favorite_id = seed_one_favorite(&db_path);
+    let prior_text = read_favorites_prior_fixture();
+
+    // The only "mutation" a Favorite's wire fields can undergo is a full
+    // Location swap (every field is identity) — simulate by pointing the
+    // TagMap at a different Location entirely (same shape as `added`, from
+    // the diff engine's point of view, never `modified`).
+    {
+        let conn = Connection::open(&db_path).expect("open db");
+        conn.execute(
+            "INSERT INTO Location (LocationId, DocumentId, Track, IssueTagNumber, KeySymbol, \
+             MepsLanguage, Type) VALUES (902, NULL, NULL, 0, 'nwt', 0, 2)",
+            [],
+        )
+        .expect("insert replacement Location");
+        conn.execute(
+            "UPDATE TagMap SET LocationId = 902 WHERE TagMapId = ?1",
+            rusqlite::params![favorite_id],
+        )
+        .expect("repoint favorite");
+    }
+
+    let conn = Connection::open(&db_path).expect("open db");
+    let out_dir = TempDir::new().expect("tempdir");
+    let incremental_path = out_dir.path().join("incremental.txt");
+    let summary = export_favorites_incremental(
+        &conn,
+        Some(&prior_text),
+        &pinned_header_for("{FAVORITES}"),
+        &incremental_path,
+    )
+    .expect("incremental export");
+
+    assert_eq!(summary.modified, 0, "Favorites must never report modified (no mutable wire field)");
+}
+
+#[test]
+fn favorites_no_prior_file_exports_all() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_one_favorite(&db_path);
+    let conn = Connection::open(&db_path).expect("open db");
+
+    let out_dir = TempDir::new().expect("tempdir");
+    let full_path = out_dir.path().join("full.txt");
+    let incremental_path = out_dir.path().join("incremental.txt");
+
+    export_favorites(&conn, None, &pinned_header_for("{FAVORITES}"), &full_path).expect("full export");
+    let summary = export_favorites_incremental(
+        &conn,
+        None,
+        &pinned_header_for("{FAVORITES}"),
+        &incremental_path,
+    )
+    .expect("incremental export with no prior file");
+
+    assert_eq!(
+        common::read_file_bytes(&full_path),
+        common::read_file_bytes(&incremental_path),
+        "no prior file must export the whole category, byte-identical to a full export (D9-05)"
+    );
+    assert_eq!(summary.added, 1);
+    assert_eq!(summary.exported, 1);
+}
+
+#[test]
+fn favorites_malformed_prior_file_aborts() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_one_favorite(&db_path);
+    let conn = Connection::open(&db_path).expect("open db");
+
+    let out_dir = TempDir::new().expect("tempdir");
+    let incremental_path = out_dir.path().join("incremental.txt");
+    let result = export_favorites_incremental(
+        &conn,
+        Some("this is not a valid Favorites export file at all"),
+        &pinned_header_for("{FAVORITES}"),
+        &incremental_path,
+    );
+
+    match result {
+        Err(ArchiveError::ImportMalformed { .. }) => {}
+        other => panic!("expected ImportMalformed, got {other:?}"),
+    }
+    assert!(!incremental_path.exists());
+}
+
+/// Seeds one Bookmark whose wire line is
+/// `1|1|None|0|nwt|0|0|0|Title|Snippet|0|None` — matches
+/// `tests/fixtures/wire/bookmarks_prior.txt`'s single data row exactly.
+fn seed_one_bookmark(db_path: &std::path::Path) -> i64 {
+    let conn = Connection::open(db_path).expect("open fixture db");
+    conn.execute(
+        "INSERT INTO Location (LocationId, BookNumber, ChapterNumber, DocumentId, Track, \
+         IssueTagNumber, KeySymbol, MepsLanguage, Type) \
+         VALUES (910, 1, 1, NULL, NULL, 0, 'nwt', 0, 0)",
+        [],
+    )
+    .expect("insert bookmark Location");
+    conn.execute(
+        "INSERT INTO Bookmark (BookmarkId, LocationId, PublicationLocationId, Slot, Title, \
+         Snippet, BlockType, BlockIdentifier) \
+         VALUES (910, 910, 910, 0, 'Title', 'Snippet', 0, NULL)",
+        [],
+    )
+    .expect("insert Bookmark");
+    910
+}
+
+fn read_bookmarks_prior_fixture() -> String {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/wire/bookmarks_prior.txt");
+    std::fs::read_to_string(path).expect("read bookmarks_prior.txt fixture")
+}
+
+#[test]
+fn bookmarks_no_change_reports_zero_and_writes_valid_empty_output() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_one_bookmark(&db_path);
+    let prior_text = read_bookmarks_prior_fixture();
+
+    let conn = Connection::open(&db_path).expect("open db");
+    let out_dir = TempDir::new().expect("tempdir");
+    let incremental_path = out_dir.path().join("incremental.txt");
+    let summary = export_bookmarks_incremental(
+        &conn,
+        Some(&prior_text),
+        &pinned_header_for("{BOOKMARKS}"),
+        &incremental_path,
+    )
+    .expect("incremental export");
+
+    assert_eq!(summary.added, 0);
+    assert_eq!(summary.modified, 0);
+    assert_eq!(summary.deleted_candidates, 0);
+    assert_eq!(summary.exported, 0);
+
+    let text = std::fs::read_to_string(&incremental_path).expect("read incremental export");
+    let records = parse_bookmarks_file(&text).expect("output must itself be a valid Bookmarks file");
+    assert!(records.is_empty());
+}
+
+#[test]
+fn bookmarks_title_change_reports_one_modified() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    let bookmark_id = seed_one_bookmark(&db_path);
+    let prior_text = read_bookmarks_prior_fixture();
+
+    {
+        let conn = Connection::open(&db_path).expect("open db");
+        conn.execute(
+            "UPDATE Bookmark SET Title = 'Changed Title' WHERE BookmarkId = ?1",
+            rusqlite::params![bookmark_id],
+        )
+        .expect("change title");
+    }
+
+    let conn = Connection::open(&db_path).expect("open db");
+    let out_dir = TempDir::new().expect("tempdir");
+    let incremental_path = out_dir.path().join("incremental.txt");
+    let summary = export_bookmarks_incremental(
+        &conn,
+        Some(&prior_text),
+        &pinned_header_for("{BOOKMARKS}"),
+        &incremental_path,
+    )
+    .expect("incremental export");
+
+    assert_eq!(summary.added, 0);
+    assert_eq!(summary.modified, 1);
+    assert_eq!(summary.exported, 1);
+
+    let text = std::fs::read_to_string(&incremental_path).expect("read incremental export");
+    assert!(text.contains("Changed Title"));
+}
+
+#[test]
+fn bookmarks_no_prior_file_exports_all() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_one_bookmark(&db_path);
+    let conn = Connection::open(&db_path).expect("open db");
+
+    let out_dir = TempDir::new().expect("tempdir");
+    let full_path = out_dir.path().join("full.txt");
+    let incremental_path = out_dir.path().join("incremental.txt");
+
+    export_bookmarks(&conn, None, &pinned_header_for("{BOOKMARKS}"), &full_path).expect("full export");
+    let summary = export_bookmarks_incremental(
+        &conn,
+        None,
+        &pinned_header_for("{BOOKMARKS}"),
+        &incremental_path,
+    )
+    .expect("incremental export with no prior file");
+
+    assert_eq!(
+        common::read_file_bytes(&full_path),
+        common::read_file_bytes(&incremental_path),
+        "no prior file must export the whole category, byte-identical to a full export (D9-05)"
+    );
+    assert_eq!(summary.added, 1);
+    assert_eq!(summary.exported, 1);
+}
+
+#[test]
+fn bookmarks_malformed_prior_file_aborts() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_one_bookmark(&db_path);
+    let conn = Connection::open(&db_path).expect("open db");
+
+    let out_dir = TempDir::new().expect("tempdir");
+    let incremental_path = out_dir.path().join("incremental.txt");
+    let result = export_bookmarks_incremental(
+        &conn,
+        Some("this is not a valid Bookmarks export file at all"),
+        &pinned_header_for("{BOOKMARKS}"),
+        &incremental_path,
+    );
+
+    match result {
+        Err(ArchiveError::ImportMalformed { .. }) => {}
+        other => panic!("expected ImportMalformed, got {other:?}"),
+    }
+    assert!(!incremental_path.exists());
+}
+
+/// Seeds one Highlight whose wire line is `1|1|0|5|1|1|1|1|None|0|nwt|0|0` —
+/// matches `tests/fixtures/wire/highlights_prior.txt`'s single data row
+/// exactly. Returns the `UserMarkId` (the only column a recolor test mutates).
+fn seed_one_highlight(db_path: &std::path::Path) -> i64 {
+    let conn = Connection::open(db_path).expect("open fixture db");
+    conn.execute(
+        "INSERT INTO Location (LocationId, BookNumber, ChapterNumber, DocumentId, Track, \
+         IssueTagNumber, KeySymbol, MepsLanguage, Type) \
+         VALUES (920, 1, 1, NULL, NULL, 0, 'nwt', 0, 0)",
+        [],
+    )
+    .expect("insert highlight Location");
+    conn.execute(
+        "INSERT INTO UserMark (UserMarkId, ColorIndex, LocationId, StyleIndex, UserMarkGuid, Version) \
+         VALUES (920, 1, 920, 0, 'fixture-highlight-usermark-0920', 1)",
+        [],
+    )
+    .expect("insert UserMark");
+    conn.execute(
+        "INSERT INTO BlockRange (BlockRangeId, BlockType, Identifier, StartToken, EndToken, UserMarkId) \
+         VALUES (920, 1, 1, 0, 5, 920)",
+        [],
+    )
+    .expect("insert BlockRange");
+    920
+}
+
+fn read_highlights_prior_fixture() -> String {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/wire/highlights_prior.txt");
+    std::fs::read_to_string(path).expect("read highlights_prior.txt fixture")
+}
+
+#[test]
+fn highlights_no_change_reports_zero_and_writes_valid_empty_output() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_one_highlight(&db_path);
+    let prior_text = read_highlights_prior_fixture();
+
+    let conn = Connection::open(&db_path).expect("open db");
+    let out_dir = TempDir::new().expect("tempdir");
+    let incremental_path = out_dir.path().join("incremental.txt");
+    let summary = export_highlights_incremental(
+        &conn,
+        Some(&prior_text),
+        &pinned_header_for("{HIGHLIGHTS}"),
+        &incremental_path,
+    )
+    .expect("incremental export");
+
+    assert_eq!(summary.added, 0);
+    assert_eq!(summary.modified, 0);
+    assert_eq!(summary.deleted_candidates, 0);
+    assert_eq!(summary.exported, 0);
+
+    let text = std::fs::read_to_string(&incremental_path).expect("read incremental export");
+    let records = parse_highlights_file(&text).expect("output must itself be a valid Highlights file");
+    assert!(records.is_empty());
+}
+
+#[test]
+fn highlights_colorindex_change_reports_one_modified() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    let user_mark_id = seed_one_highlight(&db_path);
+    let prior_text = read_highlights_prior_fixture();
+
+    {
+        let conn = Connection::open(&db_path).expect("open db");
+        conn.execute(
+            "UPDATE UserMark SET ColorIndex = 2 WHERE UserMarkId = ?1",
+            rusqlite::params![user_mark_id],
+        )
+        .expect("change color");
+    }
+
+    let conn = Connection::open(&db_path).expect("open db");
+    let out_dir = TempDir::new().expect("tempdir");
+    let incremental_path = out_dir.path().join("incremental.txt");
+    let summary = export_highlights_incremental(
+        &conn,
+        Some(&prior_text),
+        &pinned_header_for("{HIGHLIGHTS}"),
+        &incremental_path,
+    )
+    .expect("incremental export");
+
+    assert_eq!(summary.added, 0);
+    assert_eq!(summary.modified, 1);
+    assert_eq!(summary.exported, 1);
+}
+
+#[test]
+fn highlights_no_prior_file_exports_all() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_one_highlight(&db_path);
+    let conn = Connection::open(&db_path).expect("open db");
+
+    let out_dir = TempDir::new().expect("tempdir");
+    let full_path = out_dir.path().join("full.txt");
+    let incremental_path = out_dir.path().join("incremental.txt");
+
+    export_highlights(&conn, None, &pinned_header_for("{HIGHLIGHTS}"), &full_path).expect("full export");
+    let summary = export_highlights_incremental(
+        &conn,
+        None,
+        &pinned_header_for("{HIGHLIGHTS}"),
+        &incremental_path,
+    )
+    .expect("incremental export with no prior file");
+
+    assert_eq!(
+        common::read_file_bytes(&full_path),
+        common::read_file_bytes(&incremental_path),
+        "no prior file must export the whole category, byte-identical to a full export (D9-05)"
+    );
+    assert_eq!(summary.added, 1);
+    assert_eq!(summary.exported, 1);
+}
+
+#[test]
+fn highlights_malformed_prior_file_aborts() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_one_highlight(&db_path);
+    let conn = Connection::open(&db_path).expect("open db");
+
+    let out_dir = TempDir::new().expect("tempdir");
+    let incremental_path = out_dir.path().join("incremental.txt");
+    let result = export_highlights_incremental(
+        &conn,
+        Some("this is not a valid Highlights export file at all"),
+        &pinned_header_for("{HIGHLIGHTS}"),
+        &incremental_path,
+    );
+
+    match result {
+        Err(ArchiveError::ImportMalformed { .. }) => {}
+        other => panic!("expected ImportMalformed, got {other:?}"),
+    }
+    assert!(!incremental_path.exists());
+}
+
+/// Highlights convergence (09-02-PLAN.md Task 2): export incrementally
+/// against a baseline prior, re-import that output into the SAME archive,
+/// then export incrementally AGAIN against that first output — must
+/// converge to zero modified. Explicitly proves that Phase 8's accepted
+/// `UserMark` row-growth property (a re-imported `UserMark` can grow a NEW
+/// row rather than reusing the original, `apply_import_highlights`'s
+/// `synthesize_usermark`) does NOT translate into a non-zero modified count
+/// here — `UserMarkId` is not on the Highlights wire, so a fresh `UserMark`
+/// with the same `(LocationId, ColorIndex, Version)` and merged `BlockRange`
+/// produces the SAME wire line and therefore the SAME hash.
+#[test]
+fn highlights_incremental_converges() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_one_highlight(&db_path);
+
+    let out_dir = TempDir::new().expect("tempdir");
+    let baseline_path = out_dir.path().join("baseline.txt");
+    let baseline_prior_text = {
+        let conn = Connection::open(&db_path).expect("open db");
+        export_highlights(&conn, None, &pinned_header_for("{HIGHLIGHTS}"), &baseline_path)
+            .expect("baseline export");
+        std::fs::read_to_string(&baseline_path).expect("read baseline export")
+    };
+
+    // Recolor — the one real diff in this test (modified=1).
+    {
+        let conn = Connection::open(&db_path).expect("open db");
+        conn.execute("UPDATE UserMark SET ColorIndex = 2 WHERE UserMarkId = 920", [])
+            .expect("recolor");
+    }
+
+    let first_output_path = out_dir.path().join("first_incremental.txt");
+    let conn = Connection::open(&db_path).expect("open db");
+    let first_summary = export_highlights_incremental(
+        &conn,
+        Some(&baseline_prior_text),
+        &pinned_header_for("{HIGHLIGHTS}"),
+        &first_output_path,
+    )
+    .expect("first incremental export");
+    assert_eq!(first_summary.modified, 1);
+    drop(conn);
+
+    let first_output_text =
+        std::fs::read_to_string(&first_output_path).expect("read first incremental output");
+
+    // Re-import that output into the SAME archive.
+    {
+        let records = parse_highlights_file(&first_output_text).expect("parse first output");
+        let mut conn = Connection::open(&db_path).expect("reopen db");
+        let tx = conn.transaction().expect("begin tx");
+        let mut available = compute_available_ids(&tx).expect("compute available ids");
+        apply_import_highlights(&tx, &records, &mut available, 1).expect("apply re-import");
+        tx.commit().expect("commit re-import");
+    }
+
+    // Second incremental export: against the FIRST output — must converge,
+    // even though re-import synthesized a BRAND NEW UserMark (Phase 8's
+    // accepted growth property) rather than reusing UserMarkId 920.
+    let conn = Connection::open(&db_path).expect("open db after re-import");
+    let second_output_path = out_dir.path().join("second_incremental.txt");
+    let second_summary = export_highlights_incremental(
+        &conn,
+        Some(&first_output_text),
+        &pinned_header_for("{HIGHLIGHTS}"),
         &second_output_path,
     )
     .expect("second incremental export");
