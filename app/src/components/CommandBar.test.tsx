@@ -344,4 +344,203 @@ describe("CommandBar", () => {
     await vi.waitFor(() => expect(handlers.onError).toHaveBeenCalledWith(dto));
     expect(screen.queryByTestId("edit-preview-dialog")).not.toBeInTheDocument();
   });
+
+  const FOLD_SOURCES = [
+    "C:/archives/one.jwlibrary",
+    "C:/archives/two.jwlibrary",
+    "C:/archives/three.jwlibrary",
+  ];
+
+  const FOLD_REPORT = {
+    added: { Note: 2, UserMark: 1 },
+    overwritten: { Note: 3 },
+    deleted: {},
+    total_deleted: 0,
+  };
+
+  it("disables the Merge Multiple Archives action when no archive is open", () => {
+    renderBar({ archiveOpen: false });
+    expect(screen.getByTestId("fold-merge-button")).toBeDisabled();
+  });
+
+  it("Merge Multiple Archives opens a multi-select picker; cancelling makes zero invoke calls", async () => {
+    openMock.mockResolvedValue(null); // user dismissed the OS file picker
+    const handlers = renderBar({ archiveOpen: true });
+
+    fireEvent.click(screen.getByTestId("fold-merge-button"));
+    await vi.waitFor(() => expect(handlers.onCancelled).toHaveBeenCalledTimes(1));
+
+    expect(openMock).toHaveBeenCalledWith(
+      expect.objectContaining({ multiple: true }),
+    );
+    expect(invokeMock).not.toHaveBeenCalled();
+    expect(handlers.onError).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("fold-merge-dialog")).not.toBeInTheDocument();
+  });
+
+  it("choosing files opens FoldMergeDialog with them in the chosen order; no backend call yet", async () => {
+    openMock.mockResolvedValue(FOLD_SOURCES);
+    renderBar({ archiveOpen: true });
+
+    fireEvent.click(screen.getByTestId("fold-merge-button"));
+
+    expect(await screen.findByTestId("fold-merge-dialog")).toBeInTheDocument();
+    expect(screen.getByTestId("fold-merge-row-0")).toHaveTextContent("one.jwlibrary");
+    expect(screen.getByTestId("fold-merge-row-1")).toHaveTextContent("two.jwlibrary");
+    expect(screen.getByTestId("fold-merge-row-2")).toHaveTextContent("three.jwlibrary");
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("Continue calls fold_merge_dry_run once with the displayed order and opens the aggregate preview", async () => {
+    openMock.mockResolvedValue(FOLD_SOURCES);
+    invokeMock.mockResolvedValue(FOLD_REPORT);
+    renderBar({ archiveOpen: true });
+
+    fireEvent.click(screen.getByTestId("fold-merge-button"));
+    await screen.findByTestId("fold-merge-dialog");
+    fireEvent.click(screen.getByTestId("fold-merge-continue"));
+
+    await vi.waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("fold_merge_dry_run", {
+        sourcePaths: FOLD_SOURCES,
+      }),
+    );
+    expect(await screen.findByTestId("edit-preview-dialog")).toBeInTheDocument();
+    // 3 added (2+1), 3 overwritten, naming the number of source archives.
+    expect(screen.getByTestId("edit-preview-summary")).toHaveTextContent(
+      "3 records added, 3 updated from the combined effect of 3 archives",
+    );
+    expect(invokeMock).not.toHaveBeenCalledWith("fold_merge_commit", expect.anything());
+  });
+
+  it("reordering in the dialog before Continue changes the array passed to fold_merge_dry_run", async () => {
+    openMock.mockResolvedValue(FOLD_SOURCES);
+    invokeMock.mockResolvedValue(FOLD_REPORT);
+    renderBar({ archiveOpen: true });
+
+    fireEvent.click(screen.getByTestId("fold-merge-button"));
+    await screen.findByTestId("fold-merge-dialog");
+    // Move row 2 (two.jwlibrary) up, ahead of row 1 (one.jwlibrary).
+    fireEvent.click(screen.getByTestId("fold-merge-row-1-up"));
+    fireEvent.click(screen.getByTestId("fold-merge-continue"));
+
+    await vi.waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("fold_merge_dry_run", {
+        sourcePaths: [
+          "C:/archives/two.jwlibrary",
+          "C:/archives/one.jwlibrary",
+          "C:/archives/three.jwlibrary",
+        ],
+      }),
+    );
+  });
+
+  it("Preview Confirm calls fold_merge_commit with the SAME array, then list_notes, then onOpened", async () => {
+    openMock.mockResolvedValue(FOLD_SOURCES);
+    invokeMock.mockResolvedValue(FOLD_REPORT);
+    const handlers = renderBar({ archiveOpen: true });
+
+    fireEvent.click(screen.getByTestId("fold-merge-button"));
+    await screen.findByTestId("fold-merge-dialog");
+    fireEvent.click(screen.getByTestId("fold-merge-continue"));
+    const confirm = await screen.findByTestId("edit-preview-confirm");
+
+    const foldedNotes: BrowseRow[] = [];
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "fold_merge_commit") return Promise.resolve(undefined);
+      if (cmd === "list_notes") return Promise.resolve(foldedNotes);
+      return Promise.resolve(FOLD_REPORT);
+    });
+    fireEvent.click(confirm);
+
+    await vi.waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("fold_merge_commit", {
+        sourcePaths: FOLD_SOURCES,
+      }),
+    );
+    await vi.waitFor(() => expect(invokeMock).toHaveBeenCalledWith("list_notes"));
+    await vi.waitFor(() => expect(handlers.onOpened).toHaveBeenCalledWith(foldedNotes));
+  });
+
+  it("Preview Cancel makes no fold_merge_commit call", async () => {
+    openMock.mockResolvedValue(FOLD_SOURCES);
+    invokeMock.mockResolvedValue(FOLD_REPORT);
+    renderBar({ archiveOpen: true });
+
+    fireEvent.click(screen.getByTestId("fold-merge-button"));
+    await screen.findByTestId("fold-merge-dialog");
+    fireEvent.click(screen.getByTestId("fold-merge-continue"));
+    const cancel = await screen.findByTestId("edit-preview-cancel");
+    fireEvent.click(cancel);
+
+    await vi.waitFor(() =>
+      expect(screen.queryByTestId("edit-preview-dialog")).not.toBeInTheDocument(),
+    );
+    expect(invokeMock).not.toHaveBeenCalledWith("fold_merge_commit", expect.anything());
+  });
+
+  it("a rejected fold_merge_dry_run routes to onError and opens no preview", async () => {
+    openMock.mockResolvedValue(FOLD_SOURCES);
+    const dto: ErrorDto = {
+      code: "merge_unavailable",
+      operation: "fold_merge_dry_run",
+      safe_file_name: "one.jwlibrary",
+      message_key: "error.merge.unavailable",
+    };
+    invokeMock.mockRejectedValue(dto);
+    const handlers = renderBar({ archiveOpen: true });
+
+    fireEvent.click(screen.getByTestId("fold-merge-button"));
+    await screen.findByTestId("fold-merge-dialog");
+    fireEvent.click(screen.getByTestId("fold-merge-continue"));
+
+    await vi.waitFor(() => expect(handlers.onError).toHaveBeenCalledWith(dto));
+    expect(screen.queryByTestId("edit-preview-dialog")).not.toBeInTheDocument();
+  });
+
+  it("a rejected fold_merge_commit routes to onError and closes the preview", async () => {
+    openMock.mockResolvedValue(FOLD_SOURCES);
+    invokeMock.mockResolvedValue(FOLD_REPORT);
+    const handlers = renderBar({ archiveOpen: true });
+
+    fireEvent.click(screen.getByTestId("fold-merge-button"));
+    await screen.findByTestId("fold-merge-dialog");
+    fireEvent.click(screen.getByTestId("fold-merge-continue"));
+    const confirm = await screen.findByTestId("edit-preview-confirm");
+
+    const dto: ErrorDto = {
+      code: "merge_unavailable",
+      operation: "fold_merge_commit",
+      safe_file_name: "one.jwlibrary",
+      message_key: "error.merge.unavailable",
+    };
+    invokeMock.mockRejectedValue(dto);
+    fireEvent.click(confirm);
+
+    await vi.waitFor(() => expect(handlers.onError).toHaveBeenCalledWith(dto));
+    await vi.waitFor(() =>
+      expect(screen.queryByTestId("edit-preview-dialog")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("the fold-merge action is aria-busy during the picker phase and cannot be re-invoked meanwhile", async () => {
+    let resolveOpen: (value: string[]) => void = () => {};
+    openMock.mockImplementation(
+      () =>
+        new Promise<string[]>((resolve) => {
+          resolveOpen = resolve;
+        }),
+    );
+    renderBar({ archiveOpen: true });
+
+    const button = screen.getByTestId("fold-merge-button");
+    fireEvent.click(button);
+    fireEvent.click(button); // rapid second click while the picker promise is pending
+
+    expect(openMock).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole("button", { name: /preparing/i })).toBeDisabled();
+
+    resolveOpen(FOLD_SOURCES);
+    await vi.waitFor(() => expect(screen.getByTestId("fold-merge-dialog")).toBeInTheDocument());
+  });
 });

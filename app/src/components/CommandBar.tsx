@@ -6,9 +6,10 @@ import type { Category } from "../bindings/Category";
 import type { ErrorDto } from "../bindings/ErrorDto";
 import type { DryRunReport } from "../bindings/DryRunReport";
 import EditPreviewDialog from "./EditPreviewDialog";
+import FoldMergeDialog from "./FoldMergeDialog";
 import UtilitiesMenu from "./UtilitiesMenu";
 
-type ActionName = "open" | "new" | "save" | "saveAs" | "saveV14" | "merge";
+type ActionName = "open" | "new" | "save" | "saveAs" | "saveV14" | "merge" | "foldMerge";
 
 /** In-flight v14 export: the dry-run preview + the chosen target path,
  * held until the user confirms or cancels the reused preview dialog. */
@@ -24,6 +25,14 @@ interface V14Preview {
 interface MergePreview {
   report: DryRunReport;
   sourcePath: string;
+}
+
+/** In-flight fold merge: the aggregate dry-run preview + the ORDERED source
+ * paths it was computed from (MERGE-03, D10-01) — held until Confirm sends
+ * the SAME array to `fold_merge_commit`, or Cancel discards it untouched. */
+interface FoldMergePreview {
+  report: DryRunReport;
+  sourcePaths: string[];
 }
 
 /** Sums every per-table count in a `DryRunReport` bucket (added/overwritten). */
@@ -87,6 +96,13 @@ export default function CommandBar({
   // SOURCE archive path live here between the dialog opening and Confirm/Cancel.
   // `null` = no preview open.
   const [mergePreview, setMergePreview] = useState<MergePreview | null>(null);
+  // The fold merge (MERGE-03) has TWO stages held here: the chosen ordered
+  // source paths (list stage, non-null while FoldMergeDialog is open) and
+  // the aggregate dry-run preview + the paths it was computed from (confirm
+  // stage, non-null while EditPreviewDialog is open). `null` = that stage
+  // is not showing.
+  const [foldSources, setFoldSources] = useState<string[] | null>(null);
+  const [foldPreview, setFoldPreview] = useState<FoldMergePreview | null>(null);
   // Ref (not state) so the guard check is synchronous: two rapid clicks
   // dispatched before React re-renders must still see the first click's
   // "busy" flag, which `setState` alone cannot guarantee.
@@ -282,6 +298,88 @@ export default function CommandBar({
     setMergePreview(null);
   }, []);
 
+  // Synchronous guard for the FoldMergeDialog's Continue button — analogous
+  // to `busyRef` above, but scoped to the fold's dry-run call since it isn't
+  // wrapped in `runAction` (the picker phase already was; Continue fires
+  // later, after the user has reordered/edited the list).
+  const foldContinueBusyRef = useRef(false);
+
+  // "Merge Multiple Archives…" (MERGE-03): pick THREE OR MORE source
+  // archives in one action and show them as an ordered, reorderable list
+  // (FoldMergeDialog) before anything runs. Continue calls `fold_merge_dry_run`
+  // ONCE with the list's exact order and opens the reused `EditPreviewDialog`
+  // with the aggregate report. Only Confirm there calls `fold_merge_commit`,
+  // with the SAME array — cancelling either stage writes nothing. A missing
+  // or wrong-arch jwlCore binary surfaces as `merge_unavailable` through the
+  // existing ErrorBanner copy, same as the two-archive merge.
+  const handleFoldMerge = useCallback(
+    () =>
+      runAction("foldMerge", async () => {
+        const selected = await open({
+          multiple: true,
+          directory: false,
+          filters: FILTERS,
+        });
+        if (!Array.isArray(selected) || selected.length === 0) {
+          onCancelled();
+          return;
+        }
+        setFoldSources(selected);
+      }),
+    [runAction, onCancelled],
+  );
+
+  const handleFoldSourcesChange = useCallback((paths: string[]) => {
+    setFoldSources(paths);
+  }, []);
+
+  const handleFoldContinue = useCallback(async () => {
+    if (!foldSources || foldContinueBusyRef.current) {
+      return; // double-click guard: no-op, not a duplicate invoke
+    }
+    foldContinueBusyRef.current = true;
+    try {
+      const report = await invoke<DryRunReport>("fold_merge_dry_run", {
+        sourcePaths: foldSources,
+      });
+      setFoldPreview({ report, sourcePaths: foldSources });
+      setFoldSources(null);
+    } catch (err) {
+      onError(err as ErrorDto);
+      // Leave the source list open (not cleared) so the user can retry
+      // without re-picking every archive.
+    } finally {
+      foldContinueBusyRef.current = false;
+    }
+  }, [foldSources, onError]);
+
+  const handleFoldSourcesCancel = useCallback(() => {
+    setFoldSources(null);
+  }, []);
+
+  const handleFoldConfirm = useCallback(async () => {
+    if (!foldPreview) {
+      return;
+    }
+    const { sourcePaths } = foldPreview;
+    try {
+      await invoke("fold_merge_commit", { sourcePaths });
+      // fold_merge_commit mutates the open session in place (returns void),
+      // so re-query the folded Notes and push them through the existing
+      // open refresh path, exactly as the two-archive merge does.
+      const notes = await invoke<BrowseRow[]>("list_notes");
+      onOpened(notes);
+    } catch (err) {
+      onError(err as ErrorDto);
+    } finally {
+      setFoldPreview(null);
+    }
+  }, [foldPreview, onOpened, onError]);
+
+  const handleFoldPreviewCancel = useCallback(() => {
+    setFoldPreview(null);
+  }, []);
+
   const handleSortTagsApplied = useCallback(async () => {
     try {
       const freshRows = await invoke<BrowseRow[]>("list_category", { category: currentCategory });
@@ -355,6 +453,16 @@ export default function CommandBar({
       >
         {pending === "merge" ? "Preparing…" : "Merge Archive…"}
       </button>
+      <button
+        type="button"
+        className="toolbar-button toolbar-button-secondary"
+        onClick={handleFoldMerge}
+        disabled={anyPending || !archiveOpen}
+        aria-busy={pending === "foldMerge"}
+        data-testid="fold-merge-button"
+      >
+        {pending === "foldMerge" ? "Preparing…" : "Merge Multiple Archives…"}
+      </button>
       <span style={{ position: "relative", display: "inline-block" }}>
         <button
           ref={utilitiesButtonRef}
@@ -412,6 +520,35 @@ export default function CommandBar({
             {sumCounts(mergePreview.report.overwritten)} updated from{" "}
             {baseName(mergePreview.sourcePath)}. This merges into your open
             archive — nothing is written until you save.
+          </>
+        }
+      />
+    )}
+    {foldSources && (
+      <FoldMergeDialog
+        paths={foldSources}
+        onChange={handleFoldSourcesChange}
+        onContinue={handleFoldContinue}
+        onCancel={handleFoldSourcesCancel}
+      />
+    )}
+    {foldPreview && (
+      <EditPreviewDialog
+        report={foldPreview.report}
+        onConfirm={handleFoldConfirm}
+        onCancel={handleFoldPreviewCancel}
+        title="Merge these archives?"
+        ariaLabel="Confirm fold merge"
+        confirmLabel="Merge"
+        confirmPendingLabel="Merging…"
+        summary={
+          <>
+            {sumCounts(foldPreview.report.added)} record
+            {sumCounts(foldPreview.report.added) === 1 ? "" : "s"} added,{" "}
+            {sumCounts(foldPreview.report.overwritten)} updated from the
+            combined effect of {foldPreview.sourcePaths.length} archives in
+            the shown order. This merges into your open archive — nothing is
+            written until you save.
           </>
         }
       />
