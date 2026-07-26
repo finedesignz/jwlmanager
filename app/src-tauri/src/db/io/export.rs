@@ -65,11 +65,16 @@ pub(crate) fn join_row(values: &[Option<String>]) -> String {
 /// Reused verbatim by Task 3's import dup-check (`get_current` port) so the
 /// "already present" comparison is always like-with-like against THIS export
 /// path's own formatting.
-pub(crate) fn read_favorite_lines(
+/// Same query as [`read_favorite_lines`], with the row's own `TagMapId`
+/// selected as a leading column so incremental export's diff engine
+/// (`db::io::diff`, 09-02-PLAN.md Task 1) can pair each wire line with the id
+/// that would select it. [`read_favorite_lines`] is now a thin projection
+/// over this function — exactly one SQL column list exists for Favorites.
+pub(crate) fn read_favorite_id_lines(
     conn: &Connection,
     ids: Option<&NonEmptyTagMapIds>,
-) -> Result<Vec<String>, ArchiveError> {
-    let base_sql = "SELECT DocumentId, Track, IssueTagNumber, KeySymbol, MepsLanguage, Type \
+) -> Result<Vec<(i64, String)>, ArchiveError> {
+    let base_sql = "SELECT TagMapId, DocumentId, Track, IssueTagNumber, KeySymbol, MepsLanguage, Type \
          FROM Location JOIN TagMap USING (LocationId) \
          WHERE TagId = (SELECT TagId FROM Tag WHERE Type = 0 AND Name = 'Favorite')";
 
@@ -88,25 +93,36 @@ pub(crate) fn read_favorite_lines(
 
     let mut stmt = conn
         .prepare(&sql)
-        .map_err(|e| map_sqlite_err(e, "read_favorite_lines: prepare"))?;
+        .map_err(|e| map_sqlite_err(e, "read_favorite_id_lines: prepare"))?;
     let rows = stmt
         .query_map(rusqlite::params_from_iter(bound.iter()), |row| {
+            let id: i64 = row.get(0)?;
             let mut fields = Vec::with_capacity(6);
-            for i in 0..6 {
+            for i in 1..7 {
                 let value: Value = row.get(i)?;
                 fields.push(value);
             }
-            Ok(fields)
+            Ok((id, fields))
         })
-        .map_err(|e| map_sqlite_err(e, "read_favorite_lines: query"))?;
+        .map_err(|e| map_sqlite_err(e, "read_favorite_id_lines: query"))?;
 
     let mut lines = Vec::new();
     for row in rows {
-        let fields = row.map_err(|e| map_sqlite_err(e, "read_favorite_lines: read row"))?;
+        let (id, fields) = row.map_err(|e| map_sqlite_err(e, "read_favorite_id_lines: read row"))?;
         let fields: Vec<Option<String>> = fields.into_iter().map(value_to_field).collect();
-        lines.push(join_row(&fields));
+        lines.push((id, join_row(&fields)));
     }
     Ok(lines)
+}
+
+pub(crate) fn read_favorite_lines(
+    conn: &Connection,
+    ids: Option<&NonEmptyTagMapIds>,
+) -> Result<Vec<String>, ArchiveError> {
+    Ok(read_favorite_id_lines(conn, ids)?
+        .into_iter()
+        .map(|(_, line)| line)
+        .collect())
 }
 
 /// Exports Favorites (whole category when `ids` is `None`, D8-10
@@ -155,13 +171,19 @@ pub(crate) const ANNOTATIONS_WRITES_END_SENTINEL: bool = true;
 /// as Python (RESEARCH `## Wire Formats` Bookmarks subsection). No `ORDER
 /// BY` — Python's own `export_bookmarks` has none either, so row order is
 /// whatever SQLite's natural scan order yields.
-fn read_bookmark_lines(
+/// Same query as [`read_bookmark_lines`], with the row's own `BookmarkId`
+/// selected as a leading column so incremental export's diff engine
+/// (`db::io::diff`, 09-02-PLAN.md Task 1) can pair each wire line with the id
+/// that would select it. [`read_bookmark_lines`] is now a thin projection
+/// over this function — exactly one SQL column list exists for Bookmarks.
+pub(crate) fn read_bookmark_id_lines(
     conn: &Connection,
     ids: Option<&NonEmptyBookmarkIds>,
-) -> Result<Vec<String>, ArchiveError> {
-    let base_sql = "SELECT l.BookNumber, l.ChapterNumber, l.DocumentId, l.IssueTagNumber, \
-         l.KeySymbol, l.MepsLanguage, l.Type, Slot, REPLACE(b.Title, \"|\", \"\u{A6}\"), \
-         REPLACE(Snippet, \"|\", \"\u{A6}\"), BlockType, BlockIdentifier \
+) -> Result<Vec<(i64, String)>, ArchiveError> {
+    let base_sql = "SELECT b.BookmarkId, l.BookNumber, l.ChapterNumber, l.DocumentId, \
+         l.IssueTagNumber, l.KeySymbol, l.MepsLanguage, l.Type, Slot, \
+         REPLACE(b.Title, \"|\", \"\u{A6}\"), REPLACE(Snippet, \"|\", \"\u{A6}\"), \
+         BlockType, BlockIdentifier \
          FROM Bookmark b LEFT JOIN Location l USING (LocationId)";
 
     let (sql, bound): (String, Vec<i64>) = match ids {
@@ -179,25 +201,36 @@ fn read_bookmark_lines(
 
     let mut stmt = conn
         .prepare(&sql)
-        .map_err(|e| map_sqlite_err(e, "read_bookmark_lines: prepare"))?;
+        .map_err(|e| map_sqlite_err(e, "read_bookmark_id_lines: prepare"))?;
     let rows = stmt
         .query_map(rusqlite::params_from_iter(bound.iter()), |row| {
+            let id: i64 = row.get(0)?;
             let mut fields = Vec::with_capacity(12);
-            for i in 0..12 {
+            for i in 1..13 {
                 let value: Value = row.get(i)?;
                 fields.push(value);
             }
-            Ok(fields)
+            Ok((id, fields))
         })
-        .map_err(|e| map_sqlite_err(e, "read_bookmark_lines: query"))?;
+        .map_err(|e| map_sqlite_err(e, "read_bookmark_id_lines: query"))?;
 
     let mut lines = Vec::new();
     for row in rows {
-        let fields = row.map_err(|e| map_sqlite_err(e, "read_bookmark_lines: read row"))?;
+        let (id, fields) = row.map_err(|e| map_sqlite_err(e, "read_bookmark_id_lines: read row"))?;
         let fields: Vec<Option<String>> = fields.into_iter().map(value_to_field).collect();
-        lines.push(join_row(&fields));
+        lines.push((id, join_row(&fields)));
     }
     Ok(lines)
+}
+
+fn read_bookmark_lines(
+    conn: &Connection,
+    ids: Option<&NonEmptyBookmarkIds>,
+) -> Result<Vec<String>, ArchiveError> {
+    Ok(read_bookmark_id_lines(conn, ids)?
+        .into_iter()
+        .map(|(_, line)| line)
+        .collect())
 }
 
 /// Exports Bookmarks (whole category when `ids` is `None`, D8-10
@@ -356,13 +389,19 @@ pub(crate) const HIGHLIGHTS_WRITES_END_SENTINEL: bool = false;
 /// BookNumber, ChapterNumber, DocumentId, IssueTagNumber, KeySymbol,
 /// MepsLanguage, Type` (`JWLManager.py:1476`). No `ORDER BY` — Python's own
 /// `export_highlights` has none either.
-fn read_highlight_lines(
+/// Same query as [`read_highlight_lines`], with the row's own
+/// `b.BlockRangeId` selected as a leading column so incremental export's
+/// diff engine (`db::io::diff`, 09-02-PLAN.md Task 1) can pair each wire line
+/// with the id that would select it. [`read_highlight_lines`] is now a thin
+/// projection over this function — exactly one SQL column list exists for
+/// Highlights.
+pub(crate) fn read_highlight_id_lines(
     conn: &Connection,
     ids: Option<&NonEmptyBlockRangeIds>,
-) -> Result<Vec<String>, ArchiveError> {
-    let base_sql = "SELECT b.BlockType, b.Identifier, b.StartToken, b.EndToken, u.ColorIndex, \
-         u.Version, l.BookNumber, l.ChapterNumber, l.DocumentId, l.IssueTagNumber, \
-         l.KeySymbol, l.MepsLanguage, l.Type \
+) -> Result<Vec<(i64, String)>, ArchiveError> {
+    let base_sql = "SELECT b.BlockRangeId, b.BlockType, b.Identifier, b.StartToken, b.EndToken, \
+         u.ColorIndex, u.Version, l.BookNumber, l.ChapterNumber, l.DocumentId, \
+         l.IssueTagNumber, l.KeySymbol, l.MepsLanguage, l.Type \
          FROM UserMark u JOIN Location l USING (LocationId) JOIN BlockRange b USING (UserMarkId)";
 
     let (sql, bound): (String, Vec<i64>) = match ids {
@@ -380,25 +419,36 @@ fn read_highlight_lines(
 
     let mut stmt = conn
         .prepare(&sql)
-        .map_err(|e| map_sqlite_err(e, "read_highlight_lines: prepare"))?;
+        .map_err(|e| map_sqlite_err(e, "read_highlight_id_lines: prepare"))?;
     let rows = stmt
         .query_map(rusqlite::params_from_iter(bound.iter()), |row| {
+            let id: i64 = row.get(0)?;
             let mut fields = Vec::with_capacity(13);
-            for i in 0..13 {
+            for i in 1..14 {
                 let value: Value = row.get(i)?;
                 fields.push(value);
             }
-            Ok(fields)
+            Ok((id, fields))
         })
-        .map_err(|e| map_sqlite_err(e, "read_highlight_lines: query"))?;
+        .map_err(|e| map_sqlite_err(e, "read_highlight_id_lines: query"))?;
 
     let mut lines = Vec::new();
     for row in rows {
-        let fields = row.map_err(|e| map_sqlite_err(e, "read_highlight_lines: read row"))?;
+        let (id, fields) = row.map_err(|e| map_sqlite_err(e, "read_highlight_id_lines: read row"))?;
         let fields: Vec<Option<String>> = fields.into_iter().map(value_to_field).collect();
-        lines.push(join_row(&fields));
+        lines.push((id, join_row(&fields)));
     }
     Ok(lines)
+}
+
+fn read_highlight_lines(
+    conn: &Connection,
+    ids: Option<&NonEmptyBlockRangeIds>,
+) -> Result<Vec<String>, ArchiveError> {
+    Ok(read_highlight_id_lines(conn, ids)?
+        .into_iter()
+        .map(|(_, line)| line)
+        .collect())
 }
 
 /// Exports Highlights (whole category when `ids` is `None`, D8-10

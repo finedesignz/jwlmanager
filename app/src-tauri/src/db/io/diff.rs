@@ -219,6 +219,77 @@ pub(crate) fn split_prior_note_records(text: &str) -> Vec<(String, String)> {
     records
 }
 
+/// The unit-separator byte [`record_hash`] appends, reused here as the join
+/// separator between a flat category's selected identity fields — never a
+/// printable wire character (the wire delimiter is `|`), so a key built from
+/// N fields can never collide with a key built from a different N-way split
+/// of the same underlying text.
+const KEY_UNIT_SEP: char = '\u{1F}';
+
+/// Builds a flat-category identity key by pipe-splitting `line` and joining
+/// the fields at `indices` with [`KEY_UNIT_SEP`]. If `line` does not split
+/// into exactly `expected_field_count` fields, returns the WHOLE line as the
+/// key instead of indexing out of bounds — an over-conservative key (every
+/// short line becomes its own distinct identity) is the safe direction
+/// (T-09-07, 09-02-PLAN.md threat register): the exported set never consults
+/// this key at all, only the summary's added/modified label does.
+fn build_flat_identity_key(line: &str, indices: &[usize], expected_field_count: usize) -> String {
+    let fields: Vec<&str> = line.split('|').collect();
+    if fields.len() != expected_field_count {
+        return line.to_string();
+    }
+    let sep = KEY_UNIT_SEP.to_string();
+    indices
+        .iter()
+        .filter_map(|&i| fields.get(i).copied())
+        .collect::<Vec<_>>()
+        .join(&sep)
+}
+
+/// Favorites' identity key (09-02-PLAN.md `<identity_key_specification>`):
+/// every one of the 6 fields is identity — there is no mutable content field
+/// on the wire, so the key is (functionally) the whole line. Consequence: a
+/// Favorite can only ever be added or removed, never modified — asserted by
+/// `favorites_never_reports_modified` in `incremental_export_tests.rs`.
+pub(crate) fn favorites_identity(line: &str) -> String {
+    build_flat_identity_key(line, &[0, 1, 2, 3, 4, 5], 6)
+}
+
+/// Bookmarks' identity key: fields 0-7 (BookNumber, ChapterNumber,
+/// DocumentId, IssueTagNumber, KeySymbol, MepsLanguage, Type, Slot) — Slot is
+/// what distinguishes two bookmarks at one location. Mutable and therefore
+/// EXCLUDED: Title (8), Snippet (9), BlockType (10), BlockIdentifier (11) —
+/// a change to any of these reports as `modified`, never `added`.
+pub(crate) fn bookmarks_identity(line: &str) -> String {
+    build_flat_identity_key(line, &[0, 1, 2, 3, 4, 5, 6, 7], 12)
+}
+
+/// Highlights' identity key: fields 0-3 (BlockType, Identifier, StartToken,
+/// EndToken) plus fields 6-12 (the seven Location fields). Excluded and
+/// therefore surfacing as `modified`: ColorIndex (4), Version (5) — a
+/// recolor reports as modified, not as an add+delete pair. A token-span edit
+/// changes the key and so reports as an add plus a deleted candidate
+/// instead — intentional (09-02-PLAN.md `<identity_key_specification>`).
+pub(crate) fn highlights_identity(line: &str) -> String {
+    build_flat_identity_key(line, &[0, 1, 2, 3, 6, 7, 8, 9, 10, 11, 12], 13)
+}
+
+/// Splits a CRLF-normalized prior flat-category export's TEXT into its data
+/// lines, applying the SAME "a line containing a `|` is a data line" filter
+/// `parse_favorites_file`/`parse_bookmarks_file`/`parse_highlights_file`
+/// apply (`import.rs`) — so the header (which never contains `|`) is never
+/// mistaken for a record, without re-deriving each category's own stricter
+/// per-line shape check. Assumes `text` already passed the matching
+/// `parse_<category>_file` as a fail-fast validation gate.
+pub(crate) fn split_prior_lines(text: &str) -> Vec<String> {
+    let normalized = normalize_line_endings(text);
+    normalized
+        .lines()
+        .filter(|line| line.contains('|'))
+        .map(str::to_string)
+        .collect()
+}
+
 /// Exports Notes changed since `prior_text` (IO-04, 09-01-PLAN.md Task 2) —
 /// the `export_notes_incremental` Tauri command's pure body, callable
 /// directly by tests (this codebase's established `*_impl` shape: a thin
@@ -403,6 +474,53 @@ mod tests {
         assert!(records[0].1.contains("Title One"));
         assert_eq!(records[1].0, "2026-02-01T00:00:00");
         assert!(records[1].1.contains("Title Two"));
+    }
+
+    #[test]
+    fn highlights_identity_invariant_under_color_change_varies_under_identifier_change() {
+        let a = "1|2|3|4|5|6|7|8|9|10|11|12|13";
+        let recolored = "1|2|3|4|99|6|7|8|9|10|11|12|13"; // ColorIndex (idx 4) changed
+        let moved = "1|99|3|4|5|6|7|8|9|10|11|12|13"; // Identifier (idx 1) changed
+        assert_eq!(highlights_identity(a), highlights_identity(recolored));
+        assert_ne!(highlights_identity(a), highlights_identity(moved));
+    }
+
+    #[test]
+    fn bookmarks_identity_invariant_under_title_change_varies_under_slot_change() {
+        let a = "1|2|3|4|5|6|7|8|Title|Snippet|10|11";
+        let retitled = "1|2|3|4|5|6|7|8|Changed Title|Snippet|10|11"; // Title (idx 8) changed
+        let moved_slot = "1|2|3|4|5|6|7|99|Title|Snippet|10|11"; // Slot (idx 7) changed
+        assert_eq!(bookmarks_identity(a), bookmarks_identity(retitled));
+        assert_ne!(bookmarks_identity(a), bookmarks_identity(moved_slot));
+    }
+
+    #[test]
+    fn favorites_identity_varies_under_any_field_change() {
+        let a = "1|2|3|4|5|6";
+        let changed = "1|2|3|4|5|99";
+        assert_ne!(favorites_identity(a), favorites_identity(changed));
+    }
+
+    #[test]
+    fn identity_key_on_short_line_does_not_panic() {
+        let short = "1|2";
+        assert_eq!(favorites_identity(short), short);
+        assert_eq!(bookmarks_identity(short), short);
+        assert_eq!(highlights_identity(short), short);
+    }
+
+    #[test]
+    fn split_prior_lines_skips_header_and_blank_lines() {
+        let text = "{FAVORITES}\n \nExported from x\nby y (1.0) on z\n****\n1|2|3|4|5|6\n7|8|9|10|11|12";
+        let lines = split_prior_lines(text);
+        assert_eq!(lines, vec!["1|2|3|4|5|6", "7|8|9|10|11|12"]);
+    }
+
+    #[test]
+    fn split_prior_lines_normalizes_crlf() {
+        let text = "{FAVORITES}\r\n \r\n1|2|3|4|5|6\r\n";
+        let lines = split_prior_lines(text);
+        assert_eq!(lines, vec!["1|2|3|4|5|6"]);
     }
 
     #[test]
