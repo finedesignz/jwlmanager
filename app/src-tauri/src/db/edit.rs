@@ -193,6 +193,21 @@ pub(crate) const PLAYLIST_IMPORT_SNAPSHOT_TABLES: &[(&str, &str)] = &[
     ("IndependentMedia", "IndependentMediaId"),
 ];
 
+/// Playlist media delete (08-06-PLAN.md Task 3, D8-07) affected-table set:
+/// `PlaylistItem` (the deleted item rows themselves), `PlaylistItemMarker`
+/// (cascaded per-item), `TagMap` (the item's tag association, cascaded), and
+/// `IndependentMedia` (the orphaned media rows `delete_playlist_items_db`
+/// removes). The composite-key junction tables
+/// (`PlaylistItem*Map`/`PlaylistItemMarker*Map`) have no single-column
+/// identity and stay out of scope, same precedent as [`TRACKED_TABLES`]'s
+/// own composite-key exclusions.
+pub(crate) const MEDIA_DELETE_SNAPSHOT_TABLES: &[(&str, &str)] = &[
+    ("PlaylistItem", "PlaylistItemId"),
+    ("PlaylistItemMarker", "PlaylistItemMarkerId"),
+    ("TagMap", "TagMapId"),
+    ("IndependentMedia", "IndependentMediaId"),
+];
+
 pub(crate) fn snapshot_pks(
     tx: &Transaction,
     table: &str,

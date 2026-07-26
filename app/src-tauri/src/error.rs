@@ -69,6 +69,12 @@ pub enum ArchiveError {
     PlaylistExportFailed { reason: String },
     #[error("playlist import failed: {reason}")]
     PlaylistImportFailed { reason: String },
+    #[error("media add failed: {reason}")]
+    MediaAddFailed { reason: String },
+    #[error("unsupported media format for {file}: {format}")]
+    MediaUnsupportedFormat { file: String, format: String },
+    #[error("media delete failed: {reason}")]
+    MediaDeleteFailed { reason: String },
     #[error("jwlCore merge engine is unavailable on this platform")]
     MergeUnavailable,
     #[error("archive merge failed: {reason}")]
@@ -215,6 +221,25 @@ impl ArchiveError {
             // the stable code + message_key; the frontend copy is generic.
             ArchiveError::PlaylistImportFailed { .. } => {
                 ("playlist_import_failed", "error.archive.playlist_import_failed")
+            }
+            // `reason` is internal-only (module docs) — the DTO exposes only
+            // the stable code + message_key; the frontend copy is generic
+            // ("no files were added and the archive is unchanged").
+            ArchiveError::MediaAddFailed { .. } => {
+                ("media_add_failed", "error.archive.media_add_failed")
+            }
+            // `file`/`format` are internal-only (module docs) — this variant
+            // is only ever returned from [`crate::db::media::media_precheck`],
+            // which is surfaced per-file in the frontend's row list, never as
+            // a whole-dialog DTO error; kept here for completeness of the
+            // exhaustive match.
+            ArchiveError::MediaUnsupportedFormat { .. } => {
+                ("media_unsupported_format", "error.archive.media_unsupported_format")
+            }
+            // `reason` is internal-only (module docs) — the DTO exposes only
+            // the stable code + message_key; the frontend copy is generic.
+            ArchiveError::MediaDeleteFailed { .. } => {
+                ("media_delete_failed", "error.archive.media_delete_failed")
             }
             // A missing/wrong-arch jwlCore binary degrades to a typed error
             // (never the Python `crash_box + sys.exit()` defect) — the DTO

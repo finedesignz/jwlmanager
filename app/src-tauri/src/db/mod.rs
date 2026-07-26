@@ -12,6 +12,7 @@ pub mod highlights;
 pub mod ids;
 pub mod io;
 pub mod labels;
+pub mod media;
 pub mod notes;
 pub mod playlist_io;
 pub mod pragma_guard;

@@ -2355,6 +2355,225 @@ fn import_playlist_apply(
     Ok(report)
 }
 
+/// Pre-checks the given file `paths` for the currently open session's
+/// Playlists media add (IO-02, 08-06-PLAN.md): classifies each as `"new"` /
+/// `"duplicate"` / `"unsupported"` via SHA-256 content-hash dedup + magic-
+/// byte sniffing. Performs NO writes of any kind — this IS the confirm
+/// surface `MediaAddDialog` renders (D8-06, UI-SPEC).
+#[tauri::command]
+fn media_add_precheck(
+    paths: Vec<String>,
+    state: tauri::State<SessionState>,
+) -> Result<Vec<db::media::MediaPrecheckResult>, ErrorDto> {
+    let guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("media_add_precheck", None))?;
+    let session = guard.as_ref().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("media_add_precheck", None)
+    })?;
+
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("media_add_precheck", Some(session.target_path.as_path()))
+    })?;
+
+    let path_bufs: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
+    let prechecks = db::media::media_precheck(&conn, &path_bufs)
+        .map_err(|err| err.to_dto("media_add_precheck", Some(session.target_path.as_path())))?;
+
+    Ok(prechecks.iter().map(db::media::MediaPrecheck::to_dto).collect())
+}
+
+/// The Tauri-facing result of [`media_add_apply`] — how many of the
+/// (already-precheck-filtered-to-New) files were actually added. A copy
+/// failure is a WHOLE-BATCH failure (PD-3, this app's first staged-DB-then-
+/// files commit) — it never partially lands, so there is no per-file
+/// "failed" count here; the frontend derives its per-row "added"/"skipped"/
+/// "unreadable" glyphs from the PRECHECK response plus this success/failure
+/// outcome, never a third, separate per-file apply result.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, export_to = "../../src/bindings/MediaAddApplyReport.ts")]
+struct MediaAddApplyReport {
+    added: usize,
+}
+
+/// Applies a media-add batch for the currently open session's Playlists
+/// (IO-02, 08-06-PLAN.md): re-runs [`db::media::media_precheck`] on `paths`
+/// (never trusts a stale client-side classification — a race with a
+/// concurrent add is simply re-resolved by this fresh hash check), filters
+/// to `New` entries, stages every DB write into one transaction
+/// ([`db::media::apply_media_add`]), then copies every staged file
+/// ([`db::media::perform_staged_copies`]) — committing ONLY if every copy
+/// succeeded (PD-3). On any copy failure the transaction is dropped
+/// (never committed) and every already-written file from THIS call is
+/// deleted, so neither a phantom row nor a half-written batch survives.
+/// Marks the session dirty on success.
+#[tauri::command]
+fn media_add_apply(
+    paths: Vec<String>,
+    playlist_name: String,
+    state: tauri::State<SessionState>,
+) -> Result<MediaAddApplyReport, ErrorDto> {
+    let mut guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("media_add_apply", None))?;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| error::ArchiveError::MissingUserDataBackup.to_dto("media_add_apply", None))?;
+
+    let path_bufs: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
+
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err).to_dto("media_add_apply", Some(session.target_path.as_path()))
+    })?;
+
+    let prechecks = db::media::media_precheck(&conn, &path_bufs)
+        .map_err(|err| err.to_dto("media_add_apply", Some(session.target_path.as_path())))?;
+    let new_items: Vec<db::media::MediaPrecheck> = prechecks
+        .into_iter()
+        .filter(|p| matches!(p.classification, db::media::MediaClassification::New { .. }))
+        .collect();
+
+    if new_items.is_empty() {
+        return Ok(MediaAddApplyReport { added: 0 });
+    }
+
+    let guard_pragma = db::pragma_guard::PragmaGuard::new(&conn).map_err(|err| {
+        error::ArchiveError::from(err).to_dto("media_add_apply", Some(session.target_path.as_path()))
+    })?;
+    conn.execute_batch("PRAGMA foreign_keys = 'OFF';")
+        .map_err(|err| {
+            error::ArchiveError::from(err)
+                .to_dto("media_add_apply", Some(session.target_path.as_path()))
+        })?;
+
+    let tx = conn.unchecked_transaction().map_err(|err| {
+        error::ArchiveError::from(err).to_dto("media_add_apply", Some(session.target_path.as_path()))
+    })?;
+
+    let mut available = compute_available_ids(&tx)
+        .map_err(|err| err.to_dto("media_add_apply", Some(session.target_path.as_path())))?;
+    let mut staged = Vec::new();
+    let added = db::media::apply_media_add(
+        &tx,
+        &playlist_name,
+        &new_items,
+        &mut staged,
+        &mut available,
+        guid_seed_now(),
+    )
+    .map_err(|err| err.to_dto("media_add_apply", Some(session.target_path.as_path())))?;
+
+    // PD-3: files are copied AFTER every DB write is staged, and the
+    // transaction is committed ONLY if every copy succeeded — `tx` is
+    // simply dropped (never committed) on the `Err` path, rolling back the
+    // whole batch atomically.
+    db::media::perform_staged_copies(&staged, session.temp_dir.path())
+        .map_err(|err| err.to_dto("media_add_apply", Some(session.target_path.as_path())))?;
+
+    tx.commit().map_err(|err| {
+        error::ArchiveError::from(err).to_dto("media_add_apply", Some(session.target_path.as_path()))
+    })?;
+    drop(guard_pragma);
+
+    session.dirty = true;
+
+    Ok(MediaAddApplyReport { added })
+}
+
+/// Previews the effect of deleting the given Playlist item selection WITHOUT
+/// mutating the working copy (SAFE-01, D8-07): opens the session's
+/// `db_path`, runs the real delete + trim inside a rolled-back transaction,
+/// and returns the resulting [`db::media::PlaylistDeleteReport`] — the
+/// standard `DryRunReport` plus the media-removed/media-kept counts the
+/// UI-SPEC's "shared media survives" summary needs.
+#[tauri::command]
+fn playlist_delete_dry_run(
+    ids: NonEmptyPlaylistItemIds,
+    state: tauri::State<SessionState>,
+) -> Result<db::media::PlaylistDeleteReport, ErrorDto> {
+    let guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("playlist_delete_dry_run", None))?;
+    let session = guard.as_ref().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("playlist_delete_dry_run", None)
+    })?;
+
+    let mut conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("playlist_delete_dry_run", Some(session.target_path.as_path()))
+    })?;
+
+    db::media::dry_run_delete_playlist_items(&mut conn, &ids).map_err(|err| {
+        err.to_dto("playlist_delete_dry_run", Some(session.target_path.as_path()))
+    })
+}
+
+/// Applies the delete of the given Playlist item selection — the project's
+/// FIRST irreversible on-disk media removal (T-08-30, checkpoint-gated at
+/// plan time). Commits the DB delete FIRST ([`db::media::delete_playlist_items_db`]),
+/// and ONLY THEN calls [`db::media::remove_media_files`] (best-effort, a
+/// missing file silently ignored) — never the reverse (D8-07/PD-3). Marks
+/// the session dirty on success.
+#[tauri::command]
+fn playlist_delete_apply(
+    ids: NonEmptyPlaylistItemIds,
+    state: tauri::State<SessionState>,
+) -> Result<db::media::PlaylistDeleteReport, ErrorDto> {
+    let mut guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("playlist_delete_apply", None))?;
+    let session = guard.as_mut().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("playlist_delete_apply", None)
+    })?;
+
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("playlist_delete_apply", Some(session.target_path.as_path()))
+    })?;
+
+    let guard_pragma = db::pragma_guard::PragmaGuard::new(&conn).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("playlist_delete_apply", Some(session.target_path.as_path()))
+    })?;
+    conn.execute_batch("PRAGMA foreign_keys = 'OFF';")
+        .map_err(|err| {
+            error::ArchiveError::from(err)
+                .to_dto("playlist_delete_apply", Some(session.target_path.as_path()))
+        })?;
+
+    let tx = conn.unchecked_transaction().map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("playlist_delete_apply", Some(session.target_path.as_path()))
+    })?;
+
+    let before = db::edit::snapshot_tables(&tx, db::edit::MEDIA_DELETE_SNAPSHOT_TABLES)
+        .map_err(|err| err.to_dto("playlist_delete_apply", Some(session.target_path.as_path())))?;
+    let outcome = db::media::delete_playlist_items_db(&tx, &ids)
+        .map_err(|err| err.to_dto("playlist_delete_apply", Some(session.target_path.as_path())))?;
+    let after = db::edit::snapshot_tables(&tx, db::edit::MEDIA_DELETE_SNAPSHOT_TABLES)
+        .map_err(|err| err.to_dto("playlist_delete_apply", Some(session.target_path.as_path())))?;
+
+    tx.commit().map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("playlist_delete_apply", Some(session.target_path.as_path()))
+    })?;
+    drop(guard_pragma);
+
+    // Filesystem removal happens ONLY here — after the DB transaction has
+    // already committed (D8-07/PD-3).
+    db::media::remove_media_files(session.temp_dir.path(), &outcome.removed_files);
+
+    session.dirty = true;
+
+    let report = db::edit::diff_snapshots(&before, &after);
+    Ok(db::media::PlaylistDeleteReport {
+        report,
+        media_removed: outcome.removed_files.len(),
+        media_kept: outcome.kept_count,
+    })
+}
+
 /// Tauri builder wiring for the Walking Skeleton.
 ///
 /// `open_archive` (01-07) and `check_jwlcore` (01-03) are registered here.
@@ -2426,7 +2645,11 @@ pub fn run() {
             import_notes_apply,
             export_playlist,
             import_playlist_dry_run,
-            import_playlist_apply
+            import_playlist_apply,
+            media_add_precheck,
+            media_add_apply,
+            playlist_delete_dry_run,
+            playlist_delete_apply
         ])
         .run(tauri::generate_context!())
     {
