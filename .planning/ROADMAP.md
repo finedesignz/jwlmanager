@@ -182,7 +182,14 @@
   2. User can import a file the Python app produced, for any category, with data landing correctly
   3. Imported items recycle ID gaps the same way the Python app does, verified by round-trip test
 
-**Plans**: TBD
+**Plans**: 6 plans (6 waves)
+
+- [ ] 08-01-PLAN.md — Tracer: wire-format spine (header writer, `join_row`, ID-gap recycler, `DryRunReport.skipped`) proven end-to-end on Favorites export+import (Wave 1)
+- [ ] 08-02-PLAN.md — Bookmarks (`¦` escaping, no end sentinel) + Annotations (bracket tags, `{END}`) export+import (Wave 2)
+- [ ] 08-03-PLAN.md — Highlights export+import; first production call site of the Phase 7 range union-merge primitive (Wave 3)
+- [ ] 08-04-PLAN.md — Notes export+import (multi-range `RANGE`, opt-in bucket delete) + five-category semantic round-trip (Wave 4)
+- [ ] 08-05-PLAN.md — `.jwlplaylist` container export+import with full re-keying, zip-slip-safe (Wave 5)
+- [ ] 08-06-PLAN.md — Playlist media add (hash dedup, staged-DB-then-files commit) + delete media ref-counting (Wave 6)
 
 ### Phase 9: Incremental Export
 
