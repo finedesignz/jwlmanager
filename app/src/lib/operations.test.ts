@@ -126,6 +126,8 @@ describe("operationSet (D6-08 capability descriptor)", () => {
       "Annotations:import",
       "Highlights:export",
       "Highlights:import",
+      "Playlists:export",
+      "Playlists:import",
     ]);
     for (const cat of [
       "Notes",
