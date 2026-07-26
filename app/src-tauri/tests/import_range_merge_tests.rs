@@ -15,7 +15,9 @@ mod common;
 
 use common::fresh_v16_db;
 use jwlmanager_lib::db::ids::compute_available_ids;
-use jwlmanager_lib::db::io::import::{apply_import_highlights, parse_highlights_file};
+use jwlmanager_lib::db::io::import::{
+    apply_import_highlights, apply_import_notes, parse_highlights_file, parse_notes_file,
+};
 use rusqlite::Connection;
 
 fn count(conn: &Connection, table: &str) -> i64 {
@@ -202,4 +204,65 @@ fn new_block_range_id_consumes_a_recycled_gap_before_autoincrement() {
         )
         .expect("read new range id");
     assert_eq!(new_range_id, 1, "the new BlockRange must consume the recycled gap id 1");
+}
+
+// ---------------------------------------------------------------------------
+// Notes' `RANGE` attribute — the SECOND `merge_range_into` call site
+// (08-04-PLAN.md Task 2, D8-05). Sub-ranges within ONE record must merge
+// SEQUENTIALLY, and Notes' sub-ranges converge through the exact SAME
+// `db::highlights::merge_block_ranges` primitive Highlights uses above.
+// ---------------------------------------------------------------------------
+
+fn apply_note_lines(conn: &mut Connection, text: &str, guid_seed: u64) {
+    let (bucket, records) = parse_notes_file(text).expect("parse");
+    let tx = conn.transaction().expect("begin tx");
+    let mut available = compute_available_ids(&tx).expect("compute ids");
+    apply_import_notes(&tx, bucket, &records, &mut available, guid_seed, "2099-01-01T00:00:00Z")
+        .expect("apply");
+    tx.commit().expect("commit");
+}
+
+#[test]
+fn notes_sequential_sub_ranges_merge_into_one_row() {
+    let (_dir, db_path) = fresh_v16_db();
+    let mut conn = Connection::open(&db_path).expect("open db");
+
+    let text = "{NOTES=}\nheader\n==={CREATED=2024-01-01T00:00:00}{MODIFIED=2024-01-01T00:00:00}{TAGS=}{LANG=0}{PUB=nwt}{BK=1}{CH=1}{VS=5}{Reference=01001005}{COLOR=1}{RANGE=1:5-9;1:8-12}===\nTitle\nNote\n==={END}===";
+    apply_note_lines(&mut conn, text, 1);
+
+    let ranges = block_ranges(&conn);
+    assert_eq!(ranges.len(), 1, "the second sub-range must see the first sub-range's insert");
+    assert_eq!((ranges[0].1, ranges[0].2), (5, 12));
+}
+
+#[test]
+fn notes_sub_ranges_at_different_identifiers_stay_separate() {
+    let (_dir, db_path) = fresh_v16_db();
+    let mut conn = Connection::open(&db_path).expect("open db");
+
+    let text = "{NOTES=}\nheader\n==={CREATED=2024-01-01T00:00:00}{MODIFIED=2024-01-01T00:00:00}{TAGS=}{LANG=0}{PUB=nwt}{BK=1}{CH=1}{VS=5}{Reference=01001005}{COLOR=1}{RANGE=1:5-9;2:8-12}===\nTitle\nNote\n==={END}===";
+    apply_note_lines(&mut conn, text, 1);
+
+    let ranges = block_ranges(&conn);
+    assert_eq!(ranges.len(), 2, "sub-ranges naming different identifiers must not merge");
+}
+
+#[test]
+fn notes_range_merges_into_an_existing_highlight_range_via_the_shared_primitive() {
+    let (_dir, db_path) = fresh_v16_db();
+    let mut conn = Connection::open(&db_path).expect("open db");
+
+    // A Highlights import lands [0, 5] at (Identifier=1, the scripture Location).
+    apply_lines(&mut conn, "{HIGHLIGHTS}\n1|1|0|5|1|1|1|1|None|0|nwt|0|0", 1);
+    assert_eq!(block_ranges(&conn), vec![(1, 0, 5)]);
+
+    // A Notes import at the SAME (Identifier, Location) with an overlapping
+    // RANGE must merge into the SAME row via the one shared primitive — a
+    // separate implementation would leave two disjoint rows instead.
+    let text = "{NOTES=}\nheader\n==={CREATED=2024-01-01T00:00:00}{MODIFIED=2024-01-01T00:00:00}{TAGS=}{LANG=0}{PUB=nwt}{BK=1}{CH=1}{VS=1}{COLOR=1}{RANGE=3-8}===\nTitle\nNote\n==={END}===";
+    apply_note_lines(&mut conn, text, 2);
+
+    let ranges = block_ranges(&conn);
+    assert_eq!(ranges.len(), 1, "Notes' range must merge into the existing Highlights BlockRange");
+    assert_eq!((ranges[0].1, ranges[0].2), (0, 8));
 }

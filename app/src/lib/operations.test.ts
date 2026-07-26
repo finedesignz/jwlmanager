@@ -18,10 +18,24 @@ describe("operationSet (D6-08 capability descriptor)", () => {
     expect(byOp.get("color")).toMatchObject({ deferred: false, enabled: false });
     expect(byOp.get("tag")).toMatchObject({ deferred: false, enabled: false });
     expect(byOp.get("view")).toMatchObject({ deferred: false, enabled: false });
+    // export/import are LIVE and selection-independent/-optional (D8-10,
+    // 08-04-PLAN.md): never disabled at 0 selected.
+    expect(byOp.get("export")).toMatchObject({ deferred: false, enabled: true });
+    expect(byOp.get("import")).toMatchObject({ deferred: false, enabled: true });
 
-    // Every op OTHER than delete/color/tag/view is deferred (not in LIVE).
+    // Every op OTHER than delete/color/tag/view/export/import is deferred
+    // (not in LIVE).
     for (const o of ops) {
-      if (o.op === "delete" || o.op === "color" || o.op === "tag" || o.op === "view") continue;
+      if (
+        o.op === "delete" ||
+        o.op === "color" ||
+        o.op === "tag" ||
+        o.op === "view" ||
+        o.op === "export" ||
+        o.op === "import"
+      ) {
+        continue;
+      }
       expect(o.deferred, `${o.op} should be deferred`).toBe(true);
       expect(o.enabled, `${o.op} should be disabled`).toBe(false);
     }
@@ -95,6 +109,8 @@ describe("operationSet (D6-08 capability descriptor)", () => {
       "Notes:color",
       "Notes:tag",
       "Notes:view",
+      "Notes:export",
+      "Notes:import",
       "Favorites:delete",
       "Favorites:add",
       "Favorites:export",

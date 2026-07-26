@@ -6,6 +6,7 @@ import type { BrowseRow } from "../bindings/BrowseRow";
 import type { Category } from "../bindings/Category";
 import type { DryRunReport } from "../bindings/DryRunReport";
 import type { ErrorDto } from "../bindings/ErrorDto";
+import type { NotesImportPreview } from "../bindings/NotesImportPreview";
 import ColorMenu from "./ColorMenu";
 import EditPreviewDialog from "./EditPreviewDialog";
 import FavoriteAddDialog from "./FavoriteAddDialog";
@@ -58,17 +59,22 @@ const EXPORT_COMMANDS: Partial<Record<Category, string>> = {
   Bookmarks: "export_bookmarks",
   Annotations: "export_annotations",
   Highlights: "export_highlights",
+  Notes: "export_notes",
 };
 
 /**
  * The `(dryRun, apply)` Tauri command pair backing the LIVE "import" op for
- * each category (08-01-PLAN.md Task 3, 08-02-PLAN.md Tasks 1-2).
+ * each category (08-01-PLAN.md Task 3, 08-02-PLAN.md Tasks 1-2). Notes'
+ * `dryRun` returns a `NotesImportPreview` (report + the file's own detected
+ * bucket-delete character) rather than a bare `DryRunReport` — handled
+ * specially in `handleImportClick`/`handleImportConfirm` below (D8-09).
  */
 const IMPORT_COMMANDS: Partial<Record<Category, { dryRun: string; apply: string }>> = {
   Favorites: { dryRun: "import_favorites_dry_run", apply: "import_favorites_apply" },
   Bookmarks: { dryRun: "import_bookmarks_dry_run", apply: "import_bookmarks_apply" },
   Annotations: { dryRun: "import_annotations_dry_run", apply: "import_annotations_apply" },
   Highlights: { dryRun: "import_highlights_dry_run", apply: "import_highlights_apply" },
+  Notes: { dryRun: "import_notes_dry_run", apply: "import_notes_apply" },
 };
 
 /** Sums a `Record<string, number>`-shaped `DryRunReport` field's values. */
@@ -210,10 +216,18 @@ export default function CategoryList({
   // `onError` BEFORE this ever opens (D8-04 fail-fast — `importPreview`
   // stays `null`). Separate from `report` (the selection-scoped delete
   // preview above) since import is never selection-scoped.
-  const [importPreview, setImportPreview] = useState<{ report: DryRunReport; path: string } | null>(
-    null,
-  );
+  const [importPreview, setImportPreview] = useState<{
+    report: DryRunReport;
+    path: string;
+    /** Notes-only (D8-09): the file's own detected bucket-delete character,
+     * or `null` when the file names no bucket / the category isn't Notes. */
+    bucket: string | null;
+  } | null>(null);
   const [importPending, setImportPending] = useState(false);
+  // Notes-only (D8-09): the explicit user opt-in for the bucket delete the
+  // preview surfaced. Reset alongside `importPreview` — never persists past
+  // one import flow, and NEVER defaults to true.
+  const [bucketDeleteOptIn, setBucketDeleteOptIn] = useState(false);
 
   useEffect(() => {
     return () => {
@@ -247,6 +261,7 @@ export default function CategoryList({
     setShowTagDialog(false);
     setShowRecordEditor(false);
     setImportPreview(null);
+    setBucketDeleteOptIn(false);
   }
 
   const virtualizer = useVirtualizer({
@@ -358,34 +373,50 @@ export default function CategoryList({
     }
     setImportPending(true);
     try {
-      const dryRunReport = await invoke<DryRunReport>(importCommands.dryRun, {
-        path: selectedFile,
-      });
-      setImportPreview({ report: dryRunReport, path: selectedFile });
+      if (category === "Notes") {
+        const preview = await invoke<NotesImportPreview>(importCommands.dryRun, {
+          path: selectedFile,
+        });
+        setImportPreview({ report: preview.report, path: selectedFile, bucket: preview.bucket ?? null });
+      } else {
+        const dryRunReport = await invoke<DryRunReport>(importCommands.dryRun, {
+          path: selectedFile,
+        });
+        setImportPreview({ report: dryRunReport, path: selectedFile, bucket: null });
+      }
     } catch (err) {
       onError?.(err as ErrorDto);
     } finally {
       setImportPending(false);
     }
-  }, [importPending, importCommands, onError]);
+  }, [importPending, importCommands, category, onError]);
 
   const handleImportConfirm = useCallback(async () => {
     if (!importCommands || !importPreview) {
       return;
     }
     try {
-      await invoke(importCommands.apply, { path: importPreview.path });
+      const args: Record<string, unknown> = { path: importPreview.path };
+      // Notes-only (D8-09): the bucket delete NEVER runs unless the user
+      // explicitly checked the opt-in — the default `null` matches the
+      // command's own "never infer from the file" contract.
+      if (category === "Notes") {
+        args.bucket = bucketDeleteOptIn ? importPreview.bucket : null;
+      }
+      await invoke(importCommands.apply, args);
       const freshRows = await invoke<BrowseRow[]>("list_category", { category });
       onRowsChanged?.(freshRows);
     } catch (err) {
       onError?.(err as ErrorDto);
     } finally {
       setImportPreview(null);
+      setBucketDeleteOptIn(false);
     }
-  }, [importCommands, importPreview, category, onRowsChanged, onError]);
+  }, [importCommands, importPreview, category, bucketDeleteOptIn, onRowsChanged, onError]);
 
   const handleImportCancel = useCallback(() => {
     setImportPreview(null);
+    setBucketDeleteOptIn(false);
   }, []);
 
   const ops = operationSet(category, selected.size);
@@ -670,13 +701,34 @@ export default function CategoryList({
           confirmLabel={`Import ${category}`}
           confirmPendingLabel="Importing…"
           summary={
-            sumCounts(importPreview.report.added) === 0 &&
-            sumCounts(importPreview.report.overwritten) === 0 &&
-            sumCounts(importPreview.report.skipped) === 0 ? (
-              <>Nothing in this file is new — every record already matches what's in this archive.</>
-            ) : (
-              <>
-                {sumCounts(importPreview.report.added) > 0 && (
+            <>
+              {/* Notes-only extra clause (D8-09): only when the file names a
+                  title-character bucket to bulk-delete first. Rendered from
+                  `report.deleted` — never silently applied; requires this
+                  explicit opt-in checkbox before `handleImportConfirm` sends
+                  the bucket through. */}
+              {category === "Notes" && importPreview.bucket !== null && (
+                <label
+                  style={{ display: "block", marginBottom: "0.75rem" }}
+                  className="notes-import-bucket-delete-optin"
+                >
+                  <input
+                    type="checkbox"
+                    checked={bucketDeleteOptIn}
+                    onChange={(e) => setBucketDeleteOptIn(e.target.checked)}
+                  />{" "}
+                  Importing will first delete the {sumCounts(importPreview.report.deleted)} existing
+                  Note{sumCounts(importPreview.report.deleted) === 1 ? "" : "s"} under "
+                  {importPreview.bucket}" before adding the file's records.
+                </label>
+              )}
+              {sumCounts(importPreview.report.added) === 0 &&
+              sumCounts(importPreview.report.overwritten) === 0 &&
+              sumCounts(importPreview.report.skipped) === 0 ? (
+                <>Nothing in this file is new — every record already matches what's in this archive.</>
+              ) : (
+                <>
+                  {sumCounts(importPreview.report.added) > 0 && (
                   <>
                     {sumCounts(importPreview.report.added)} new record
                     {sumCounts(importPreview.report.added) === 1 ? "" : "s"} will be added.
@@ -690,15 +742,16 @@ export default function CategoryList({
                     <br />
                   </>
                 )}
-                {sumCounts(importPreview.report.skipped) > 0 && (
-                  <>
-                    {sumCounts(importPreview.report.skipped)} record
-                    {sumCounts(importPreview.report.skipped) === 1 ? "" : "s"} in this file will be
-                    skipped (already present).
-                  </>
-                )}
-              </>
-            )
+                  {sumCounts(importPreview.report.skipped) > 0 && (
+                    <>
+                      {sumCounts(importPreview.report.skipped)} record
+                      {sumCounts(importPreview.report.skipped) === 1 ? "" : "s"} in this file will be
+                      skipped (already present).
+                    </>
+                  )}
+                </>
+              )}
+            </>
           }
         />
       )}

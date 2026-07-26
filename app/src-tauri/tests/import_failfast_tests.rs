@@ -8,9 +8,14 @@ mod common;
 use common::{fresh_v16_db, fresh_v16_db_for_favorites_io};
 use jwlmanager_lib::db::io::import::{
     parse_annotations_file, parse_bookmarks_file, parse_favorites_file, parse_highlights_file,
+    parse_notes_file,
 };
 use jwlmanager_lib::error::ArchiveError;
 use rusqlite::Connection;
+
+fn note_count(conn: &Connection) -> i64 {
+    conn.query_row("SELECT COUNT(*) FROM Note", [], |r| r.get(0)).expect("count")
+}
 
 fn tagmap_count(conn: &Connection) -> i64 {
     conn.query_row("SELECT COUNT(*) FROM TagMap", [], |r| r.get(0))
@@ -252,6 +257,67 @@ fn highlights_earlier_well_formed_lines_do_not_partially_apply_before_a_later_ma
     let err = parse_highlights_file(text).expect_err("must reject the whole file");
     match err {
         ArchiveError::ImportMalformed { line, .. } => assert_eq!(line, 3),
+        other => panic!("expected ImportMalformed, got {other:?}"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Notes (08-04-PLAN.md)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn notes_missing_tag_line_is_rejected_at_line_1() {
+    let (_dir, db_path) = fresh_v16_db();
+    let conn = Connection::open(&db_path).expect("open db");
+    let before = note_count(&conn);
+
+    let err = parse_notes_file("no tag line here").expect_err("must reject a missing tag line");
+    match err {
+        ArchiveError::ImportMalformed { category, line, .. } => {
+            assert_eq!(category, "Notes");
+            assert_eq!(line, 1);
+        }
+        other => panic!("expected ImportMalformed, got {other:?}"),
+    }
+    assert_eq!(note_count(&conn), before);
+}
+
+#[test]
+fn notes_multi_char_bucket_tag_is_rejected() {
+    let err = parse_notes_file(
+        "{NOTES=ab}\nheader\n==={CREATED=x}{MODIFIED=y}{TAGS=}===\nT\nN\n==={END}===",
+    )
+    .expect_err("must reject a 2+ character bucket capture");
+    match err {
+        ArchiveError::ImportMalformed { category, line, .. } => {
+            assert_eq!(category, "Notes");
+            assert_eq!(line, 1);
+        }
+        other => panic!("expected ImportMalformed, got {other:?}"),
+    }
+}
+
+#[test]
+fn notes_bible_shaped_record_missing_color_is_rejected() {
+    let text = "{NOTES=}\nheader\n==={CREATED=2024-01-01T00:00:00}{MODIFIED=2024-01-01T00:00:00}{TAGS=}{LANG=0}{PUB=nwt}{BK=1}{CH=1}===\nT\nN\n==={END}===";
+    let err = parse_notes_file(text).expect_err("must reject a Bible-shaped record with no COLOR");
+    assert!(matches!(err, ArchiveError::ImportMalformed { .. }));
+}
+
+#[test]
+fn notes_malformed_range_span_is_rejected() {
+    let text = "{NOTES=}\nheader\n==={CREATED=2024-01-01T00:00:00}{MODIFIED=2024-01-01T00:00:00}{TAGS=}{LANG=0}{PUB=nwt}{BK=1}{CH=1}{VS=1}{COLOR=1}{RANGE=notanumber}===\nT\nN\n==={END}===";
+    let err = parse_notes_file(text).expect_err("must reject an unparseable RANGE span");
+    assert!(matches!(err, ArchiveError::ImportMalformed { .. }));
+}
+
+#[test]
+fn notes_earlier_well_formed_record_does_not_partially_apply_before_a_later_malformed_one() {
+    // D8-04: the WHOLE file is parsed before any transaction opens.
+    let text = "{NOTES=}\nheader\n==={CREATED=2024-01-01T00:00:00}{MODIFIED=2024-01-01T00:00:00}{TAGS=}===\nGood\nRecord\n==={CREATED=2024-01-01T00:00:00}{MODIFIED=2024-01-01T00:00:00}{TAGS=}{LANG=0}{PUB=nwt}{BK=1}{CH=1}===\nBad\nRecord\n==={END}===";
+    let err = parse_notes_file(text).expect_err("must reject the whole file");
+    match err {
+        ArchiveError::ImportMalformed { line, .. } => assert_eq!(line, 2),
         other => panic!("expected ImportMalformed, got {other:?}"),
     }
 }

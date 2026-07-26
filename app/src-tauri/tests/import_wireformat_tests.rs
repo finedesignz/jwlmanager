@@ -10,9 +10,10 @@ use common::{fresh_v16_db, fresh_v16_db_for_favorites_io, seed_id_gap_fixture, s
 use jwlmanager_lib::db::ids::compute_available_ids;
 use jwlmanager_lib::db::io::import::{
     apply_import_annotations, apply_import_bookmarks, apply_import_favorites,
-    apply_import_highlights, dry_run_import_annotations, dry_run_import_bookmarks,
-    dry_run_import_favorites, dry_run_import_highlights, parse_annotations_file,
-    parse_bookmarks_file, parse_favorites_file, parse_highlights_file,
+    apply_import_highlights, apply_import_notes, dry_run_import_annotations,
+    dry_run_import_bookmarks, dry_run_import_favorites, dry_run_import_highlights,
+    dry_run_import_notes, parse_annotations_file, parse_bookmarks_file, parse_favorites_file,
+    parse_highlights_file, parse_notes_file,
 };
 use rusqlite::Connection;
 
@@ -469,4 +470,230 @@ fn highlights_dry_run_leaves_every_affected_table_row_count_unchanged() {
     assert_eq!(count(&conn, "Location"), before_location, "dry run must not commit");
     assert_eq!(count(&conn, "UserMark"), before_usermark, "dry run must not commit");
     assert_eq!(count(&conn, "BlockRange"), before_blockrange, "dry run must not commit");
+}
+
+// ---------------------------------------------------------------------------
+// Notes (08-04-PLAN.md)
+// ---------------------------------------------------------------------------
+
+fn independent_note_text(title: &str, note: &str) -> String {
+    format!(
+        "{{NOTES=}}\nheader\n==={{CREATED=2024-01-01T00:00:00}}{{MODIFIED=2024-01-01T00:00:00}}{{TAGS=}}===\n{title}\n{note}\n==={{END}}==="
+    )
+}
+
+#[test]
+fn independent_note_inserts_with_untitled_or_titled_match() {
+    let (_dir, db_path) = fresh_v16_db();
+    let text = independent_note_text("My Title", "My note body");
+    let (bucket, records) = parse_notes_file(&text).expect("parse");
+    assert_eq!(bucket, None);
+    assert_eq!(records.len(), 1);
+
+    let mut conn = Connection::open(&db_path).expect("open db");
+    {
+        let tx = conn.transaction().expect("begin tx");
+        let mut available = compute_available_ids(&tx).expect("compute ids");
+        apply_import_notes(&tx, None, &records, &mut available, 1, "2099-01-01T00:00:00Z")
+            .expect("apply");
+        tx.commit().expect("commit");
+    }
+
+    assert_eq!(count(&conn, "Note"), 1);
+    let (title, content): (String, String) = conn
+        .query_row("SELECT Title, Content FROM Note", [], |r| Ok((r.get(0)?, r.get(1)?)))
+        .expect("read note");
+    assert_eq!(title, "My Title");
+    assert_eq!(content, "My note body");
+}
+
+#[test]
+fn reimporting_titled_note_updates_rather_than_inserts() {
+    let (_dir, db_path) = fresh_v16_db();
+    let text = independent_note_text("My Title", "v1 body");
+    let (_bucket, records) = parse_notes_file(&text).expect("parse");
+
+    let mut conn = Connection::open(&db_path).expect("open db");
+    {
+        let tx = conn.transaction().expect("begin tx");
+        let mut available = compute_available_ids(&tx).expect("compute ids");
+        apply_import_notes(&tx, None, &records, &mut available, 1, "2099-01-01T00:00:00Z")
+            .expect("apply");
+        tx.commit().expect("commit");
+    }
+
+    let text2 = independent_note_text("My Title", "v2 body");
+    let (_bucket2, records2) = parse_notes_file(&text2).expect("parse");
+    {
+        let tx = conn.transaction().expect("begin tx");
+        let mut available = compute_available_ids(&tx).expect("compute ids");
+        apply_import_notes(&tx, None, &records2, &mut available, 2, "2099-01-01T00:00:00Z")
+            .expect("apply");
+        tx.commit().expect("commit");
+    }
+
+    assert_eq!(count(&conn, "Note"), 1, "a titled re-import must UPDATE, not insert a second Note");
+    let content: String = conn
+        .query_row("SELECT Content FROM Note", [], |r| r.get(0))
+        .expect("read note");
+    assert_eq!(content, "v2 body");
+}
+
+#[test]
+fn multiline_note_round_trips_internal_newlines() {
+    let (_dir, db_path) = fresh_v16_db();
+    let text = independent_note_text("Title", "line one\nline two\nline three");
+    let (_bucket, records) = parse_notes_file(&text).expect("parse");
+    assert_eq!(records[0].note, "line one\nline two\nline three");
+
+    let mut conn = Connection::open(&db_path).expect("open db");
+    let tx = conn.transaction().expect("begin tx");
+    let mut available = compute_available_ids(&tx).expect("compute ids");
+    apply_import_notes(&tx, None, &records, &mut available, 1, "2099-01-01T00:00:00Z")
+        .expect("apply");
+    tx.commit().expect("commit");
+    drop(conn);
+
+    let conn = Connection::open(&db_path).expect("reopen");
+    let content: String = conn
+        .query_row("SELECT Content FROM Note", [], |r| r.get(0))
+        .expect("read note");
+    assert_eq!(content, "line one\nline two\nline three");
+}
+
+#[test]
+fn missing_created_falls_back_to_now_truncated_to_twenty_chars() {
+    let (_dir, db_path) = fresh_v16_db();
+    let text = "{NOTES=}\nheader\n==={MODIFIED=2024-01-01T00:00:00}{TAGS=}===\nTitle\nBody\n==={END}===";
+    let (_bucket, records) = parse_notes_file(text).expect("parse");
+    assert_eq!(records[0].created, None);
+
+    let mut conn = Connection::open(&db_path).expect("open db");
+    let tx = conn.transaction().expect("begin tx");
+    let mut available = compute_available_ids(&tx).expect("compute ids");
+    apply_import_notes(&tx, None, &records, &mut available, 1, "2099-06-15T12:00:00Z")
+        .expect("apply");
+    tx.commit().expect("commit");
+    drop(conn);
+
+    let conn = Connection::open(&db_path).expect("reopen");
+    let created: String = conn
+        .query_row("SELECT Created FROM Note", [], |r| r.get(0))
+        .expect("read created");
+    assert_eq!(created.len(), 20, "expected a 20-character timestamp, got: {created}");
+    assert!(created.ends_with('Z'));
+}
+
+#[test]
+fn bible_note_color_zero_with_range_creates_no_usermark_or_blockrange() {
+    let (_dir, db_path) = fresh_v16_db();
+    let text = "{NOTES=}\nheader\n==={CREATED=2024-01-01T00:00:00}{MODIFIED=2024-01-01T00:00:00}{TAGS=}{LANG=0}{PUB=nwt}{BK=1}{CH=1}{VS=5}{Reference=01001005}{COLOR=0}{RANGE=1:5-9}===\nTitle\nBody\n==={END}===";
+    let (_bucket, records) = parse_notes_file(text).expect("parse");
+    assert_eq!(records[0].color, 0);
+
+    let mut conn = Connection::open(&db_path).expect("open db");
+    let tx = conn.transaction().expect("begin tx");
+    let mut available = compute_available_ids(&tx).expect("compute ids");
+    apply_import_notes(&tx, None, &records, &mut available, 1, "2099-01-01T00:00:00Z")
+        .expect("apply");
+    tx.commit().expect("commit");
+    drop(conn);
+
+    let conn = Connection::open(&db_path).expect("reopen");
+    assert_eq!(count(&conn, "UserMark"), 0);
+    assert_eq!(count(&conn, "BlockRange"), 0);
+    assert_eq!(count(&conn, "Note"), 1);
+}
+
+#[test]
+fn bible_note_with_range_creates_usermark_and_merged_blockrange() {
+    let (_dir, db_path) = fresh_v16_db();
+    let text = "{NOTES=}\nheader\n==={CREATED=2024-01-01T00:00:00}{MODIFIED=2024-01-01T00:00:00}{TAGS=}{LANG=0}{PUB=nwt}{BK=1}{CH=1}{VS=5}{Reference=01001005}{COLOR=1}{RANGE=1:5-9;1:8-12}===\nTitle\nBody\n==={END}===";
+    let (_bucket, records) = parse_notes_file(text).expect("parse");
+
+    let mut conn = Connection::open(&db_path).expect("open db");
+    let tx = conn.transaction().expect("begin tx");
+    let mut available = compute_available_ids(&tx).expect("compute ids");
+    apply_import_notes(&tx, None, &records, &mut available, 1, "2099-01-01T00:00:00Z")
+        .expect("apply");
+    tx.commit().expect("commit");
+    drop(conn);
+
+    let conn = Connection::open(&db_path).expect("reopen");
+    assert_eq!(count(&conn, "UserMark"), 1);
+    assert_eq!(count(&conn, "BlockRange"), 1, "sequential sub-ranges merge into one BlockRange");
+    let (start, end): (i64, i64) = conn
+        .query_row("SELECT StartToken, EndToken FROM BlockRange", [], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
+        .expect("read range");
+    assert_eq!((start, end), (5, 12));
+}
+
+#[test]
+fn notes_bucket_delete_none_leaves_bucket_notes_untouched() {
+    let (_dir, db_path) = fresh_v16_db();
+    {
+        let conn = Connection::open(&db_path).expect("open db");
+        conn.execute(
+            "INSERT INTO Note (Guid, Title, Content, BlockType, LastModified, Created) \
+             VALUES ('note-a', 'apple', 'x', 0, '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z')",
+            [],
+        )
+        .expect("seed bucket note");
+    }
+
+    let text = "{NOTES=a}\nheader\n==={CREATED=2024-01-01T00:00:00}{MODIFIED=2024-01-01T00:00:00}{TAGS=}===\nOther Title\nBody\n==={END}===";
+    let (bucket, records) = parse_notes_file(text).expect("parse");
+    assert_eq!(bucket, Some('a'));
+
+    let mut conn = Connection::open(&db_path).expect("open db");
+    let tx = conn.transaction().expect("begin tx");
+    let mut available = compute_available_ids(&tx).expect("compute ids");
+    // Caller passes `None` regardless of the file's own bucket — the opt-in
+    // decision belongs to the frontend, never inferred from the file.
+    let deleted = apply_import_notes(&tx, None, &records, &mut available, 1, "2099-01-01T00:00:00Z")
+        .expect("apply");
+    tx.commit().expect("commit");
+    drop(conn);
+
+    assert_eq!(deleted, 0);
+    let conn = Connection::open(&db_path).expect("reopen");
+    assert_eq!(count(&conn, "Note"), 2, "bucket delete must not run without explicit opt-in");
+}
+
+#[test]
+fn notes_dry_run_with_bucket_reports_deleted() {
+    let (_dir, db_path) = fresh_v16_db();
+    {
+        let conn = Connection::open(&db_path).expect("open db");
+        conn.execute(
+            "INSERT INTO Note (Guid, Title, Content, BlockType, LastModified, Created) \
+             VALUES ('note-a', 'apple', 'x', 0, '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z')",
+            [],
+        )
+        .expect("seed bucket note");
+        // A second, higher-id, NON-bucket note — keeps `Note`'s max rowid
+        // above 1 after the bucket delete, so the "Other Title" insert below
+        // can never SQLite-reuse the just-freed id (rowid reuse without an
+        // `AUTOINCREMENT` column would otherwise make a genuine
+        // delete+insert look like a same-PK `overwritten` in the snapshot
+        // diff — an artifact of THIS test's fixture shape, not of the
+        // deletion logic itself).
+        conn.execute(
+            "INSERT INTO Note (Guid, Title, Content, BlockType, LastModified, Created) \
+             VALUES ('note-z', 'zebra', 'y', 0, '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z')",
+            [],
+        )
+        .expect("seed decoy note");
+    }
+
+    let text = "{NOTES=a}\nheader\n==={CREATED=2024-01-01T00:00:00}{MODIFIED=2024-01-01T00:00:00}{TAGS=}===\nOther Title\nBody\n==={END}===";
+    let (_bucket, records) = parse_notes_file(text).expect("parse");
+
+    let mut conn = Connection::open(&db_path).expect("open db");
+    let report =
+        dry_run_import_notes(&mut conn, Some('a'), &records, 1, "2099-01-01T00:00:00Z").expect("dry run");
+    assert_eq!(report.deleted.get("Note"), Some(&1));
+    assert_eq!(count(&conn, "Note"), 2, "dry run must not commit the delete");
 }

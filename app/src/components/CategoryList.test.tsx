@@ -188,14 +188,15 @@ describe("CategoryList — contextual operation set (D6-08, DATA-07 criterion 3)
     expect(deferredDelete).toBeDisabled();
   });
 
-  it("Notes renders the live delete op AND deferred affordances for the rest", () => {
+  it("Notes renders the live delete op AND the live export/import affordances", () => {
     render(<CategoryList rows={[makeRow(1)]} category="Notes" />);
     // Live delete button exists.
     expect(screen.getByTestId("category-list-delete-button")).toBeInTheDocument();
-    // export (deferred) affordance is present and marked deferred.
-    const deferredExport = screen.getByTestId("category-list-op-export");
-    expect(deferredExport).toHaveAttribute("data-deferred", "true");
-    expect(deferredExport).toBeDisabled();
+    // export/import (08-04-PLAN.md) are LIVE for Notes — rendered as their
+    // own dedicated buttons, never the generic deferred-op affordance.
+    expect(screen.getByTestId("category-list-export-button")).toBeInTheDocument();
+    expect(screen.getByTestId("category-list-import-button")).toBeInTheDocument();
+    expect(screen.queryByTestId("category-list-op-export")).not.toBeInTheDocument();
   });
 });
 
