@@ -8,6 +8,8 @@ mod common;
 
 use common::{fresh_v16_db, fresh_v16_db_for_favorites_io, seed_id_gap_fixture, seed_one_favorite};
 use jwlmanager_lib::db::ids::compute_available_ids;
+use jwlmanager_lib::db::io::export::export_annotations;
+use jwlmanager_lib::db::io::header::ExportHeaderCtx;
 use jwlmanager_lib::db::io::import::{
     apply_import_annotations, apply_import_bookmarks, apply_import_favorites,
     apply_import_highlights, apply_import_notes, dry_run_import_annotations,
@@ -15,7 +17,17 @@ use jwlmanager_lib::db::io::import::{
     dry_run_import_notes, parse_annotations_file, parse_bookmarks_file, parse_favorites_file,
     parse_highlights_file, parse_notes_file,
 };
+use jwlmanager_lib::error::ArchiveError;
 use rusqlite::Connection;
+
+fn pinned_annotations_header() -> ExportHeaderCtx<'static> {
+    ExportHeaderCtx {
+        category_tag: "{ANNOTATIONS}",
+        archive_name: "MyArchive.jwlibrary".to_string(),
+        app_version: "0.1.0".to_string(),
+        timestamp: "2026-01-01 @ 00:00:00".to_string(),
+    }
+}
 
 fn count(conn: &Connection, table: &str) -> i64 {
     conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
@@ -337,6 +349,102 @@ fn annotation_without_issue_bracket_creates_location_with_zero_not_null() {
         )
         .expect("read issue tag number");
     assert_eq!(issue, 0, "a missing {{ISSUE}} bracket must fill IssueTagNumber to 0, never NULL");
+}
+
+/// Pre-existing Phase 8 defect (found during Phase 9): `{DOC=None}` with no
+/// matching `Location` already present must be rejected with a typed error,
+/// not a raw SQLite CHECK-constraint violation. `find_or_insert_annotation_location`
+/// (`db/io/import.rs`) never sets `Track`/`BookNumber`/`ChapterNumber`, so a
+/// freshly-inserted `Location` can only satisfy the `Type=0` CHECK
+/// (`archive/upgrade.rs`'s `CREATE_LOCATION_NEW`, byte-exact port of
+/// `JWLManager.py:1026-1062`) when `DocumentId` is present and non-zero.
+/// `JWLManager.py`'s own `add_location` (`:1909-1919`) has the identical gap
+/// and would raise `sqlite3.IntegrityError` on this same input (caught by its
+/// bare `except:` at `:1931` and surfaced as a generic "Error on import!"
+/// dialog + `ROLLBACK`) — this is oracle parity, not a Rust-only rejection.
+#[test]
+fn annotation_without_doc_and_no_existing_location_rejected_with_typed_error() {
+    let (_dir, db_path) = fresh_v16_db();
+    let text = "{ANNOTATIONS}\n \nheader\n==={PUB=w}{DOC=None}{LABEL=p1}===\nValue\n==={END}===";
+    let records = parse_annotations_file(text).expect("parse");
+    assert_eq!(records[0].doc, None);
+
+    let mut conn = Connection::open(&db_path).expect("open db");
+    let before_location = count(&conn, "Location");
+    let before_inputfield = count(&conn, "InputField");
+
+    let tx = conn.transaction().expect("begin tx");
+    let mut available = compute_available_ids(&tx).expect("compute ids");
+    let result = apply_import_annotations(&tx, &records, &mut available);
+    match result {
+        Err(ArchiveError::ImportFailed { reason }) => {
+            assert!(
+                reason.contains("DOC"),
+                "typed error should name the missing DOC as the reason: {reason}"
+            );
+        }
+        other => panic!("expected ArchiveError::ImportFailed, got {other:?}"),
+    }
+    // Roll back explicitly rather than dropping `tx` — mirrors Python's
+    // `con.execute('ROLLBACK;')` on the same failure (`JWLManager.py:1933`).
+    tx.rollback().expect("rollback");
+
+    assert_eq!(count(&conn, "Location"), before_location, "rejected import must not create a Location row");
+    assert_eq!(count(&conn, "InputField"), before_inputfield, "rejected import must not create an InputField row");
+}
+
+/// Round-trip stability for a DOC-less annotation that already exists in the
+/// archive (a scripture-shaped `Type=0` Location — `BookNumber`/
+/// `ChapterNumber`/`KeySymbol` set, `DocumentId` NULL — the one shape that
+/// legitimately produces `{DOC=None}` on export, `export.rs`'s
+/// `AnnotationExportRow::doc` doc comment). Such a record can never be
+/// RE-IMPORTED (the existing-Location `SELECT` binds `DocumentId = NULL`,
+/// which SQL `=` never matches, so it always falls through to the same
+/// rejected INSERT as the test above) — in EITHER this app or the Python
+/// oracle. What must hold is that export stays byte-identical before and
+/// after the rejected import attempt: the DB is untouched, so re-exporting
+/// produces the exact same wire bytes.
+#[test]
+fn doc_less_annotation_export_is_unchanged_by_a_rejected_reimport() {
+    let (_dir, db_path) = fresh_v16_db();
+    {
+        let conn = Connection::open(&db_path).expect("open db");
+        conn.execute_batch("PRAGMA foreign_keys = OFF").expect("fk off");
+        conn.execute(
+            "INSERT INTO Location (LocationId, BookNumber, ChapterNumber, KeySymbol, MepsLanguage, Type) \
+             VALUES (930, 1, 1, 'nwt', NULL, 0)",
+            [],
+        )
+        .expect("insert scripture-shaped location");
+        conn.execute(
+            "INSERT INTO InputField (LocationId, TextTag, Value) VALUES (930, 'p1', 'Some value')",
+            [],
+        )
+        .expect("insert inputfield");
+    }
+
+    let conn = Connection::open(&db_path).expect("reopen");
+    let export_path_1 = _dir.path().join("first.txt");
+    export_annotations(&conn, None, &pinned_annotations_header(), &export_path_1).expect("first export");
+    let first_text = std::fs::read_to_string(&export_path_1).expect("read first export");
+    assert!(first_text.contains("{DOC=None}"), "scripture-shaped Location must export DOC=None:\n{first_text}");
+
+    let records = parse_annotations_file(&first_text).expect("parse re-exported text");
+    assert_eq!(records[0].doc, None);
+
+    let mut conn = Connection::open(&db_path).expect("reopen for import attempt");
+    let tx = conn.transaction().expect("begin tx");
+    let mut available = compute_available_ids(&tx).expect("compute ids");
+    let result = apply_import_annotations(&tx, &records, &mut available);
+    assert!(matches!(result, Err(ArchiveError::ImportFailed { .. })), "re-import of a DOC-less record must be rejected: {result:?}");
+    tx.rollback().expect("rollback");
+
+    let conn = Connection::open(&db_path).expect("reopen after rejected import");
+    let export_path_2 = _dir.path().join("second.txt");
+    export_annotations(&conn, None, &pinned_annotations_header(), &export_path_2).expect("second export");
+    let second_text = std::fs::read_to_string(&export_path_2).expect("read second export");
+
+    assert_eq!(first_text, second_text, "export must be byte-identical before/after a rejected re-import");
 }
 
 // ---------------------------------------------------------------------------

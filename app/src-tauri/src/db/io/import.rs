@@ -953,6 +953,30 @@ fn find_or_insert_annotation_location(
         return Ok(id);
     }
 
+    // Location.Type=0 CHECK (`CREATE_LOCATION_NEW`, `archive/upgrade.rs`,
+    // byte-exact port of `JWLManager.py:1026-1062`) requires ONE of:
+    // (DocumentId IS NOT NULL AND != 0), OR (Track IS NOT NULL AND ...), OR
+    // a BookNumber/ChapterNumber branch. This INSERT (matching Python's
+    // `add_location`, `JWLManager.py:1909-1919`) never sets Track,
+    // BookNumber, or ChapterNumber — so a NEW Location row can only satisfy
+    // the CHECK when DocumentId is present and non-zero. A DOC-less
+    // Annotations record whose Location doesn't already exist would violate
+    // the CHECK in JWLManager.py too (raising sqlite3.IntegrityError inside
+    // the bare `except:` at `JWLManager.py:1931`, surfaced as a generic
+    // "Error on import!" dialog + ROLLBACK) — reject it here with a typed,
+    // explanatory error instead of letting the raw CHECK violation surface.
+    if !matches!(record.doc, Some(doc) if doc != 0) {
+        return Err(ArchiveError::ImportFailed {
+            reason: format!(
+                "Annotations record for publication '{}' (LABEL={}) has no DOC and no matching \
+                 Location already exists in this archive — a new Location row cannot satisfy the \
+                 Type=0 CHECK constraint without a DocumentId (matches JWLManager.py's own \
+                 add_location behavior, which fails identically on this input)",
+                record.pub_sym, record.label
+            ),
+        });
+    }
+
     if let Some(id) = take_id(available, "Location") {
         tx.execute(
             "INSERT INTO Location (LocationId, DocumentId, IssueTagNumber, KeySymbol, MepsLanguage, Type) \
