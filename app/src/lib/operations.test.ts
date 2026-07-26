@@ -94,10 +94,17 @@ describe("operationSet (D6-08 capability descriptor)", () => {
     expect(del).toMatchObject({ deferred: false, enabled: true });
   });
 
-  it("Playlists' add stays deferred even though Favorites' add is live — LIVE is keyed per-category, not per-op", () => {
+  it("Playlists' add (Add Media…) is live and selection-independent (08-06-PLAN.md)", () => {
     const ops = operationSet("Playlists", 0);
     const add = ops.find((o) => o.op === "add");
-    expect(add).toMatchObject({ deferred: true, enabled: false });
+    expect(add).toMatchObject({ deferred: false, enabled: true });
+  });
+
+  it("Playlists' delete is live and enabled once selection > 0 (08-06-PLAN.md, D8-07)", () => {
+    const zeroSelected = operationSet("Playlists", 0).find((o) => o.op === "delete");
+    expect(zeroSelected).toMatchObject({ deferred: false, enabled: false });
+    const oneSelected = operationSet("Playlists", 1).find((o) => o.op === "delete");
+    expect(oneSelected).toMatchObject({ deferred: false, enabled: true });
   });
 
   it("every op carries { op, enabled, deferred }; deferred is true exactly when (category, op) is not LIVE", () => {
@@ -128,6 +135,8 @@ describe("operationSet (D6-08 capability descriptor)", () => {
       "Highlights:import",
       "Playlists:export",
       "Playlists:import",
+      "Playlists:add",
+      "Playlists:delete",
     ]);
     for (const cat of [
       "Notes",

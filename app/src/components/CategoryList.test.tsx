@@ -175,17 +175,17 @@ describe("CategoryList — selection model (D6-05)", () => {
 });
 
 describe("CategoryList — contextual operation set (D6-08, DATA-07 criterion 3)", () => {
-  it("a still-fully-deferred category (Playlists) renders every operation deferred/disabled and has no live delete button", () => {
+  it("Playlists renders live delete/add-media affordances, not the deferred placeholder (08-06-PLAN.md)", () => {
     render(<CategoryList rows={[makeRow(1), makeRow(2)]} category="Playlists" />);
 
-    // No live delete affordance for Playlists — its delete stays deferred
-    // (ref-counted media, D7-10/Phase 8).
-    expect(screen.queryByTestId("category-list-delete-button")).not.toBeInTheDocument();
+    // Live delete affordance for Playlists — ref-counted media delete
+    // (D8-07) landed in 08-06-PLAN.md, closing the last deferred slot.
+    expect(screen.getByTestId("category-list-delete-button")).toBeInTheDocument();
+    expect(screen.queryByTestId("category-list-op-delete")).not.toBeInTheDocument();
 
-    // The deferred delete affordance is present, marked deferred, and disabled.
-    const deferredDelete = screen.getByTestId("category-list-op-delete");
-    expect(deferredDelete).toHaveAttribute("data-deferred", "true");
-    expect(deferredDelete).toBeDisabled();
+    // "Add Media…" renders as the live add-button, not the deferred op.
+    expect(screen.getByTestId("category-list-add-button")).toHaveTextContent("Add Media…");
+    expect(screen.queryByTestId("category-list-op-add")).not.toBeInTheDocument();
   });
 
   it("Notes renders the live delete op AND the live export/import affordances", () => {
