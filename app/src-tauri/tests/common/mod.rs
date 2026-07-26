@@ -83,6 +83,48 @@ pub fn normalized_table_rows(conn: &Connection, table: &str) -> BTreeMap<String,
     counts
 }
 
+// ---------------------------------------------------------------------------
+// Synthetic media-format fixtures (08-06-PLAN.md Task 1) — tiny,
+// hand-authored byte arrays whose only load-bearing property is their magic
+// signature (`sniff_format` is a fixed-length prefix comparison, never a
+// decoder), never a real/valid decodable image. GDPR Art. 9 bright line:
+// never a real photo.
+// ---------------------------------------------------------------------------
+
+/// Minimal `BM`-signed bytes — enough for `sniff_format` to recognize as BMP.
+pub fn tiny_bmp_bytes() -> Vec<u8> {
+    b"BM\x00\x00\x00\x00\x00\x00\x00\x00fixture-not-a-real-bmp".to_vec()
+}
+
+/// Minimal `GIF89a`-signed bytes.
+pub fn tiny_gif_bytes() -> Vec<u8> {
+    b"GIF89afixture-not-a-real-gif".to_vec()
+}
+
+/// Minimal JPEG SOI-marker-signed bytes (`FF D8 FF`).
+pub fn tiny_jpeg_bytes() -> Vec<u8> {
+    let mut bytes = vec![0xFF, 0xD8, 0xFF, 0xE0];
+    bytes.extend_from_slice(b"fixture-not-a-real-jpeg");
+    bytes
+}
+
+/// Minimal PNG-signature-signed bytes (the 8-byte magic header).
+pub fn tiny_png_bytes() -> Vec<u8> {
+    let mut bytes = vec![0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A];
+    bytes.extend_from_slice(b"fixture-not-a-real-png");
+    bytes
+}
+
+/// Minimal HEIC ISOBMFF `ftyp` box bytes (`....ftypheic...`) — recognized
+/// only so the app can reject it explicitly (no mature pure-Rust decoder,
+/// documented parity gap).
+pub fn tiny_heic_bytes() -> Vec<u8> {
+    let mut bytes = vec![0x00, 0x00, 0x00, 0x18];
+    bytes.extend_from_slice(b"ftypheic");
+    bytes.extend_from_slice(b"fixture-not-a-real-heic");
+    bytes
+}
+
 /// Reads a whole file into memory. Test-only convenience wrapper.
 pub fn read_file_bytes(path: &Path) -> Vec<u8> {
     let mut buf = Vec::new();
