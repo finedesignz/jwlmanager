@@ -24,11 +24,13 @@ use super::usermark::{merge_range_into, synthesize_usermark};
 use crate::db::edit::{
     diff_snapshots, snapshot_tables, DryRunReport, ANNOTATION_SNAPSHOT_TABLES,
     BOOKMARK_SNAPSHOT_TABLES, FAVORITE_SNAPSHOT_TABLES, HIGHLIGHT_SNAPSHOT_TABLES,
+    NOTE_IMPORT_SNAPSHOT_TABLES,
 };
 use crate::db::ids::{compute_available_ids, take_id};
 use crate::db::pragma_guard::PragmaGuard;
 use crate::db::trim::trim_sweep;
 use crate::error::ArchiveError;
+use crate::guid::format_guid_v4;
 use rusqlite::{Connection, OptionalExtension, Transaction};
 use std::collections::{BTreeMap, HashMap};
 
@@ -1353,6 +1355,707 @@ pub fn dry_run_import_highlights(
     Ok(report)
 }
 
+// ---------------------------------------------------------------------------
+// Notes (08-04-PLAN.md) — the widest bracket-tag vocabulary, the second
+// `merge_range_into` call site (driven by a SEQUENTIAL multi-range `RANGE`
+// attribute), and the conditional title-character bucket delete (D8-09).
+// Ports `import_notes` (`JWLManager.py:2212-2442`).
+// ---------------------------------------------------------------------------
+
+/// One `RANGE` sub-range (`identifier:start-end`, or bare `start-end`
+/// defaulting to the record's own VS/BLOCK-derived identifier at apply time)
+/// — ports the per-`;`-segment parse inside `add_usermark`
+/// (`JWLManager.py:2307-2313`). Parsed entirely at [`parse_notes_file`] time
+/// (D8-04): an unparseable sub-range is `ImportMalformed` before any
+/// transaction opens, rather than surfacing mid-apply.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NoteSubRange {
+    pub identifier: Option<i64>,
+    pub start: i64,
+    pub end: i64,
+}
+
+/// A Note record's shape — which Location-resolution/derivation path
+/// `apply_import_notes` takes, mirroring `update_db`'s `if row['BK'] is not
+/// None: ... elif row['DOC'] is not None: ... else: ...` chain
+/// (`JWLManager.py:2405-2416`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoteShape {
+    Bible,
+    Publication,
+    Independent,
+}
+
+/// One parsed Notes record. Numeric attributes are parsed to `i64` at PARSE
+/// time (D8-04, a strengthening over Python's untyped dict values — every
+/// one of these fields is genuinely numeric on the wire and in the schema),
+/// so an unparseable value is `ImportMalformed` before any transaction opens.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoteRecord {
+    pub shape: NoteShape,
+    pub created: Option<String>,
+    pub modified: Option<String>,
+    /// Raw `TAGS` attribute text, bare-`|`-joined (never the export-side
+    /// `" | "` separator) — split/trimmed per tag at apply time
+    /// (`process_tags`, `JWLManager.py:2336`).
+    pub tags: Option<String>,
+    /// `0` for [`NoteShape::Independent`] (COLOR is never present on an
+    /// independent header) — matches `add_usermark`'s
+    /// `int(attribs['COLOR']) == 0` early return being unreachable for that
+    /// shape anyway (independent notes never call `add_usermark` at all).
+    pub color: i64,
+    pub range: Option<Vec<NoteSubRange>>,
+    pub lang: Option<i64>,
+    pub pub_sym: Option<String>,
+    pub bk: Option<i64>,
+    pub ch: Option<i64>,
+    pub vs: Option<i64>,
+    pub issue: Option<i64>,
+    pub doc: Option<i64>,
+    pub block: Option<i64>,
+    pub heading: Option<String>,
+    pub title: String,
+    pub note: String,
+}
+
+/// Scans line 1 for the `{NOTES=(.?)}` tag — ports the `pre_import` regex
+/// (`JWLManager.py:2216`) EXACTLY: the capture is 0-or-1 characters, never
+/// more. Returns `Some(bucket)` on a match (`bucket` is `None` for the plain
+/// `{NOTES=}` no-delete tag, `Some(c)` for a one-character bucket), or `None`
+/// when the line doesn't match this shape at all (missing tag line, or 2+
+/// characters between `=` and `}` — Python's `regex.search` simply fails to
+/// match either way, surfacing as the "Wrong import file format" abort).
+fn extract_notes_bucket(line: &str) -> Option<Option<char>> {
+    let idx = line.find("{NOTES=")?;
+    let after = &line[idx + "{NOTES=".len()..];
+    let close = after.find('}')?;
+    let inner = &after[..close];
+    let mut chars = inner.chars();
+    match (chars.next(), chars.next()) {
+        (None, None) => Some(None),
+        (Some(c), None) => Some(Some(c)),
+        _ => None,
+    }
+}
+
+/// Parses one `RANGE` attribute's `;`-separated sub-ranges
+/// (`JWLManager.py:2307-2313`) into [`NoteSubRange`]s, entirely at parse time
+/// (D8-04). Each segment is either `identifier:start-end` or bare
+/// `start-end`; an unparseable segment is `ImportMalformed`.
+fn parse_note_range(
+    raw: &str,
+    record_no: usize,
+) -> Result<Vec<NoteSubRange>, ArchiveError> {
+    let malformed = |reason: String| ArchiveError::ImportMalformed {
+        category: "Notes".to_string(),
+        line: record_no,
+        reason,
+    };
+    let mut sub_ranges = Vec::new();
+    for segment in raw.split(';') {
+        let (identifier, span) = match segment.split_once(':') {
+            Some((id_raw, span)) => {
+                let id = id_raw
+                    .parse::<i64>()
+                    .map_err(|_| malformed(format!("unparseable RANGE identifier: {id_raw:?}")))?;
+                (Some(id), span)
+            }
+            None => (None, segment),
+        };
+        let (start_raw, end_raw) = span
+            .split_once('-')
+            .ok_or_else(|| malformed(format!("malformed RANGE span: {span:?}")))?;
+        let start = start_raw
+            .parse::<i64>()
+            .map_err(|_| malformed(format!("unparseable RANGE start: {start_raw:?}")))?;
+        let end = end_raw
+            .parse::<i64>()
+            .map_err(|_| malformed(format!("unparseable RANGE end: {end_raw:?}")))?;
+        sub_ranges.push(NoteSubRange { identifier, start, end });
+    }
+    Ok(sub_ranges)
+}
+
+/// Parses a whole Notes `.txt` file's TEXT into `(bucket, records)`, entirely
+/// BEFORE any transaction opens (D8-04). Line 1 must carry a well-formed
+/// `{NOTES=(.?)}` tag ([`extract_notes_bucket`]); record boundaries are found
+/// via the same explicit `\n===`-scan technique
+/// [`parse_annotations_file`] uses (Rust's `regex` crate has no lookahead).
+/// Each record's body is split at the FIRST newline: `TITLE` is line one,
+/// `NOTE` is everything after it REJOINED with `\n`
+/// (`JWLManager.py:2244-2248`) — an empty body yields `TITLE = NOTE = ""`.
+pub fn parse_notes_file(text: &str) -> Result<(Option<char>, Vec<NoteRecord>), ArchiveError> {
+    let first_line_end = text.find('\n').unwrap_or(text.len());
+    let first_line = &text[..first_line_end];
+    let bucket = extract_notes_bucket(first_line).ok_or_else(|| ArchiveError::ImportMalformed {
+        category: "Notes".to_string(),
+        line: 1,
+        reason: "missing or malformed {NOTES=} attribute line".to_string(),
+    })?;
+    let rest = if first_line_end < text.len() {
+        &text[first_line_end + 1..]
+    } else {
+        ""
+    };
+
+    let boundaries: Vec<usize> = rest
+        .match_indices("\n===")
+        .filter(|(idx, _)| rest[*idx + 4..].starts_with('{'))
+        .map(|(idx, _)| idx)
+        .collect();
+
+    let mut records = Vec::new();
+    if boundaries.len() < 2 {
+        return Ok((bucket, records));
+    }
+
+    for (i, window) in boundaries.windows(2).enumerate() {
+        let (start, end) = (window[0], window[1]);
+        let chunk = &rest[start + 4..end];
+        let record_no = i + 1;
+
+        let malformed = |reason: String| ArchiveError::ImportMalformed {
+            category: "Notes".to_string(),
+            line: record_no,
+            reason,
+        };
+
+        let Some(header_end) = chunk.find("===\n") else {
+            return Err(malformed("unterminated record header".to_string()));
+        };
+        let header = &chunk[..header_end];
+        let body = &chunk[header_end + 4..];
+
+        let attrs = parse_header_attrs(header);
+
+        let parse_opt_i64 = |key: &str| -> Result<Option<i64>, ArchiveError> {
+            match attrs.get(key) {
+                None => Ok(None),
+                Some(raw) => raw
+                    .parse::<i64>()
+                    .map(Some)
+                    .map_err(|_| malformed(format!("unparseable {key} value: {raw:?}"))),
+            }
+        };
+
+        let bk = parse_opt_i64("BK")?;
+        let doc = parse_opt_i64("DOC")?;
+        let shape = if bk.is_some() {
+            NoteShape::Bible
+        } else if doc.is_some() {
+            NoteShape::Publication
+        } else {
+            NoteShape::Independent
+        };
+
+        let color = if matches!(shape, NoteShape::Independent) {
+            0
+        } else {
+            let raw = attrs
+                .get("COLOR")
+                .ok_or_else(|| malformed("missing {COLOR=...} attribute".to_string()))?;
+            raw.parse::<i64>()
+                .map_err(|_| malformed(format!("unparseable COLOR value: {raw:?}")))?
+        };
+
+        let range = match attrs.get("RANGE") {
+            Some(raw) => Some(parse_note_range(raw, record_no)?),
+            None => None,
+        };
+
+        let body_trimmed = body.trim_end();
+        let (title, note) = if body_trimmed.is_empty() {
+            (String::new(), String::new())
+        } else {
+            let mut lines = body_trimmed.split('\n');
+            let title = lines.next().unwrap_or("").to_string();
+            let note = lines.collect::<Vec<_>>().join("\n");
+            (title, note)
+        };
+
+        records.push(NoteRecord {
+            shape,
+            created: attrs.get("CREATED").cloned(),
+            modified: attrs.get("MODIFIED").cloned(),
+            tags: attrs.get("TAGS").cloned(),
+            color,
+            range,
+            lang: parse_opt_i64("LANG")?,
+            pub_sym: attrs.get("PUB").cloned(),
+            bk,
+            ch: parse_opt_i64("CH")?,
+            vs: parse_opt_i64("VS")?,
+            issue: parse_opt_i64("ISSUE")?,
+            doc,
+            block: parse_opt_i64("BLOCK")?,
+            heading: attrs.get("HEADING").cloned(),
+            title,
+            note,
+        });
+    }
+    Ok((bucket, records))
+}
+
+/// Finds-or-inserts a SCRIPTURE `Location` for a Note record — ports
+/// `add_scripture_location` (`JWLManager.py:2262-2272`). Dedup key:
+/// `KeySymbol + MepsLanguage + BookNumber + ChapterNumber + Type = 0` —
+/// DISTINCT from every other category's own scripture predicate (D8-04). An
+/// existing OR freshly-inserted Location's `Title` is (re-)written to the
+/// pre-`:`-split `HEADING` on EVERY call when `HEADING` is present, matching
+/// Python's unconditional post-branch `UPDATE` (`:2270-2272`) — this runs
+/// even when the Location already existed.
+fn find_or_insert_note_scripture_location(
+    tx: &Transaction,
+    record: &NoteRecord,
+    available: &mut HashMap<&'static str, Vec<i64>>,
+) -> Result<i64, ArchiveError> {
+    let existing: Option<i64> = tx
+        .query_row(
+            "SELECT LocationId FROM Location \
+             WHERE KeySymbol = ? AND MepsLanguage = ? AND BookNumber = ? AND ChapterNumber = ? AND Type = 0",
+            rusqlite::params![record.pub_sym, record.lang, record.bk, record.ch],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| map_sqlite_err(e, "find_or_insert_note_scripture_location: select"))?;
+
+    let location_id = if let Some(id) = existing {
+        id
+    } else if let Some(id) = take_id(available, "Location") {
+        tx.execute(
+            "INSERT INTO Location (LocationId, KeySymbol, MepsLanguage, BookNumber, ChapterNumber, Title, Type) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)",
+            rusqlite::params![id, record.pub_sym, record.lang, record.bk, record.ch, record.heading],
+        )
+        .map_err(|e| map_sqlite_err(e, "find_or_insert_note_scripture_location: insert recycled id"))?;
+        id
+    } else {
+        tx.execute(
+            "INSERT INTO Location (KeySymbol, MepsLanguage, BookNumber, ChapterNumber, Title, Type) \
+             VALUES (?1, ?2, ?3, ?4, ?5, 0)",
+            rusqlite::params![record.pub_sym, record.lang, record.bk, record.ch, record.heading],
+        )
+        .map_err(|e| map_sqlite_err(e, "find_or_insert_note_scripture_location: insert autoincrement"))?;
+        tx.last_insert_rowid()
+    };
+
+    if let Some(heading) = record.heading.as_deref().filter(|h| !h.is_empty()) {
+        let title = heading.split(':').next().unwrap_or(heading);
+        tx.execute(
+            "UPDATE Location SET Title = ?1 WHERE LocationId = ?2",
+            rusqlite::params![title, location_id],
+        )
+        .map_err(|e| map_sqlite_err(e, "find_or_insert_note_scripture_location: update title"))?;
+    }
+
+    Ok(location_id)
+}
+
+/// Finds-or-inserts a PUBLICATION `Location` for a Note record — ports
+/// `add_publication_location` (`JWLManager.py:2274-2280`). Dedup key:
+/// `KeySymbol + MepsLanguage + IssueTagNumber + DocumentId + Type = 0` —
+/// NO post-insert Title update (unlike the scripture predicate above).
+fn find_or_insert_note_publication_location(
+    tx: &Transaction,
+    record: &NoteRecord,
+    available: &mut HashMap<&'static str, Vec<i64>>,
+) -> Result<i64, ArchiveError> {
+    let existing: Option<i64> = tx
+        .query_row(
+            "SELECT LocationId FROM Location \
+             WHERE KeySymbol = ? AND MepsLanguage = ? AND IssueTagNumber = ? AND DocumentId = ? AND Type = 0",
+            rusqlite::params![record.pub_sym, record.lang, record.issue, record.doc],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| map_sqlite_err(e, "find_or_insert_note_publication_location: select"))?;
+    if let Some(id) = existing {
+        return Ok(id);
+    }
+
+    if let Some(id) = take_id(available, "Location") {
+        tx.execute(
+            "INSERT INTO Location (LocationId, IssueTagNumber, KeySymbol, MepsLanguage, DocumentId, Title, Type) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)",
+            rusqlite::params![id, record.issue, record.pub_sym, record.lang, record.doc, record.heading],
+        )
+        .map_err(|e| map_sqlite_err(e, "find_or_insert_note_publication_location: insert recycled id"))?;
+        Ok(id)
+    } else {
+        tx.execute(
+            "INSERT INTO Location (IssueTagNumber, KeySymbol, MepsLanguage, DocumentId, Title, Type) \
+             VALUES (?1, ?2, ?3, ?4, ?5, 0)",
+            rusqlite::params![record.issue, record.pub_sym, record.lang, record.doc, record.heading],
+        )
+        .map_err(|e| map_sqlite_err(e, "find_or_insert_note_publication_location: insert autoincrement"))?;
+        Ok(tx.last_insert_rowid())
+    }
+}
+
+/// Synthesizes the record's `UserMark` + merges its `RANGE` sub-ranges — the
+/// SECOND `merge_range_into` call site (D8-05), ports `add_usermark`
+/// (`JWLManager.py:2294-2330`). `COLOR = 0` short-circuits to `Ok(None)`
+/// WITHOUT creating any `UserMark`/`BlockRange` row at all — distinct from
+/// the Recolor op, which DOES synthesize for a plain note. Each `;`-separated
+/// sub-range calls [`merge_range_into`] SEQUENTIALLY (never batched) so a
+/// later sub-range's overlap test sees rows the earlier one just
+/// inserted/deleted. A sub-range with no explicit `identifier:` prefix falls
+/// back to the record's own VS/BLOCK-derived identifier — `Version` is fixed
+/// at `1` (`JWLManager.py:2301`/`:2303`, unlike Highlights' own parsed
+/// `Version` field).
+fn apply_note_usermark(
+    tx: &Transaction,
+    record: &NoteRecord,
+    location_id: i64,
+    guid_seed: u64,
+    available: &mut HashMap<&'static str, Vec<i64>>,
+) -> Result<Option<i64>, ArchiveError> {
+    if record.color == 0 {
+        return Ok(None);
+    }
+
+    let (default_identifier, usermark_block_type) = match record.vs {
+        Some(vs) => (vs, 2i64),
+        None => (record.block.unwrap_or(0), 1i64),
+    };
+
+    let user_mark_id = synthesize_usermark(tx, location_id, record.color, 1, guid_seed, available)?;
+
+    if let Some(sub_ranges) = &record.range {
+        for sub in sub_ranges {
+            let identifier = sub.identifier.unwrap_or(default_identifier);
+            merge_range_into(
+                tx,
+                identifier,
+                location_id,
+                sub.start,
+                sub.end,
+                usermark_block_type,
+                user_mark_id,
+                available,
+            )?;
+        }
+    }
+
+    Ok(Some(user_mark_id))
+}
+
+/// First 19 characters plus a literal `Z` — ports the `[:19] + 'Z'` slice
+/// applied to whichever timestamp source wins (`JWLManager.py:2367-2370`).
+fn truncate19_z(s: &str) -> String {
+    let end = s.char_indices().nth(19).map(|(i, _)| i).unwrap_or(s.len());
+    format!("{}Z", &s[..end])
+}
+
+/// Finds an existing Note matching the record's identity — ports
+/// `update_note`'s SELECT (`JWLManager.py:2352-2365`): by
+/// `(LocationId, TRIM(Title), BlockIdentifier, BlockType)` when titled, else
+/// `((Title = '' OR Title IS NULL) AND TRIM(Content), BlockType = 0)` when
+/// untitled/independent.
+fn find_existing_note(
+    tx: &Transaction,
+    record: &NoteRecord,
+    location_id: Option<i64>,
+    block_type: i64,
+    block_identifier: Option<i64>,
+) -> Result<Option<(i64, String, String)>, ArchiveError> {
+    let title_trimmed = record.title.trim();
+    let use_title = !title_trimmed.is_empty();
+    let match_value = if use_title { title_trimmed } else { record.note.trim() };
+    let match_clause = if use_title {
+        "TRIM(Title) = ?"
+    } else {
+        "(Title = '' OR Title IS NULL) AND TRIM(Content) = ?"
+    };
+
+    let row_mapper = |r: &rusqlite::Row| -> rusqlite::Result<(i64, String, String)> {
+        Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+    };
+
+    match location_id {
+        Some(loc_id) => {
+            let blk_clause = if block_identifier.is_some() {
+                "BlockIdentifier = ?"
+            } else {
+                "BlockIdentifier IS NULL"
+            };
+            let sql = format!(
+                "SELECT NoteId, LastModified, Created FROM Note \
+                 WHERE LocationId = ? AND {match_clause} AND {blk_clause} AND BlockType = ?"
+            );
+            let result = if let Some(blk_id) = block_identifier {
+                tx.query_row(
+                    &sql,
+                    rusqlite::params![loc_id, match_value, blk_id, block_type],
+                    row_mapper,
+                )
+            } else {
+                tx.query_row(&sql, rusqlite::params![loc_id, match_value, block_type], row_mapper)
+            };
+            result
+                .optional()
+                .map_err(|e| map_sqlite_err(e, "find_existing_note: select (located)"))
+        }
+        None => {
+            let sql = format!(
+                "SELECT NoteId, LastModified, Created FROM Note WHERE {match_clause} AND BlockType = 0"
+            );
+            tx.query_row(&sql, rusqlite::params![match_value], row_mapper)
+                .optional()
+                .map_err(|e| map_sqlite_err(e, "find_existing_note: select (independent)"))
+        }
+    }
+}
+
+/// Deletes then re-inserts `NoteId`'s tag mappings from a bare-`|`-split tag
+/// list — ports `process_tags` (`JWLManager.py:2336-2350`) exactly, including
+/// its bare-`|` split (a tag NAME containing a literal `|` mis-splits; an
+/// accepted Python limitation, RESEARCH). `Position` is recomputed via
+/// `MAX(Position)+1` per tag, fresh each insert.
+fn process_note_tags(
+    tx: &Transaction,
+    note_id: i64,
+    tags: Option<&str>,
+    available: &mut HashMap<&'static str, Vec<i64>>,
+) -> Result<(), ArchiveError> {
+    tx.execute("DELETE FROM TagMap WHERE NoteId = ?1", rusqlite::params![note_id])
+        .map_err(|e| map_sqlite_err(e, "process_note_tags: delete existing"))?;
+
+    let Some(tags) = tags else {
+        return Ok(());
+    };
+    for raw_tag in tags.split('|') {
+        let tag = raw_tag.trim();
+        if tag.is_empty() {
+            continue;
+        }
+
+        let existing: Option<i64> = tx
+            .query_row(
+                "SELECT TagId FROM Tag WHERE Type = 1 AND Name = ?1",
+                rusqlite::params![tag],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(|e| map_sqlite_err(e, "process_note_tags: lookup tag"))?;
+        let tag_id = if let Some(id) = existing {
+            id
+        } else if let Some(id) = take_id(available, "Tag") {
+            tx.execute(
+                "INSERT INTO Tag (TagId, Type, Name) VALUES (?1, 1, ?2)",
+                rusqlite::params![id, tag],
+            )
+            .map_err(|e| map_sqlite_err(e, "process_note_tags: insert tag (recycled id)"))?;
+            id
+        } else {
+            tx.execute("INSERT INTO Tag (Type, Name) VALUES (1, ?1)", rusqlite::params![tag])
+                .map_err(|e| map_sqlite_err(e, "process_note_tags: insert tag (autoincrement)"))?;
+            tx.last_insert_rowid()
+        };
+
+        let position: i64 = tx
+            .query_row(
+                "SELECT IFNULL(MAX(Position), -1) + 1 FROM TagMap WHERE TagId = ?1",
+                rusqlite::params![tag_id],
+                |r| r.get(0),
+            )
+            .map_err(|e| map_sqlite_err(e, "process_note_tags: compute position"))?;
+        if let Some(id) = take_id(available, "TagMap") {
+            tx.execute(
+                "INSERT INTO TagMap (TagMapId, PlaylistItemId, LocationId, NoteId, TagId, Position) \
+                 VALUES (?1, NULL, NULL, ?2, ?3, ?4)",
+                rusqlite::params![id, note_id, tag_id, position],
+            )
+            .map_err(|e| map_sqlite_err(e, "process_note_tags: insert tagmap (recycled id)"))?;
+        } else {
+            tx.execute(
+                "INSERT INTO TagMap (PlaylistItemId, LocationId, NoteId, TagId, Position) \
+                 VALUES (NULL, NULL, ?1, ?2, ?3)",
+                rusqlite::params![note_id, tag_id, position],
+            )
+            .map_err(|e| map_sqlite_err(e, "process_note_tags: insert tagmap (autoincrement)"))?;
+        }
+    }
+    Ok(())
+}
+
+/// Upserts one Note record — ports `update_note` (`JWLManager.py:2352-2372`):
+/// an identity match ([`find_existing_note`]) UPDATEs `UserMarkId, Content,
+/// LastModified, Created`; a miss INSERTs fresh with a new
+/// [`format_guid_v4`] GUID. `CREATED`/`MODIFIED` fall back to the EXISTING
+/// row's stored values on UPDATE, or to `now` on INSERT (`CREATED` falling
+/// through to `MODIFIED` first) — both truncated via [`truncate19_z`]. Tags
+/// are always re-processed via [`process_note_tags`], last.
+#[allow(clippy::too_many_arguments)]
+fn upsert_note(
+    tx: &Transaction,
+    record: &NoteRecord,
+    location_id: Option<i64>,
+    block_type: i64,
+    block_identifier: Option<i64>,
+    user_mark_id: Option<i64>,
+    now: &str,
+    guid_seed: u64,
+    available: &mut HashMap<&'static str, Vec<i64>>,
+) -> Result<(), ArchiveError> {
+    let existing = find_existing_note(tx, record, location_id, block_type, block_identifier)?;
+
+    let note_id = if let Some((note_id, existing_modified, existing_created)) = existing {
+        let modified = truncate19_z(record.modified.as_deref().unwrap_or(&existing_modified));
+        let created = truncate19_z(record.created.as_deref().unwrap_or(&existing_created));
+        tx.execute(
+            "UPDATE Note SET UserMarkId = ?1, Content = ?2, LastModified = ?3, Created = ?4 WHERE NoteId = ?5",
+            rusqlite::params![user_mark_id, record.note, modified, created, note_id],
+        )
+        .map_err(|e| map_sqlite_err(e, "upsert_note: update"))?;
+        note_id
+    } else {
+        let modified = truncate19_z(record.modified.as_deref().unwrap_or(now));
+        let created_source = record
+            .created
+            .as_deref()
+            .or(record.modified.as_deref())
+            .unwrap_or(now);
+        let created = truncate19_z(created_source);
+        let guid = format_guid_v4(guid_seed);
+
+        if let Some(id) = take_id(available, "Note") {
+            tx.execute(
+                "INSERT INTO Note (NoteId, Guid, UserMarkId, LocationId, Title, Content, BlockType, BlockIdentifier, LastModified, Created) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                rusqlite::params![
+                    id, guid, user_mark_id, location_id, record.title, record.note, block_type,
+                    block_identifier, modified, created
+                ],
+            )
+            .map_err(|e| map_sqlite_err(e, "upsert_note: insert recycled id"))?;
+            id
+        } else {
+            tx.execute(
+                "INSERT INTO Note (Guid, UserMarkId, LocationId, Title, Content, BlockType, BlockIdentifier, LastModified, Created) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                rusqlite::params![
+                    guid, user_mark_id, location_id, record.title, record.note, block_type,
+                    block_identifier, modified, created
+                ],
+            )
+            .map_err(|e| map_sqlite_err(e, "upsert_note: insert autoincrement"))?;
+            tx.last_insert_rowid()
+        }
+    };
+
+    process_note_tags(tx, note_id, record.tags.as_deref(), available)
+}
+
+/// Runs the ALREADY-PARSED Notes `records` inside the caller's transaction
+/// (`JWLManager.py:2394-2440`). `bucket` gates the title-character bulk
+/// delete (D8-09) — `Some(c)` runs `DELETE FROM Note WHERE Title GLOB ?`
+/// (bound, never interpolated) BEFORE any record is processed; `None` NEVER
+/// deletes, even when the source file's OWN tag line named a bucket (the
+/// caller decides whether to pass the file's bucket through — an explicit,
+/// separately-surfaced opt-in, never inferred here). Returns the number of
+/// Notes deleted by the bucket clause (for the caller's own bookkeeping —
+/// `diff_snapshots` already captures the same fact via the Note PK
+/// before/after diff).
+pub fn apply_import_notes(
+    tx: &Transaction,
+    bucket: Option<char>,
+    records: &[NoteRecord],
+    available: &mut HashMap<&'static str, Vec<i64>>,
+    guid_seed: u64,
+    now: &str,
+) -> Result<usize, ArchiveError> {
+    let deleted = match bucket {
+        Some(ch) => {
+            let pattern = format!("{ch}*");
+            tx.execute("DELETE FROM Note WHERE Title GLOB ?1", rusqlite::params![pattern])
+                .map_err(|e| map_sqlite_err(e, "apply_import_notes: bucket delete"))?
+        }
+        None => 0,
+    };
+
+    for (index, record) in records.iter().enumerate() {
+        let usermark_seed = guid_seed ^ (index as u64);
+        let note_seed = usermark_seed.rotate_left(17) ^ 0xA5A5_A5A5_A5A5_A5A5;
+
+        match record.shape {
+            NoteShape::Bible => {
+                let location_id = find_or_insert_note_scripture_location(tx, record, available)?;
+                let user_mark_id =
+                    apply_note_usermark(tx, record, location_id, usermark_seed, available)?;
+                let (block_type, block_identifier) = if record.block.is_some() {
+                    (1i64, Some(1i64))
+                } else if record.vs.is_some() {
+                    (2i64, record.vs)
+                } else {
+                    (0i64, None)
+                };
+                upsert_note(
+                    tx, record, Some(location_id), block_type, block_identifier, user_mark_id, now,
+                    note_seed, available,
+                )?;
+            }
+            NoteShape::Publication => {
+                let location_id = find_or_insert_note_publication_location(tx, record, available)?;
+                let user_mark_id =
+                    apply_note_usermark(tx, record, location_id, usermark_seed, available)?;
+                let block_type = if record.block.is_some() { 1i64 } else { 0i64 };
+                upsert_note(
+                    tx, record, Some(location_id), block_type, record.block, user_mark_id, now,
+                    note_seed, available,
+                )?;
+            }
+            NoteShape::Independent => {
+                upsert_note(tx, record, None, 0, None, None, now, note_seed, available)?;
+            }
+        }
+    }
+
+    Ok(deleted)
+}
+
+/// Runs the REAL [`apply_import_notes`] + `trim_sweep` inside a transaction
+/// that is NEVER committed, returning a SEMANTIC [`DryRunReport`] over
+/// [`NOTE_IMPORT_SNAPSHOT_TABLES`] — same shape as
+/// [`dry_run_import_highlights`]. The bucket delete (if `bucket` is `Some`)
+/// runs for real inside this rolled-back transaction, so its effect is
+/// captured naturally by the before/after PK diff (`report.deleted["Note"]`)
+/// — no manual bookkeeping needed on top of [`diff_snapshots`].
+pub fn dry_run_import_notes(
+    conn: &mut Connection,
+    bucket: Option<char>,
+    records: &[NoteRecord],
+    guid_seed: u64,
+    now: &str,
+) -> Result<DryRunReport, ArchiveError> {
+    let guard = PragmaGuard::new(conn).map_err(|e| map_sqlite_err(e, "snapshotting pragmas"))?;
+
+    conn.execute_batch(
+        "PRAGMA temp_store = 'MEMORY'; \
+         PRAGMA synchronous = 'OFF'; \
+         PRAGMA journal_mode = 'MEMORY'; \
+         PRAGMA foreign_keys = 'OFF';",
+    )
+    .map_err(|e| map_sqlite_err(e, "setting dry-run pragmas"))?;
+
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| map_sqlite_err(e, "opening dry-run transaction"))?;
+
+    let mut available = compute_available_ids(&tx)?;
+    let before = snapshot_tables(&tx, NOTE_IMPORT_SNAPSHOT_TABLES)?;
+    apply_import_notes(&tx, bucket, records, &mut available, guid_seed, now)?;
+    trim_sweep(&tx)?;
+    let after = snapshot_tables(&tx, NOTE_IMPORT_SNAPSHOT_TABLES)?;
+
+    let report = diff_snapshots(&before, &after);
+
+    drop(tx);
+    drop(guard);
+
+    Ok(report)
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
@@ -1459,5 +2162,95 @@ mod tests {
         let records = parse_highlights_file(text).unwrap();
         assert_eq!(records.len(), 1);
         assert!(records[0].book_number.is_empty());
+    }
+
+    // -----------------------------------------------------------------
+    // Notes (08-04-PLAN.md)
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn notes_extract_bucket_plain_tag_is_no_bucket() {
+        assert_eq!(extract_notes_bucket("{NOTES=}"), Some(None));
+    }
+
+    #[test]
+    fn notes_extract_bucket_single_char() {
+        assert_eq!(extract_notes_bucket("{NOTES=a}"), Some(Some('a')));
+    }
+
+    #[test]
+    fn notes_extract_bucket_rejects_multi_char() {
+        assert_eq!(extract_notes_bucket("{NOTES=ab}"), None);
+    }
+
+    #[test]
+    fn notes_parse_rejects_missing_tag_line() {
+        let err = parse_notes_file("not a tag line").unwrap_err();
+        match err {
+            ArchiveError::ImportMalformed { category, line, .. } => {
+                assert_eq!(category, "Notes");
+                assert_eq!(line, 1);
+            }
+            other => panic!("expected ImportMalformed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn notes_parse_independent_record_no_optional_brackets() {
+        let text = "{NOTES=}\nheader\n==={CREATED=2024-01-01T00:00:00}{MODIFIED=2024-01-01T00:00:00}{TAGS=}===\nMy Title\nMy note body\n==={END}===";
+        let (bucket, records) = parse_notes_file(text).unwrap();
+        assert_eq!(bucket, None);
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].shape, NoteShape::Independent);
+        assert_eq!(records[0].title, "My Title");
+        assert_eq!(records[0].note, "My note body");
+    }
+
+    #[test]
+    fn notes_parse_untitled_body_has_blank_first_line() {
+        let text = "{NOTES=}\nheader\n==={CREATED=2024-01-01T00:00:00}{MODIFIED=2024-01-01T00:00:00}{TAGS=}===\n\nline1\nline2\n==={END}===";
+        let (_bucket, records) = parse_notes_file(text).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].title, "");
+        assert_eq!(records[0].note, "line1\nline2");
+    }
+
+    #[test]
+    fn notes_parse_bible_shape_requires_color() {
+        let text = "{NOTES=}\nheader\n==={CREATED=2024-01-01T00:00:00}{MODIFIED=2024-01-01T00:00:00}{TAGS=}{LANG=1}{PUB=nwt}{BK=1}{CH=1}===\nTitle\nNote\n==={END}===";
+        let err = parse_notes_file(text).unwrap_err();
+        assert!(matches!(err, ArchiveError::ImportMalformed { .. }));
+    }
+
+    #[test]
+    fn notes_parse_bucket_char() {
+        let text = "{NOTES=a}\nheader\n==={CREATED=2024-01-01T00:00:00}{MODIFIED=2024-01-01T00:00:00}{TAGS=}===\nTitle\nNote\n==={END}===";
+        let (bucket, records) = parse_notes_file(text).unwrap();
+        assert_eq!(bucket, Some('a'));
+        assert_eq!(records.len(), 1);
+    }
+
+    #[test]
+    fn notes_parse_range_sequential_sub_ranges() {
+        let ranges = parse_note_range("1:5-9;1:8-12", 1).unwrap();
+        assert_eq!(ranges.len(), 2);
+        assert_eq!(ranges[0], NoteSubRange { identifier: Some(1), start: 5, end: 9 });
+        assert_eq!(ranges[1], NoteSubRange { identifier: Some(1), start: 8, end: 12 });
+    }
+
+    #[test]
+    fn notes_parse_range_bare_segment_has_no_identifier() {
+        let ranges = parse_note_range("5-9", 1).unwrap();
+        assert_eq!(ranges.len(), 1);
+        assert_eq!(ranges[0].identifier, None);
+    }
+
+    #[test]
+    fn notes_apply_import_notes_bucket_none_never_deletes() {
+        let deleted = extract_notes_bucket("{NOTES=a}");
+        assert_eq!(deleted, Some(Some('a')));
+        // The actual zero-deletion guarantee for `bucket: None` is asserted
+        // against a real database in `import_wireformat_tests.rs` (this
+        // module has no DB fixture harness — see `usermark.rs`'s doc note).
     }
 }

@@ -21,23 +21,27 @@ use db::ids::compute_available_ids;
 use db::io::export::{
     export_annotations as export_annotations_impl, export_bookmarks as export_bookmarks_impl,
     export_favorites as export_favorites_impl, export_highlights as export_highlights_impl,
+    export_notes as export_notes_impl,
 };
 use db::io::header::ExportHeaderCtx;
 use db::io::import::{
     apply_import_annotations, apply_import_bookmarks, apply_import_favorites,
-    apply_import_highlights, dry_run_import_annotations, dry_run_import_bookmarks,
-    dry_run_import_favorites, dry_run_import_highlights, parse_annotations_file,
-    parse_bookmarks_file, parse_favorites_file, parse_highlights_file,
+    apply_import_highlights, apply_import_notes, dry_run_import_annotations,
+    dry_run_import_bookmarks, dry_run_import_favorites, dry_run_import_highlights,
+    dry_run_import_notes, parse_annotations_file, parse_bookmarks_file, parse_favorites_file,
+    parse_highlights_file, parse_notes_file,
 };
 use db::notes::BrowseRow;
 use db::record_edit::{RecordEditFields, RecordEditPayload, RecordIdentity};
 use db::tags::TagState;
 use error::ErrorDto;
+use serde::Serialize;
 use session::{ArchiveSession, SessionState};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
+use ts_rs::TS;
 
 /// Wall-clock-derived seed for [`guid::format_guid_v4`], threaded through
 /// exactly like `now: &str` is threaded at `save_archive`/`save_as` above —
@@ -1993,6 +1997,191 @@ fn import_highlights_apply(
     Ok(db::edit::diff_snapshots(&before, &after))
 }
 
+/// Exports Notes to `path` (whole category when `ids` is `None`, D8-10
+/// selection-optional) as a `.txt` file — same shape as [`export_highlights`],
+/// plus the `ResourceCatalog` load [`list_category`] already establishes
+/// (needed for the HEADING auto-fill's Bible book name lookup).
+#[tauri::command]
+fn export_notes(
+    path: String,
+    ids: Option<NonEmptyNoteIds>,
+    app: tauri::AppHandle,
+    state: tauri::State<SessionState>,
+) -> Result<usize, ErrorDto> {
+    let resources_db_path = db::resources::resolve_resources_db_path(&app)
+        .map_err(|err| err.to_dto("export_notes", None))?;
+    let guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("export_notes", None))?;
+    let session = guard
+        .as_ref()
+        .ok_or_else(|| error::ArchiveError::MissingUserDataBackup.to_dto("export_notes", None))?;
+
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err).to_dto("export_notes", Some(session.target_path.as_path()))
+    })?;
+    let catalog = db::resources::ResourceCatalog::load(&resources_db_path, "en")
+        .map_err(|err| err.to_dto("export_notes", None))?;
+
+    let archive_name = session
+        .target_path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "NEW ARCHIVE".to_string());
+    let header = ExportHeaderCtx {
+        category_tag: "{NOTES=}",
+        archive_name,
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        timestamp: time::now_export_header_timestamp(),
+    };
+
+    let out_path = PathBuf::from(&path);
+    export_notes_impl(
+        &conn,
+        ids.as_ref(),
+        &catalog,
+        &header,
+        &time::now_iso8601_utc(),
+        &out_path,
+    )
+    .map_err(|err| err.to_dto("export_notes", Some(out_path.as_path())))
+}
+
+/// The Tauri-facing result of a Notes import preview (IO-02, D8-09) — the
+/// standard [`DryRunReport`] PLUS the file's own detected bucket-delete
+/// character (if any), so the frontend can render the Notes-only extra
+/// preview clause and require an explicit opt-in BEFORE calling
+/// [`import_notes_apply`] with that same character. `report` already
+/// reflects what would happen if `bucket` were applied — this preview runs
+/// [`dry_run_import_notes`] with the FILE's own bucket (never a caller-
+/// supplied one, since there is no caller opt-in yet at preview time), all
+/// inside a transaction that is never committed (SAFE-01) — showing the true
+/// effect is harmless because nothing is ever persisted from a dry run.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export, export_to = "../../src/bindings/NotesImportPreview.ts")]
+pub struct NotesImportPreview {
+    pub report: DryRunReport,
+    pub bucket: Option<String>,
+}
+
+/// Previews a Notes `.txt` import (IO-02/IO-03, D8-09) — same shape as
+/// [`import_highlights_dry_run`], extended with [`NotesImportPreview`]'s
+/// bucket-delete signal. The bucket the FILE names is used for the preview
+/// itself (an honest "what would happen"); [`import_notes_apply`] takes its
+/// OWN separate `bucket` argument, decoupled from what the file requested,
+/// so the user's explicit opt-in (or lack of one) is what actually governs
+/// the commit.
+#[tauri::command]
+fn import_notes_dry_run(
+    path: String,
+    state: tauri::State<SessionState>,
+) -> Result<NotesImportPreview, ErrorDto> {
+    let guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("import_notes_dry_run", None))?;
+    let session = guard.as_ref().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("import_notes_dry_run", None)
+    })?;
+
+    let in_path = PathBuf::from(&path);
+    let text = std::fs::read_to_string(&in_path).map_err(|err| {
+        error::ArchiveError::from(err).to_dto("import_notes_dry_run", Some(in_path.as_path()))
+    })?;
+    let (bucket, records) = parse_notes_file(&text)
+        .map_err(|err| err.to_dto("import_notes_dry_run", Some(in_path.as_path())))?;
+
+    let mut conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("import_notes_dry_run", Some(session.target_path.as_path()))
+    })?;
+
+    let report = dry_run_import_notes(
+        &mut conn,
+        bucket,
+        &records,
+        guid_seed_now(),
+        &time::now_iso8601_utc(),
+    )
+    .map_err(|err| err.to_dto("import_notes_dry_run", Some(session.target_path.as_path())))?;
+
+    Ok(NotesImportPreview {
+        report,
+        bucket: bucket.map(|c| c.to_string()),
+    })
+}
+
+/// Applies a Notes `.txt` import (IO-02/IO-03, D8-09) — same shape as
+/// [`import_highlights_apply`]. `bucket` is the user's EXPLICIT opt-in
+/// (`None` unless the frontend's preview dialog opt-in was checked): the
+/// bucket delete never runs just because the file's own tag line named one.
+#[tauri::command]
+fn import_notes_apply(
+    path: String,
+    bucket: Option<String>,
+    state: tauri::State<SessionState>,
+) -> Result<DryRunReport, ErrorDto> {
+    let mut guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("import_notes_apply", None))?;
+    let session = guard.as_mut().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("import_notes_apply", None)
+    })?;
+
+    let in_path = PathBuf::from(&path);
+    let text = std::fs::read_to_string(&in_path).map_err(|err| {
+        error::ArchiveError::from(err).to_dto("import_notes_apply", Some(in_path.as_path()))
+    })?;
+    let (_file_bucket, records) = parse_notes_file(&text)
+        .map_err(|err| err.to_dto("import_notes_apply", Some(in_path.as_path())))?;
+    let opted_in_bucket = bucket.and_then(|s| s.chars().next());
+
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("import_notes_apply", Some(session.target_path.as_path()))
+    })?;
+
+    let guard_pragma = db::pragma_guard::PragmaGuard::new(&conn).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("import_notes_apply", Some(session.target_path.as_path()))
+    })?;
+    conn.execute_batch("PRAGMA foreign_keys = 'OFF';")
+        .map_err(|err| {
+            error::ArchiveError::from(err)
+                .to_dto("import_notes_apply", Some(session.target_path.as_path()))
+        })?;
+
+    let tx = conn.unchecked_transaction().map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("import_notes_apply", Some(session.target_path.as_path()))
+    })?;
+
+    let mut available = compute_available_ids(&tx)
+        .map_err(|err| err.to_dto("import_notes_apply", Some(session.target_path.as_path())))?;
+    let before = db::edit::snapshot_tables(&tx, db::edit::NOTE_IMPORT_SNAPSHOT_TABLES)
+        .map_err(|err| err.to_dto("import_notes_apply", Some(session.target_path.as_path())))?;
+    apply_import_notes(
+        &tx,
+        opted_in_bucket,
+        &records,
+        &mut available,
+        guid_seed_now(),
+        &time::now_iso8601_utc(),
+    )
+    .map_err(|err| err.to_dto("import_notes_apply", Some(session.target_path.as_path())))?;
+    let after = db::edit::snapshot_tables(&tx, db::edit::NOTE_IMPORT_SNAPSHOT_TABLES)
+        .map_err(|err| err.to_dto("import_notes_apply", Some(session.target_path.as_path())))?;
+
+    tx.commit().map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("import_notes_apply", Some(session.target_path.as_path()))
+    })?;
+    drop(guard_pragma);
+
+    session.dirty = true;
+
+    Ok(db::edit::diff_snapshots(&before, &after))
+}
+
 /// Tauri builder wiring for the Walking Skeleton.
 ///
 /// `open_archive` (01-07) and `check_jwlcore` (01-03) are registered here.
@@ -2058,7 +2247,10 @@ pub fn run() {
             import_annotations_apply,
             export_highlights,
             import_highlights_dry_run,
-            import_highlights_apply
+            import_highlights_apply,
+            export_notes,
+            import_notes_dry_run,
+            import_notes_apply
         ])
         .run(tauri::generate_context!())
     {

@@ -9,12 +9,13 @@
 mod common;
 
 use jwlmanager_lib::db::color::NonEmptyBlockRangeIds;
-use jwlmanager_lib::db::delete::{NonEmptyBookmarkIds, NonEmptyLocationIds};
+use jwlmanager_lib::db::delete::{NonEmptyBookmarkIds, NonEmptyLocationIds, NonEmptyNoteIds};
 use jwlmanager_lib::db::favorites::NonEmptyTagMapIds;
 use jwlmanager_lib::db::io::export::{
-    export_annotations, export_bookmarks, export_favorites, export_highlights,
+    export_annotations, export_bookmarks, export_favorites, export_highlights, export_notes,
 };
 use jwlmanager_lib::db::io::header::ExportHeaderCtx;
+use jwlmanager_lib::db::resources::{dev_resources_db_path, ResourceCatalog};
 use rusqlite::Connection;
 use tempfile::TempDir;
 
@@ -566,4 +567,261 @@ fn highlights_selection_scoped_export_contains_only_the_selected_row() {
     let text = std::fs::read_to_string(&out_path).expect("read exported file");
     assert!(text.contains("nwt"));
     assert!(!text.contains("pub-x"));
+}
+
+// ---------------------------------------------------------------------------
+// Notes (08-04-PLAN.md Task 1): bracket-tag records, the widest optional-tag
+// vocabulary, `{END}` sentinel. Ports `export_notes`'s txt branch
+// (`JWLManager.py:1636-1668`).
+// ---------------------------------------------------------------------------
+
+fn pinned_notes_header() -> ExportHeaderCtx<'static> {
+    ExportHeaderCtx {
+        category_tag: "{NOTES=}",
+        archive_name: "MyArchive.jwlibrary".to_string(),
+        app_version: "0.1.0".to_string(),
+        timestamp: "2026-01-01 @ 00:00:00".to_string(),
+    }
+}
+
+/// Seeds the exact three-note fixture `notes_golden.txt` was hand-authored
+/// against, in export order (`ORDER BY BlockType, LastModified DESC`):
+/// an untitled multi-line independent note (BlockType 0), a tagless
+/// publication note carrying a `RANGE` (BlockType 1), and a tagged,
+/// multi-line Bible verse note with a PRESET Location Title (BlockType 2,
+/// exercising the `HEADING` `":VS"` append path rather than the auto-fill).
+/// Returns the Note ids in export order.
+fn seed_notes_golden_fixture_rows(db_path: &std::path::Path) -> (i64, i64, i64) {
+    let conn = Connection::open(db_path).expect("open fixture db");
+    conn.execute_batch("PRAGMA foreign_keys = OFF").expect("fk off");
+
+    // Independent (untitled, multi-line, no tags).
+    conn.execute(
+        "INSERT INTO Note (Guid, UserMarkId, LocationId, Title, Content, BlockType, BlockIdentifier, LastModified, Created) \
+         VALUES ('note-indep', NULL, NULL, '', 'indep line1\nindep line2', 0, NULL, '2024-03-01T00:00:00', '2024-03-01T00:00:00')",
+        [],
+    )
+    .expect("insert independent note");
+    let indep_id = conn.last_insert_rowid();
+
+    // Publication (BLOCK + COLOR + RANGE, empty heading, no tags).
+    conn.execute(
+        "INSERT INTO Location (DocumentId, IssueTagNumber, KeySymbol, MepsLanguage, Title, Type) \
+         VALUES (1001, 0, 'pub-x', 0, '', 0)",
+        [],
+    )
+    .expect("insert publication location");
+    let pub_loc = conn.last_insert_rowid();
+    conn.execute(
+        "INSERT INTO UserMark (ColorIndex, LocationId, StyleIndex, UserMarkGuid, Version) \
+         VALUES (1, ?1, 0, 'fixture-note-publication', 1)",
+        rusqlite::params![pub_loc],
+    )
+    .expect("insert publication usermark");
+    let pub_um = conn.last_insert_rowid();
+    conn.execute(
+        "INSERT INTO BlockRange (BlockType, Identifier, StartToken, EndToken, UserMarkId) \
+         VALUES (1, 3, 10, 20, ?1)",
+        rusqlite::params![pub_um],
+    )
+    .expect("insert publication blockrange");
+    conn.execute(
+        "INSERT INTO Note (Guid, UserMarkId, LocationId, Title, Content, BlockType, BlockIdentifier, LastModified, Created) \
+         VALUES ('note-pub', ?1, ?2, 'Pub Note', 'Some content', 1, 3, '2024-02-01T00:00:00', '2024-02-01T00:00:00')",
+        rusqlite::params![pub_um, pub_loc],
+    )
+    .expect("insert publication note");
+    let pub_id = conn.last_insert_rowid();
+
+    // Bible verse note (VS present, preset Location Title, tagged, multi-line).
+    conn.execute(
+        "INSERT INTO Location (BookNumber, ChapterNumber, KeySymbol, MepsLanguage, Title, Type) \
+         VALUES (1, 1, 'nwt', 0, 'Genesis 1', 0)",
+        [],
+    )
+    .expect("insert bible location");
+    let bible_loc = conn.last_insert_rowid();
+    conn.execute(
+        "INSERT INTO Note (Guid, UserMarkId, LocationId, Title, Content, BlockType, BlockIdentifier, LastModified, Created) \
+         VALUES ('note-bible', NULL, ?1, 'My Title', 'Line one\nLine two', 2, 5, '2024-01-02T03:04:05', '2024-01-01T00:00:00')",
+        rusqlite::params![bible_loc],
+    )
+    .expect("insert bible note");
+    let bible_id = conn.last_insert_rowid();
+
+    for (name, position) in [("alpha", 0), ("beta", 1)] {
+        conn.execute(
+            "INSERT INTO Tag (Type, Name) VALUES (1, ?1)",
+            rusqlite::params![name],
+        )
+        .expect("insert tag");
+        let tag_id = conn.last_insert_rowid();
+        conn.execute(
+            "INSERT INTO TagMap (PlaylistItemId, LocationId, NoteId, TagId, Position) \
+             VALUES (NULL, NULL, ?1, ?2, ?3)",
+            rusqlite::params![bible_id, tag_id, position],
+        )
+        .expect("insert tagmap");
+    }
+
+    (indep_id, pub_id, bible_id)
+}
+
+#[test]
+fn exported_notes_match_golden_fixture_exactly() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_notes_golden_fixture_rows(&db_path);
+    let conn = Connection::open(&db_path).expect("open db");
+    let catalog =
+        ResourceCatalog::load(&dev_resources_db_path(), "en").expect("resources.db must load");
+
+    let out_dir = TempDir::new().expect("tempdir");
+    let out_path = out_dir.path().join("notes_out.txt");
+    let count = export_notes(
+        &conn,
+        None,
+        &catalog,
+        &pinned_notes_header(),
+        "2099-01-01T00:00:00Z",
+        &out_path,
+    )
+    .expect("export");
+    assert_eq!(count, 3);
+
+    let actual = common::read_file_bytes(&out_path);
+    let golden_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/wire/notes_golden.txt");
+    let golden = common::read_file_bytes(&golden_path);
+    assert_eq!(actual, golden, "exported Notes bytes must byte-match the golden fixture exactly");
+}
+
+#[test]
+fn exported_notes_end_with_end_sentinel_and_no_trailing_newline() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_notes_golden_fixture_rows(&db_path);
+    let conn = Connection::open(&db_path).expect("open db");
+    let catalog =
+        ResourceCatalog::load(&dev_resources_db_path(), "en").expect("resources.db must load");
+
+    let out_dir = TempDir::new().expect("tempdir");
+    let out_path = out_dir.path().join("notes_out.txt");
+    export_notes(
+        &conn,
+        None,
+        &catalog,
+        &pinned_notes_header(),
+        "2099-01-01T00:00:00Z",
+        &out_path,
+    )
+    .expect("export");
+
+    let bytes = common::read_file_bytes(&out_path);
+    assert!(bytes.ends_with(b"\n==={END}==="));
+}
+
+#[test]
+fn notes_empty_heading_bracket_omitted() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_notes_golden_fixture_rows(&db_path);
+    let conn = Connection::open(&db_path).expect("open db");
+    let catalog =
+        ResourceCatalog::load(&dev_resources_db_path(), "en").expect("resources.db must load");
+
+    let out_dir = TempDir::new().expect("tempdir");
+    let out_path = out_dir.path().join("notes_out.txt");
+    export_notes(
+        &conn,
+        None,
+        &catalog,
+        &pinned_notes_header(),
+        "2099-01-01T00:00:00Z",
+        &out_path,
+    )
+    .expect("export");
+
+    let text = std::fs::read_to_string(&out_path).expect("read exported file");
+    // The publication note's Location.Title is '' — its record must carry
+    // no {HEADING substring at all.
+    let pub_record = text.split("Pub Note").next().expect("publication record present");
+    assert!(!pub_record.contains("{HEADING"));
+}
+
+#[test]
+fn notes_tags_have_no_spaces_around_pipe() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_notes_golden_fixture_rows(&db_path);
+    let conn = Connection::open(&db_path).expect("open db");
+    let catalog =
+        ResourceCatalog::load(&dev_resources_db_path(), "en").expect("resources.db must load");
+
+    let out_dir = TempDir::new().expect("tempdir");
+    let out_path = out_dir.path().join("notes_out.txt");
+    export_notes(
+        &conn,
+        None,
+        &catalog,
+        &pinned_notes_header(),
+        "2099-01-01T00:00:00Z",
+        &out_path,
+    )
+    .expect("export");
+
+    let text = std::fs::read_to_string(&out_path).expect("read exported file");
+    assert!(text.contains("{TAGS=alpha|beta}"));
+    assert!(!text.contains(" | "));
+}
+
+#[test]
+fn notes_untitled_body_begins_with_blank_line() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_notes_golden_fixture_rows(&db_path);
+    let conn = Connection::open(&db_path).expect("open db");
+    let catalog =
+        ResourceCatalog::load(&dev_resources_db_path(), "en").expect("resources.db must load");
+
+    let out_dir = TempDir::new().expect("tempdir");
+    let out_path = out_dir.path().join("notes_out.txt");
+    export_notes(
+        &conn,
+        None,
+        &catalog,
+        &pinned_notes_header(),
+        "2099-01-01T00:00:00Z",
+        &out_path,
+    )
+    .expect("export");
+
+    let text = std::fs::read_to_string(&out_path).expect("read exported file");
+    assert!(
+        text.contains("{TAGS=}===\n\nindep line1"),
+        "an untitled note's body must begin with an empty first line: {text:?}"
+    );
+}
+
+#[test]
+fn notes_selection_scoped_export_contains_only_the_selected_note() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    let (_indep_id, pub_id, _bible_id) = seed_notes_golden_fixture_rows(&db_path);
+    let conn = Connection::open(&db_path).expect("open db");
+    let catalog =
+        ResourceCatalog::load(&dev_resources_db_path(), "en").expect("resources.db must load");
+
+    let ids = NonEmptyNoteIds::try_from(vec![pub_id]).expect("non-empty selection");
+    let out_dir = TempDir::new().expect("tempdir");
+    let out_path = out_dir.path().join("notes_selected.txt");
+    let count = export_notes(
+        &conn,
+        Some(&ids),
+        &catalog,
+        &pinned_notes_header(),
+        "2099-01-01T00:00:00Z",
+        &out_path,
+    )
+    .expect("export");
+    assert_eq!(count, 1);
+
+    let text = std::fs::read_to_string(&out_path).expect("read exported file");
+    assert!(text.contains("Pub Note"));
+    assert!(!text.contains("My Title"));
+    assert!(!text.contains("indep line1"));
 }

@@ -8,8 +8,9 @@
 
 use super::header::{build_export_header, ExportHeaderCtx};
 use crate::db::color::NonEmptyBlockRangeIds;
-use crate::db::delete::{NonEmptyBookmarkIds, NonEmptyLocationIds};
+use crate::db::delete::{NonEmptyBookmarkIds, NonEmptyLocationIds, NonEmptyNoteIds};
 use crate::db::favorites::NonEmptyTagMapIds;
+use crate::db::resources::ResourceCatalog;
 use crate::error::ArchiveError;
 use rusqlite::types::Value;
 use rusqlite::Connection;
@@ -422,6 +423,290 @@ pub fn export_highlights(
     }
 
     Ok(lines.len())
+}
+
+// ---------------------------------------------------------------------------
+// Notes (08-04-PLAN.md Task 1) — bracket-tag records with the widest
+// optional-tag vocabulary of any category. Ports `export_notes`'s txt branch
+// (`JWLManager.py:1636-1668`) plus the shared `get_notes` item-derivation
+// (`:1552-1622`) that runs unconditionally before the format branch.
+// ---------------------------------------------------------------------------
+
+/// Notes DOES write an `==={END}===` sentinel — same shape as
+/// [`ANNOTATIONS_WRITES_END_SENTINEL`].
+#[allow(dead_code)] // documented fact, referenced by module docs/tests rather than code
+pub(crate) const NOTES_WRITES_END_SENTINEL: bool = true;
+
+/// One raw `Note` export row, straight off the SQL (`JWLManager.py:1519-1542`)
+/// before any of `get_notes`'s per-shape derivation runs.
+struct RawNoteRow {
+    book_number: Option<i64>,
+    document_id: Option<i64>,
+    title: Option<String>,
+    content: Option<String>,
+    tags: Option<String>,
+    meps_language: Option<i64>,
+    chapter_number: Option<i64>,
+    /// `n.BlockIdentifier` — read once here and reused as BOTH Python's
+    /// `VS` and `BLOCK` dict entries (`JWLManager.py:1560-1561`, both set
+    /// from the same `row[7]`); the per-shape derivation below reproduces
+    /// which of the two identifiers survives to the wire.
+    block_identifier: Option<i64>,
+    issue_tag_number: Option<i64>,
+    key_symbol: Option<String>,
+    location_title: Option<String>,
+    last_modified: String,
+    created: String,
+    color_index: Option<i64>,
+    user_mark_id: Option<i64>,
+}
+
+/// Reads the merged `RANGE` string for one `UserMarkId` — ports the inline
+/// `BlockRange` sub-select (`JWLManager.py:1610-1615`): `identifier:start-end`
+/// sub-ranges joined by `;`, ordered by `(Identifier, StartToken)`. `None`
+/// when the UserMark carries no ranges at all (an un-highlighted-but-marked
+/// edge case, or simply a UserMark with zero BlockRange rows).
+fn read_note_range(conn: &Connection, user_mark_id: i64) -> Result<Option<String>, ArchiveError> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT Identifier, StartToken, EndToken FROM BlockRange \
+             WHERE UserMarkId = ?1 ORDER BY Identifier, StartToken",
+        )
+        .map_err(|e| map_sqlite_err(e, "read_note_range: prepare"))?;
+    let rows = stmt
+        .query_map(rusqlite::params![user_mark_id], |row| {
+            let identifier: i64 = row.get(0)?;
+            let start: i64 = row.get(1)?;
+            let end: i64 = row.get(2)?;
+            Ok(format!("{identifier}:{start}-{end}"))
+        })
+        .map_err(|e| map_sqlite_err(e, "read_note_range: query"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| map_sqlite_err(e, "read_note_range: read rows"))?;
+    if rows.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(rows.join(";")))
+    }
+}
+
+fn read_raw_note_rows(
+    conn: &Connection,
+    ids: Option<&NonEmptyNoteIds>,
+) -> Result<Vec<RawNoteRow>, ArchiveError> {
+    let base_sql = "SELECT l.BookNumber, l.DocumentId, n.Title, n.Content, \
+         (SELECT GROUP_CONCAT(t.Name, ' | ') FROM Note nt \
+              LEFT JOIN TagMap USING (NoteId) JOIN Tag t USING (TagId) \
+              WHERE nt.NoteId = n.NoteId), \
+         l.MepsLanguage, l.ChapterNumber, n.BlockIdentifier, l.IssueTagNumber, l.KeySymbol, \
+         l.Title, n.LastModified, n.Created, u.ColorIndex, n.UserMarkId \
+         FROM Note n \
+             LEFT JOIN Location l USING (LocationId) \
+             LEFT JOIN UserMark u USING (UserMarkId)";
+
+    let (sql, bound): (String, Vec<i64>) = match ids {
+        Some(ids) => {
+            let placeholders: String = std::iter::repeat_n("?", ids.len())
+                .collect::<Vec<_>>()
+                .join(",");
+            (
+                format!(
+                    "{base_sql} WHERE n.NoteId IN ({placeholders}) \
+                     GROUP BY n.NoteId ORDER BY n.BlockType, n.LastModified DESC"
+                ),
+                ids.iter().copied().collect(),
+            )
+        }
+        None => (
+            format!("{base_sql} GROUP BY n.NoteId ORDER BY n.BlockType, n.LastModified DESC"),
+            Vec::new(),
+        ),
+    };
+
+    let mut stmt = conn
+        .prepare(&sql)
+        .map_err(|e| map_sqlite_err(e, "read_raw_note_rows: prepare"))?;
+    let rows = stmt
+        .query_map(rusqlite::params_from_iter(bound.iter()), |row| {
+            Ok(RawNoteRow {
+                book_number: row.get(0)?,
+                document_id: row.get(1)?,
+                title: row.get(2)?,
+                content: row.get(3)?,
+                tags: row.get(4)?,
+                meps_language: row.get(5)?,
+                chapter_number: row.get(6)?,
+                block_identifier: row.get(7)?,
+                issue_tag_number: row.get(8)?,
+                key_symbol: row.get(9)?,
+                location_title: row.get(10)?,
+                last_modified: row.get(11)?,
+                created: row.get(12)?,
+                color_index: row.get(13)?,
+                user_mark_id: row.get(14)?,
+            })
+        })
+        .map_err(|e| map_sqlite_err(e, "read_raw_note_rows: query"))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| map_sqlite_err(e, "read_raw_note_rows: read rows"))?;
+    Ok(rows)
+}
+
+/// First 19 characters (never bytes — these are ASCII ISO date strings, so
+/// char/byte truncation is identical, but this is explicit about which
+/// invariant is relied on).
+fn take19(s: &str) -> String {
+    s.chars().take(19).collect()
+}
+
+/// Exports Notes (whole category when `ids` is `None`, D8-10
+/// selection-optional) to `path` as a `.txt` file: [`build_export_header`]
+/// tagged `{NOTES=}`, then per record the bracket header with the exact
+/// per-shape optional-tag ORDER (`JWLManager.py:1636-1667`), then
+/// `===\n<TITLE>\n<NOTE>`, then the literal `\n==={END}===`
+/// ([`NOTES_WRITES_END_SENTINEL`]). `catalog` supplies the Bible book name
+/// for the HEADING auto-fill fallback (`bible_books[BK]`); `now` supplies the
+/// data-hygiene fallback for a corrupted `CREATED`/`MODIFIED` timestamp
+/// (`JWLManager.py:1602-1608`) — both injected, never read from the wall
+/// clock inside this function. Never mutates the archive (D8-09).
+#[allow(clippy::too_many_arguments)]
+pub fn export_notes(
+    conn: &Connection,
+    ids: Option<&NonEmptyNoteIds>,
+    catalog: &ResourceCatalog,
+    header: &ExportHeaderCtx,
+    now: &str,
+    path: &Path,
+) -> Result<usize, ArchiveError> {
+    let raw_rows = read_raw_note_rows(conn, ids)?;
+
+    let mut file = std::fs::File::create(path).map_err(ArchiveError::from)?;
+    file.write_all(build_export_header(header).as_bytes())
+        .map_err(ArchiveError::from)?;
+
+    let mut count = 0usize;
+    for raw in &raw_rows {
+        count += 1;
+
+        let title = raw.title.clone().unwrap_or_default();
+        let note = raw
+            .content
+            .as_deref()
+            .map(|c| c.trim().to_string())
+            .unwrap_or_default();
+        let tags = raw.tags.clone().unwrap_or_default().replace(" | ", "|");
+        let color = raw.color_index.unwrap_or(0);
+        let range = match raw.user_mark_id {
+            Some(id) => read_note_range(conn, id)?,
+            None => None,
+        };
+
+        // `JWLManager.py:1602-1608`'s data-hygiene fallback for a corrupted
+        // stored timestamp — a rare, non-load-bearing edge case ported for
+        // completeness, not exercised by the golden fixture.
+        let mut created = take19(&raw.created);
+        let mut modified = take19(&raw.last_modified);
+        if !created.contains('-') || created.chars().count() < 10 {
+            created = now.to_string();
+        } else if !modified.contains('T') {
+            modified = format!("{}T00:00:00", modified.chars().take(10).collect::<String>());
+        }
+        if !modified.contains('-') || modified.chars().count() < 10 {
+            modified = created.clone();
+        } else if !created.contains('T') {
+            created = format!("{}T00:00:00", created.chars().take(10).collect::<String>());
+        }
+
+        file.write_all(
+            format!("\n==={{CREATED={created}}}{{MODIFIED={modified}}}{{TAGS={tags}}}").as_bytes(),
+        )
+        .map_err(ArchiveError::from)?;
+
+        // `item.get('DOC')` truthiness (`JWLManager.py:1622`/`:1655`/`:1661`):
+        // a `DocumentId` of `0` is treated as absent, same as `NULL`.
+        let doc_present = raw.document_id.filter(|d| *d != 0);
+
+        if let Some(bk) = raw.book_number {
+            // Bible-shaped (`:1646-1657`). `VS` is the raw BlockIdentifier;
+            // `BLOCK` becomes unconditionally `None` once BK is present
+            // (Python's `item['BLOCK'] = None` when VS is Some, and BLOCK
+            // was ALREADY None whenever VS is None — both dict entries are
+            // read from the identical `row[7]`), so `{BLOCK=...}` never
+            // actually renders for a Bible-shaped note.
+            let vs = raw.block_identifier;
+            let ch = raw.chapter_number.unwrap_or(0);
+            let vs_str = vs.map(|v| format!("{v:03}")).unwrap_or_else(|| "000".to_string());
+            let reference = format!("{bk:02}{ch:03}{vs_str}");
+
+            let mut heading = raw.location_title.clone().unwrap_or_default();
+            if heading.is_empty() {
+                let book_name = catalog.bible_book(bk).unwrap_or("");
+                heading = format!("{book_name} {ch}");
+            } else if vs.is_some() && !heading.contains(':') {
+                heading = format!("{heading}:{}", vs.unwrap_or_default());
+            }
+
+            let lang = raw.meps_language.unwrap_or(0);
+            let pub_sym = raw.key_symbol.clone().unwrap_or_default();
+            file.write_all(format!("{{LANG={lang}}}{{PUB={pub_sym}}}{{BK={bk}}}{{CH={ch}}}").as_bytes())
+                .map_err(ArchiveError::from)?;
+            if let Some(v) = vs {
+                file.write_all(format!("{{VS={v}}}").as_bytes())
+                    .map_err(ArchiveError::from)?;
+            }
+            file.write_all(format!("{{Reference={reference}}}").as_bytes())
+                .map_err(ArchiveError::from)?;
+            if !heading.is_empty() {
+                file.write_all(format!("{{HEADING={heading}}}").as_bytes())
+                    .map_err(ArchiveError::from)?;
+            }
+            file.write_all(format!("{{COLOR={color}}}").as_bytes())
+                .map_err(ArchiveError::from)?;
+            if let Some(r) = &range {
+                file.write_all(format!("{{RANGE={r}}}").as_bytes())
+                    .map_err(ArchiveError::from)?;
+            }
+            if doc_present.is_some() {
+                file.write_all(b"{DOC=0}").map_err(ArchiveError::from)?;
+            }
+        } else if let Some(doc) = doc_present {
+            // Publication-shaped (`:1658-1666`). `BLOCK`/`HEADING` are NEVER
+            // overridden here — they stay exactly as read off the row.
+            let heading = raw.location_title.clone().unwrap_or_default();
+            let issue = raw.issue_tag_number.filter(|n| *n > 10_000_000);
+            let lang = raw.meps_language.unwrap_or(0);
+            let pub_sym = raw.key_symbol.clone().unwrap_or_default();
+            file.write_all(format!("{{LANG={lang}}}{{PUB={pub_sym}}}").as_bytes())
+                .map_err(ArchiveError::from)?;
+            if let Some(iss) = issue {
+                file.write_all(format!("{{ISSUE={iss}}}").as_bytes())
+                    .map_err(ArchiveError::from)?;
+            }
+            file.write_all(format!("{{DOC={doc}}}").as_bytes())
+                .map_err(ArchiveError::from)?;
+            if let Some(blk) = raw.block_identifier {
+                file.write_all(format!("{{BLOCK={blk}}}").as_bytes())
+                    .map_err(ArchiveError::from)?;
+            }
+            if !heading.is_empty() {
+                file.write_all(format!("{{HEADING={heading}}}").as_bytes())
+                    .map_err(ArchiveError::from)?;
+            }
+            file.write_all(format!("{{COLOR={color}}}").as_bytes())
+                .map_err(ArchiveError::from)?;
+            if let Some(r) = &range {
+                file.write_all(format!("{{RANGE={r}}}").as_bytes())
+                    .map_err(ArchiveError::from)?;
+            }
+        }
+        // else: independent-shaped — no further brackets (`:1636-1637`).
+
+        file.write_all(format!("===\n{title}\n{note}").as_bytes())
+            .map_err(ArchiveError::from)?;
+    }
+    file.write_all(b"\n==={END}===").map_err(ArchiveError::from)?;
+
+    Ok(count)
 }
 
 #[cfg(test)]

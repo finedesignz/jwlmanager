@@ -157,6 +157,24 @@ pub(crate) const HIGHLIGHT_SNAPSHOT_TABLES: &[(&str, &str)] = &[
     ("BlockRange", "BlockRangeId"),
 ];
 
+/// Notes import (08-04-PLAN.md Task 2) affected-table set: `Location` (the
+/// scripture/publication Locations `apply_import_notes` finds-or-inserts),
+/// `UserMark`/`BlockRange` (the second `merge_range_into` call site, same
+/// non-idempotent-UserMark / convergent-BlockRange shape as
+/// [`HIGHLIGHT_SNAPSHOT_TABLES`]), `Note` (the upserted note row itself —
+/// an UPDATE keeps its PK, landing in `overwritten`; a bucket-delete removes
+/// PKs, landing in `deleted`), and `Tag`/`TagMap` (the note's tag list,
+/// re-processed on every import per `process_tags`'s DELETE-then-INSERT
+/// shape).
+pub(crate) const NOTE_IMPORT_SNAPSHOT_TABLES: &[(&str, &str)] = &[
+    ("Location", "LocationId"),
+    ("UserMark", "UserMarkId"),
+    ("BlockRange", "BlockRangeId"),
+    ("Note", "NoteId"),
+    ("Tag", "TagId"),
+    ("TagMap", "TagMapId"),
+];
+
 pub(crate) fn snapshot_pks(
     tx: &Transaction,
     table: &str,
