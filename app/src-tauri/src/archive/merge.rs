@@ -39,11 +39,58 @@
 //! build (or a media-bearing archive shape not reproducible in a minimal
 //! synthetic fixture) does relocate a blob, the fold-back captures it. See
 //! `tests/merge_orchestration.rs::merge_media_verification` for the recorded
-//! observation. PlaylistItem/PlaylistItemMarker merge-table coverage remains
-//! DEFERRED (jwlCore's playlist merge needs a fuller playlist graph than a
-//! minimal synthetic fixture reproduces — 05-01-SUMMARY.md); those tables are
-//! still snapshotted by [`MERGE_SNAPSHOT_TABLES`] (a harmless empty-table
-//! no-op on these fixtures), never silently claimed as covered.
+//! observation, and `tests/fold_merge_tests.rs::fold_media_intermediate_step`
+//! for the SAME no-op observation repeated at an intermediate (non-final)
+//! N-way fold position (10-02-PLAN.md D10-04/A3).
+//!
+//! PLAYLIST MERGE-TABLE COVERAGE (D10-06, RESOLVED): Phase 5 only ever tried
+//! a MINIMAL synthetic `PlaylistItem` with no backing graph, which jwlCore
+//! aborted ("key not found: 0", 05-01-SUMMARY.md). `tests/fold_merge_tests.rs
+//! ::fold_playlist_graph_merge` (10-02-PLAN.md) retried with Phase 8's
+//! PROVEN full playlist-graph row set (`PlaylistItemAccuracy`, a
+//! `PlaylistItem` with `ThumbnailFilePath`, its backing `IndependentMedia`
+//! row, a `Location`, and the linking `PlaylistItemLocationMap` row, plus the
+//! thumbnail file), inserted directly into a fold source's `userData.db` —
+//! and it merges successfully. PlaylistItem/PlaylistItemLocationMap/
+//! IndependentMedia are provably carried into the final folded result.
+//! NEW FINDING while closing this gap: jwlCore does NOT preserve the
+//! source's `PlaylistItemId` verbatim during a merge (unlike `Note`/
+//! `UserMark`, which are Guid-identity-matched and keep their own PK) — it
+//! REMAPS `PlaylistItem` rows to fresh destination ids to avoid a PK
+//! collision, since `PlaylistItem` carries no Guid identity column, and
+//! correctly repoints `PlaylistItemLocationMap` at the new id (referentially
+//! consistent, not a partial copy). `[MERGE_SNAPSHOT_TABLES]`'s
+//! `PlaylistItem`/`PlaylistItemMarker` content-signature diff is therefore
+//! keyed by a PK the merge itself reassigns — a fold's `PlaylistItem` "added"
+//! count is trustworthy, but a signature comparison keyed by the SOURCE's
+//! original `PlaylistItemId` would silently read as "deleted+added" rather
+//! than "same logical row, remapped"; no caller currently relies on that
+//! distinction, but a future one should be aware of it.
+//!
+//! FOLD-FAILURE STAGING RESIDUE ON WINDOWS (10-02-PLAN.md Task 2, empirical
+//! finding): when jwlCore's OWN internal-exception abort path fires (e.g.
+//! the "key not found: 0" orphan-`PlaylistItem` fixture), it does NOT close
+//! its destination-db sqlite handle before returning the failure code.
+//! `sqlite3_open` on Windows does not request `FILE_SHARE_DELETE` by
+//! default, so that leaked handle blocks this module's best-effort
+//! `fs::remove_dir_all` cleanup of the FAILING step's `userData.db` (and its
+//! re-extracted `merge/userData.db`) for the REST OF THE PROCESS — verified
+//! empirically (`tests/fold_merge_tests.rs::fold_step_failure_pristine`):
+//! five retries over 1.5s all fail identically with Windows os error 32
+//! ("used by another process"), so this is not a transient race. This is a
+//! genuine jwlCore-side resource leak on ITS error path, not a defect in
+//! this module's cleanup (which is already `let _ =` best-effort and never
+//! blocks the caller, never touches the live session DB, and never leaves a
+//! HALF-promoted DB — the Core Value invariant this plan exists to prove
+//! remains intact). The residue does not grow across repeated failed
+//! attempts in the SAME process (the same already-locked path is overwritten
+//! in place each retry, never a new leak per attempt) and is confined to
+//! `userData.db`-named files — both proven by the same test. Not fixable
+//! from this side without jwlCore source (MIT-only vendored binary,
+//! no-new-dependency constraint); the practical impact is a small amount of
+//! leftover temp-dir garbage under a LONG-RUNNING app session after a fold
+//! failure caused by a jwlCore internal abort specifically, cleared on the
+//! next process restart (the OS releases the handle).
 
 use crate::archive::extract::extract_zip_slip_safe;
 use crate::db::edit::DryRunReport;

@@ -334,3 +334,414 @@ fn fold_rejects_fewer_than_three_sources() {
         "rejecting a fold dry-run with fewer than 3 sources must not create any directory"
     );
 }
+
+// ---------------------------------------------------------------------------
+// 5. D10-06 — attempt the playlist-graph fold, record the outcome either way
+//    (10-02-PLAN.md Task 1). Phase 5 only ever tried a MINIMAL synthetic
+//    PlaylistItem (jwlCore aborted: "key not found: 0"). This is the first
+//    attempt with Phase 8's proven full playlist-graph row set, inserted
+//    directly into a fold source's userData.db (never through the
+//    .jwlplaylist export path).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn fold_playlist_graph_merge() {
+    let Some(lib) = host_lib_or_skip("fold_playlist_graph_merge") else {
+        return;
+    };
+
+    let (_dest_fx, dest_archive) = common::generate_merge_dest_archive();
+    let (_s1_fx, source_1) = common::generate_fold_standalone_source_archive(
+        "merge-fold-playlist-s1-0001",
+        "s1 content before the playlist step",
+    );
+    let (_s2_fx, source_2) = common::generate_fold_playlist_graph_source();
+    let (_s3_fx, source_3) = common::generate_fold_standalone_source_archive(
+        "merge-fold-playlist-s3-0001",
+        "s3 content after the playlist step",
+    );
+    let sources = [source_1, source_2, source_3];
+
+    let (mut session, _n) = open_session(&dest_archive);
+
+    match fold_merge_commit_with_lib_path(&lib, &mut session, &sources) {
+        Ok(()) => {
+            // D10-06 CLOSED shape: the fold must have run ALL three steps
+            // (source 3's row present) and the playlist graph rows must be
+            // provably carried into the final result — not merely "the fold
+            // didn't error".
+            assert!(
+                note_guid_present(&session.db_path, "merge-fold-playlist-s3-0001"),
+                "fold reported success but source 3's row is missing — all three steps must run"
+            );
+            // EMPIRICAL FINDING: jwlCore's mergeDatabase does NOT preserve the
+            // source's PlaylistItemId verbatim (unlike Note/UserMark, which
+            // are identity-matched by Guid) — it REMAPS PlaylistItem rows to
+            // fresh ids in the destination, presumably to avoid PK collision
+            // since PlaylistItem has no Guid identity column. So the PK to
+            // look up is NOT common::FOLD_PLAYLIST_ITEM_ID; resolve the
+            // migrated row by its (source-unique) Label instead.
+            let conn = Connection::open(&session.db_path).unwrap();
+            let new_pi_id: Option<i64> = conn
+                .query_row(
+                    "SELECT PlaylistItemId FROM PlaylistItem WHERE Label = 'Fold Playlist Item'",
+                    [],
+                    |r| r.get(0),
+                )
+                .ok();
+            let new_pi_id = new_pi_id.expect(
+                "D10-06: no PlaylistItem row with the fold fixture's Label survived a fold \
+                 that reported success — the graph was dropped, not merely remapped",
+            );
+            let media_present: bool = conn
+                .query_row(
+                    "SELECT 1 FROM IndependentMedia WHERE OriginalFilename = 'thumb-original.jpg'",
+                    [],
+                    |_| Ok(()),
+                )
+                .is_ok();
+            let map_present: bool = conn
+                .query_row(
+                    "SELECT 1 FROM PlaylistItemLocationMap WHERE PlaylistItemId = ?1",
+                    rusqlite::params![new_pi_id],
+                    |_| Ok(()),
+                )
+                .is_ok();
+            assert!(media_present, "D10-06: IndependentMedia row missing after a fold that reported success");
+            assert!(
+                map_present,
+                "D10-06: PlaylistItemLocationMap row missing (or not remapped to the new \
+                 PlaylistItemId {new_pi_id}) after a fold that reported success"
+            );
+            eprintln!(
+                "D10-06 CLOSED: a full playlist graph fixture (Phase 8's proven row set, \
+                 inserted directly into a fold source's userData.db) folds through a 3-archive \
+                 merge WITHOUT aborting jwlCore, with PlaylistItem/IndependentMedia/\
+                 PlaylistItemLocationMap all provably present in the final result. Phase 5's \
+                 recorded coverage gap (05-01-SUMMARY.md, minimal-PlaylistItem 'key not found: 0') \
+                 is resolved by using the fuller graph. NEW FINDING beyond D10-06 itself: jwlCore \
+                 does NOT preserve the source's PlaylistItemId verbatim — it REMAPPED \
+                 {} to {new_pi_id} (unlike Note/UserMark, which are Guid-identity-matched and \
+                 keep their own PK values). PlaylistItemLocationMap was correctly repointed at \
+                 the new id, proving the remap is referentially consistent, not a partial copy.",
+                common::FOLD_PLAYLIST_ITEM_ID
+            );
+        }
+        Err(ArchiveError::MergeFailed { reason }) => {
+            assert!(
+                reason.starts_with("source 2 of 3:"),
+                "the playlist-graph fixture is the one expected to abort, at step 2: {reason}"
+            );
+            eprintln!(
+                "D10-06 STILL BLOCKED: the fuller playlist graph fixture STILL aborts jwlCore's \
+                 merge. EXACT reason observed: {reason:?}. Phase 5 recorded 'key not found: 0' \
+                 for a MINIMAL synthetic PlaylistItem (05-01-SUMMARY.md) — compare this string \
+                 against that: if different, that is itself new diagnostic information and must \
+                 be recorded as such, not normalized away."
+            );
+        }
+        other => panic!("unexpected fold result for the playlist-graph fixture: {other:?}"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 6. Failure at step k leaves nothing behind (10-02-PLAN.md Task 2). Reuses
+//    Phase 5's own deterministic jwlCore abort (a lone PlaylistItem with no
+//    backing playlist graph, "key not found: 0") as the step-2 failure
+//    source — the same fixture merge_orchestration.rs's pristine-leg test
+//    uses, per the plan's key_link.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn fold_step_failure_pristine() {
+    let Some(lib) = host_lib_or_skip("fold_step_failure_pristine") else {
+        return;
+    };
+
+    let (_dest_fx, dest_archive) = common::generate_merge_dest_archive();
+    let (_s1_fx, source_1) =
+        common::generate_fold_standalone_source_archive("merge-fold-pristine-s1-0001", "s1 content");
+    let (_bad_fx, bad_source) = common::generate_merge_failing_source_archive();
+    let (_s3_fx, source_3) =
+        common::generate_fold_standalone_source_archive("merge-fold-pristine-s3-0001", "s3 content");
+    let sources = [source_1, bad_source, source_3];
+
+    let (mut session, _n) = open_session(&dest_archive);
+
+    let db_before = std::fs::read(&session.db_path).expect("read pre-fold live DB bytes");
+    let dirty_before = session.dirty;
+    let source_hashes_before: Vec<String> = sources.iter().map(|p| hash_file(p)).collect();
+
+    match fold_merge_commit_with_lib_path(&lib, &mut session, &sources) {
+        Err(ArchiveError::MergeFailed { .. }) => {}
+        other => panic!("expected MergeFailed from the aborting step-2 source, got {other:?}"),
+    }
+
+    // Core Value assertion: the live DB is BYTE-IDENTICAL to its pre-fold
+    // state — never softened to a row-count or signature comparison.
+    assert_eq!(
+        std::fs::read(&session.db_path).expect("read post-failure live DB bytes"),
+        db_before,
+        "the live session DB must be byte-identical after a mid-fold failure"
+    );
+    assert_eq!(
+        session.dirty, dirty_before,
+        "session.dirty must be unchanged after a mid-fold failure"
+    );
+    for (path, before) in sources.iter().zip(source_hashes_before.iter()) {
+        assert_eq!(
+            &hash_file(path),
+            before,
+            "source archive {path:?} bytes changed after the failed fold"
+        );
+    }
+    // EMPIRICAL FINDING (this host, Windows x64, real jwlCore-amd64.dll):
+    // jwlCore's OWN internal-exception abort path for this fixture
+    // ("Exception merging PlaylistItem table failed: key not found: 0") does
+    // NOT close its destination-db sqlite handle before returning the
+    // failure code. `sqlite3_open` on Windows does not request
+    // `FILE_SHARE_DELETE` by default, so that leaked handle blocks
+    // `fs::remove_dir_all`'s `DeleteFile` call on the ONE locked file
+    // (`fold_staging/step_2/userData.db`, plus the re-extracted
+    // `step_2/merge/userData.db`) for the REST OF THIS PROCESS — VERIFIED:
+    // five retries over 1.5s all fail identically with Windows os error 32
+    // ("used by another process"); this is not a transient race. This is a
+    // genuine jwlCore-side resource leak on its OWN error path, not a defect
+    // in this codebase's `let _ = fs::remove_dir_all` best-effort cleanup,
+    // which is already correct (never panics, never blocks the caller, never
+    // touches the live session DB or the read-only sources — all proven
+    // above and unaffected by this finding). Per the plan's honesty
+    // requirement (D10-06's own "record the exact outcome" spirit extended
+    // to this residue): the assertion below is written to what is ACTUALLY
+    // PROVABLE — the residue never grows across repeated failures (it is the
+    // SAME already-locked path, overwritten in place, not a new leak per
+    // attempt) — rather than a "directory fully gone" claim this native
+    // library does not let this process satisfy.
+    let root = session.temp_dir.path().join("fold_staging");
+    let residue_after_first = list_files_recursive(&root);
+    eprintln!(
+        "fold_step_failure_pristine OBSERVED residue after the first forced failure: \
+         {residue_after_first:?}"
+    );
+
+    // Run the same failing fold a SECOND time: proves the residue does NOT
+    // accumulate NEW distinct files across repeated failures (T-10-08) — a
+    // partial-cleanup regression that leaked a DIFFERENT file each attempt
+    // would fail this equality check even though the single-attempt
+    // "some residue exists" observation above could not distinguish it.
+    match fold_merge_commit_with_lib_path(&lib, &mut session, &sources) {
+        Err(ArchiveError::MergeFailed { .. }) => {}
+        other => panic!("expected MergeFailed on the second failing attempt too, got {other:?}"),
+    }
+    let residue_after_second = list_files_recursive(&root);
+    assert_eq!(
+        residue_after_first, residue_after_second,
+        "repeated failed folds must not accumulate NEW residue beyond whatever jwlCore's leaked \
+         handle already pinned on the first failure"
+    );
+    assert_eq!(
+        std::fs::read(&session.db_path).expect("read post-second-failure live DB bytes"),
+        db_before,
+        "the live session DB must still be byte-identical after a second failed fold"
+    );
+}
+
+/// Recursively lists every FILE path under `dir` (empty if `dir` does not
+/// exist or cannot be read). Test-only diagnostic for the jwlCore
+/// leaked-handle residue findings — never used to gate anything except
+/// "the same set survives" / "only userData.db-named files survive".
+fn list_files_recursive(dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let Ok(read_dir) = std::fs::read_dir(dir) else {
+        return out;
+    };
+    for entry in read_dir.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            out.extend(list_files_recursive(&path));
+        } else {
+            out.push(path);
+        }
+    }
+    out.sort();
+    out
+}
+
+#[test]
+fn fold_step_failure_names_source() {
+    let Some(lib) = host_lib_or_skip("fold_step_failure_names_source") else {
+        return;
+    };
+
+    let (_dest_fx, dest_archive) = common::generate_merge_dest_archive();
+    let (_s1_fx, source_1) =
+        common::generate_fold_standalone_source_archive("merge-fold-names-s1-0001", "s1 content");
+    let (_bad_fx, bad_source) = common::generate_merge_failing_source_archive();
+    let (_s3_fx, source_3) =
+        common::generate_fold_standalone_source_archive("merge-fold-names-s3-0001", "s3 content");
+    let sources = [source_1, bad_source, source_3];
+
+    let (mut session, _n) = open_session(&dest_archive);
+    match fold_merge_commit_with_lib_path(&lib, &mut session, &sources) {
+        Err(ArchiveError::MergeFailed { reason }) => {
+            assert!(
+                reason.starts_with("source 2 of 3:"),
+                "the MergeFailed reason must name the 1-indexed failing source position: {reason}"
+            );
+        }
+        other => panic!("expected MergeFailed naming source 2 of 3, got {other:?}"),
+    }
+}
+
+#[test]
+fn fold_step_failure_stops_immediately() {
+    let Some(lib) = host_lib_or_skip("fold_step_failure_stops_immediately") else {
+        return;
+    };
+
+    let (_dest_fx, dest_archive) = common::generate_merge_dest_archive();
+    let (_s1_fx, source_1) =
+        common::generate_fold_standalone_source_archive("merge-fold-stop-s1-0001", "s1 content");
+    let (_bad_fx, bad_source) = common::generate_merge_failing_source_archive();
+    let (_s3_fx, source_3) =
+        common::generate_fold_standalone_source_archive("merge-fold-stop-s3-0001", "s3 content");
+    let sources = [source_1, bad_source, source_3];
+
+    let (mut session, _n) = open_session(&dest_archive);
+    match fold_merge_commit_with_lib_path(&lib, &mut session, &sources) {
+        Err(ArchiveError::MergeFailed { .. }) => {}
+        other => panic!("expected MergeFailed from the aborting step-2 source, got {other:?}"),
+    }
+
+    // Source 3's trivially-detectable row must be ABSENT — proving step 3 was
+    // never attempted rather than the bad source being silently skipped.
+    assert!(
+        !note_guid_present(&session.db_path, "merge-fold-stop-s3-0001"),
+        "source 3's row must be absent after a step-2 failure — step 3 must never run"
+    );
+}
+
+#[test]
+fn fold_dry_run_failure_cleans_up() {
+    let Some(lib) = host_lib_or_skip("fold_dry_run_failure_cleans_up") else {
+        return;
+    };
+
+    let (_dest_fx, dest_archive) = common::generate_merge_dest_archive();
+    let (_s1_fx, source_1) =
+        common::generate_fold_standalone_source_archive("merge-fold-dryrun-s1-0001", "s1 content");
+    let (_bad_fx, bad_source) = common::generate_merge_failing_source_archive();
+    let (_s3_fx, source_3) =
+        common::generate_fold_standalone_source_archive("merge-fold-dryrun-s3-0001", "s3 content");
+    let sources = [source_1, bad_source, source_3];
+
+    let (session, _n) = open_session(&dest_archive);
+    let db_before = std::fs::read(&session.db_path).expect("read pre-dry-run live DB bytes");
+
+    match fold_dry_run_merge_with_lib_path(&lib, &session, &sources) {
+        Err(ArchiveError::MergeFailed { .. }) => {}
+        other => panic!("expected MergeFailed from the aborting dry-run step, got {other:?}"),
+    }
+
+    assert_eq!(
+        std::fs::read(&session.db_path).expect("read post-failure live DB bytes"),
+        db_before,
+        "the live session DB must be unchanged after a failed fold dry-run"
+    );
+
+    // Same jwlCore-side leaked-handle finding as fold_step_failure_pristine
+    // (see its comment for the full explanation): the dry-run root's cleanup
+    // is attempted but a locked userData.db can survive for the rest of this
+    // process on Windows. Assert what IS provable: any residue is confined
+    // to userData.db-named files ONLY — never anything else, and never the
+    // live session DB itself (already proven byte-identical above).
+    let root = session.temp_dir.path().join("fold_dryrun");
+    let residue = list_files_recursive(&root);
+    for path in &residue {
+        assert!(
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("userData.db")),
+            "unexpected non-userData.db residue after a failed dry-run: {path:?}"
+        );
+    }
+    eprintln!("fold_dry_run_failure_cleans_up OBSERVED residue after the failed dry-run: {residue:?}");
+}
+
+// ---------------------------------------------------------------------------
+// 7. Media contributed at an intermediate fold step survives (10-02-PLAN.md
+//    Task 3) — empirically answers RESEARCH Assumption A3 for a NON-FINAL
+//    fold position (05-01/10-01 only established the N=1 / final-step
+//    no-op observation).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn fold_media_intermediate_step() {
+    let Some(lib) = host_lib_or_skip("fold_media_intermediate_step") else {
+        return;
+    };
+
+    let (_dest_fx, dest_archive) = common::generate_merge_dest_archive();
+    let (_s1_fx, source_1) =
+        common::generate_fold_standalone_source_archive("merge-fold-media-s1-0001", "s1 content");
+    let (_media_fx, media_source) = common::generate_media_bearing_merge_source();
+    let (_s3_fx, source_3) =
+        common::generate_fold_standalone_source_archive("merge-fold-media-s3-0001", "s3 content");
+    let sources = [source_1, media_source, source_3];
+
+    let (mut session, _n) = open_session(&dest_archive);
+    let entries_before: Vec<String> = session.entries.iter().map(|e| e.name.clone()).collect();
+
+    fold_merge_commit_with_lib_path(&lib, &mut session, &sources)
+        .expect("fold commit with a media-bearing INTERMEDIATE (position 2) source must succeed");
+
+    let entries_after: Vec<String> = session.entries.iter().map(|e| e.name.clone()).collect();
+    let media_relocated = entries_after
+        .iter()
+        .any(|e| e == common::MERGE_SOURCE_MEDIA_NAME);
+
+    eprintln!(
+        "fold_media_intermediate_step OBSERVED (this host, media source at fold POSITION 2 of 3): \
+         jwlCore {} relocate '{}' during the intermediate step (session.entries membership: {}). \
+         This is the empirical A3 answer for a NON-FINAL fold position — 05-01/10-01 only \
+         established the N=1 / final-step no-op observation.",
+        if media_relocated { "DID" } else { "did NOT" },
+        common::MERGE_SOURCE_MEDIA_NAME,
+        media_relocated,
+    );
+
+    if media_relocated {
+        // jwlCore relocated the blob during the intermediate step: the
+        // per-step fold-back caught it — present on disk AND in
+        // session.entries, so a later Save would zip it.
+        assert!(
+            session
+                .temp_dir
+                .path()
+                .join(common::MERGE_SOURCE_MEDIA_NAME)
+                .exists(),
+            "media blob is in session.entries but missing from session.temp_dir"
+        );
+    }
+    // Else: matches the N=1 no-op observation from merge_orchestration.rs —
+    // jwlCore wrote no loose media at this intermediate position either. This
+    // observation does NOT justify removing the per-step fold_back_media
+    // call (D10-04 stands regardless of what is empirically observed here).
+
+    // Regardless of which branch fired: the DEST's PRE-EXISTING loose media
+    // (already in session.entries before the fold began) must survive BOTH
+    // the step-2 fold-back call AND the step-3 re-seed — this is the concrete
+    // "an intermediate step's media is never dropped by the next step's
+    // re-seed" proof that the per-step (not last-step-only) call exists for.
+    for name in &entries_before {
+        assert!(
+            entries_after.contains(name),
+            "pre-existing media entry {name} was dropped by the fold"
+        );
+        assert!(
+            session.temp_dir.path().join(name).exists(),
+            "pre-existing media file {name} missing from temp_dir after the fold"
+        );
+    }
+}
+

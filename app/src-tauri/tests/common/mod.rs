@@ -1891,6 +1891,109 @@ pub fn generate_fold_contested_pair() -> ((TempDir, PathBuf), (TempDir, PathBuf)
 }
 
 // ---------------------------------------------------------------------------
+// FOLD PLAYLIST-GRAPH fixture (10-02-PLAN.md D10-06) — reuses Phase 8's
+// `build_container` ROW SET (PlaylistItemAccuracy, PlaylistItem with
+// ThumbnailFilePath, IndependentMedia, Location, PlaylistItemLocationMap +
+// the thumbnail file), inserted DIRECTLY into a fold source archive's
+// `userData.db` via parameterized SQL — NOT routed through the
+// `.jwlplaylist` export path (a fold operates on full-archive rows, not a
+// playlist container). Phase 8's `playlist_import_tests.rs::build_container`
+// is NOT modified; this is an independent re-authoring of the same row shape
+// for a different (full-archive-merge) purpose.
+// ---------------------------------------------------------------------------
+
+/// Fixed identities for the fold playlist-graph fixture (10-02-PLAN.md).
+pub const FOLD_PLAYLIST_ITEM_ID: i64 = 9000;
+pub const FOLD_PLAYLIST_MEDIA_ID: i64 = 9010;
+pub const FOLD_PLAYLIST_LOCATION_ID: i64 = 9020;
+pub const FOLD_PLAYLIST_THUMB_NAME: &str = "thumb.jpg";
+
+/// Full `.jwlibrary` fold SOURCE archive carrying a FULL playlist graph
+/// (Phase 8's proven row set): `PlaylistItemAccuracy`, a `PlaylistItem` with
+/// a `ThumbnailFilePath`, its backing `IndependentMedia` row, a `Location`,
+/// and the linking `PlaylistItemLocationMap` row — plus the thumbnail file
+/// itself as an archive member at the root (matching where
+/// `IndependentMedia.FilePath` points). This is the D10-06 attempt: Phase 5
+/// only ever tried a MINIMAL synthetic `PlaylistItem` (which jwlCore aborted
+/// with `"key not found: 0"`); this is the first attempt with a fuller,
+/// Phase-8-proven graph.
+pub fn generate_fold_playlist_graph_source() -> (TempDir, PathBuf) {
+    let work_dir = TempDir::new().expect("create fold playlist-graph source work dir");
+    seed_from_res_blank(work_dir.path());
+    let db_path = work_dir.path().join("userData.db");
+    {
+        let conn = Connection::open(&db_path).expect("open fold playlist-graph source db");
+        conn.execute_batch("PRAGMA foreign_keys = OFF")
+            .expect("fk off");
+        conn.execute(
+            "INSERT INTO PlaylistItemAccuracy (PlaylistItemAccuracyId, Description) \
+             VALUES (1, 'Exact')",
+            [],
+        )
+        .expect("insert PlaylistItemAccuracy");
+        conn.execute(
+            "INSERT INTO PlaylistItem (PlaylistItemId, Label, StartTrimOffsetTicks, \
+             EndTrimOffsetTicks, Accuracy, EndAction, ThumbnailFilePath) \
+             VALUES (?1, 'Fold Playlist Item', NULL, NULL, 1, 1, ?2)",
+            rusqlite::params![FOLD_PLAYLIST_ITEM_ID, FOLD_PLAYLIST_THUMB_NAME],
+        )
+        .expect("insert fold playlist-graph PlaylistItem");
+        conn.execute(
+            "INSERT INTO IndependentMedia (IndependentMediaId, OriginalFilename, FilePath, \
+             MimeType, Hash) VALUES (?1, 'thumb-original.jpg', ?2, 'image/jpeg', \
+             'hash-fold-playlist-fixed')",
+            rusqlite::params![FOLD_PLAYLIST_MEDIA_ID, FOLD_PLAYLIST_THUMB_NAME],
+        )
+        .expect("insert fold playlist-graph IndependentMedia");
+        conn.execute(
+            "INSERT INTO Location (LocationId, BookNumber, ChapterNumber, DocumentId, Track, \
+             IssueTagNumber, KeySymbol, MepsLanguage, Type, Title, Specialty, Edition) \
+             VALUES (?1, 1, 1, NULL, NULL, 0, 'nwt', 0, 0, 'Genesis 1:1', NULL, NULL)",
+            rusqlite::params![FOLD_PLAYLIST_LOCATION_ID],
+        )
+        .expect("insert fold playlist-graph Location");
+        conn.execute(
+            "INSERT INTO PlaylistItemLocationMap (PlaylistItemId, LocationId, \
+             MajorMultimediaType, BaseDurationTicks) VALUES (?1, ?2, 1, 12345)",
+            rusqlite::params![FOLD_PLAYLIST_ITEM_ID, FOLD_PLAYLIST_LOCATION_ID],
+        )
+        .expect("insert fold playlist-graph PlaylistItemLocationMap");
+    }
+    fs::write(work_dir.path().join(FOLD_PLAYLIST_THUMB_NAME), b"fake-thumb-bytes-fold-fixture")
+        .expect("write fold playlist-graph thumbnail file");
+
+    // Bespoke archive assembly (like generate_media_bearing_merge_source) so
+    // the thumbnail file can be included as an extra root-level member beyond
+    // build_fixture_archive's fixed entry set.
+    let archive_dir = TempDir::new().expect("create fold playlist-graph archive dir");
+    let archive_path = archive_dir.path().join("fixture.jwlibrary");
+    let zip_file = fs::File::create(&archive_path).expect("create fold playlist-graph archive");
+    let mut writer = ZipWriter::new(zip_file);
+    let options = SimpleFileOptions::default();
+
+    writer
+        .start_file("manifest.json", options)
+        .expect("start manifest");
+    writer
+        .write_all(synthetic_manifest_json().as_bytes())
+        .expect("write manifest");
+    for name in ["userData.db", "default_thumbnail.png"] {
+        writer.start_file(name, options).expect("start entry");
+        let bytes = fs::read(work_dir.path().join(name)).expect("read seeded entry");
+        writer.write_all(&bytes).expect("write entry");
+    }
+    writer
+        .start_file(FOLD_PLAYLIST_THUMB_NAME, options)
+        .expect("start playlist thumbnail entry");
+    writer
+        .write_all(&fs::read(work_dir.path().join(FOLD_PLAYLIST_THUMB_NAME)).unwrap())
+        .expect("write playlist thumbnail entry");
+    writer.finish().expect("finish fold playlist-graph archive");
+
+    (archive_dir, archive_path)
+}
+
+// ---------------------------------------------------------------------------
 // Zip-slip fixture generator (6 variants, D-08)
 // ---------------------------------------------------------------------------
 
