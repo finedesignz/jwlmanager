@@ -7,11 +7,13 @@ pub mod archive;
 pub mod category;
 pub mod db;
 pub mod error;
+pub mod guid;
 pub mod jwlcore;
 pub mod session;
 pub mod time;
 
 use category::Category;
+use db::color::{ColorSelection, NonEmptyBlockRangeIds};
 use db::delete::NonEmptyNoteIds;
 use db::edit::DryRunReport;
 use db::favorites::{FavoriteEditionRef, NonEmptyTagMapIds};
@@ -21,6 +23,19 @@ use session::{ArchiveSession, SessionState};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Wall-clock-derived seed for [`guid::format_guid_v4`], threaded through
+/// exactly like `now: &str` is threaded at `save_archive`/`save_as` above —
+/// the command layer is the ONLY place that reaches for real time; every
+/// core `db::color` function takes `guid_seed: u64` as a plain parameter so
+/// tests can supply a fixed literal instead (07-RESEARCH.md Shared Pattern 6).
+fn guid_seed_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(0)
+}
 
 /// Fixed app identity used for `manifest.json`'s `name`/`deviceName` fields
 /// on every save (mirrors `JWLManager.py:28-29`'s `APP`/`VERSION` constants).
@@ -488,6 +503,159 @@ fn favorite_add_apply(
     Ok(report)
 }
 
+/// Previews the effect of a recolor WITHOUT mutating the working copy
+/// (SAFE-01, EDIT-02): opens the session's `db_path`, runs the real
+/// `apply_color` + `trim_sweep` inside a rolled-back transaction, and returns
+/// the resulting semantic [`DryRunReport`]. `selection` cannot be empty per
+/// category — an empty array fails IPC deserialization before this command
+/// body ever runs, because [`ColorSelection`]'s per-variant `ids` field is a
+/// typed non-empty wrapper.
+#[tauri::command]
+fn color_dry_run(
+    selection: ColorSelection,
+    color_index: i64,
+    state: tauri::State<SessionState>,
+) -> Result<DryRunReport, ErrorDto> {
+    let guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("color_dry_run", None))?;
+    let session = guard.as_ref().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("color_dry_run", None)
+    })?;
+
+    let mut conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err).to_dto("color_dry_run", Some(session.target_path.as_path()))
+    })?;
+
+    db::color::dry_run_color(&mut conn, &selection, color_index, guid_seed_now())
+        .map_err(|err| err.to_dto("color_dry_run", Some(session.target_path.as_path())))
+}
+
+/// Applies a recolor — the committed counterpart to [`color_dry_run`]
+/// (EDIT-02). Marks the session dirty on success.
+#[tauri::command]
+fn color_apply(
+    selection: ColorSelection,
+    color_index: i64,
+    state: tauri::State<SessionState>,
+) -> Result<DryRunReport, ErrorDto> {
+    let mut guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("color_apply", None))?;
+    let session = guard.as_mut().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("color_apply", None)
+    })?;
+
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err).to_dto("color_apply", Some(session.target_path.as_path()))
+    })?;
+
+    let guard_pragma = db::pragma_guard::PragmaGuard::new(&conn).map_err(|err| {
+        error::ArchiveError::from(err).to_dto("color_apply", Some(session.target_path.as_path()))
+    })?;
+    conn.execute_batch("PRAGMA foreign_keys = 'OFF';")
+        .map_err(|err| {
+            error::ArchiveError::from(err)
+                .to_dto("color_apply", Some(session.target_path.as_path()))
+        })?;
+
+    let tx = conn.unchecked_transaction().map_err(|err| {
+        error::ArchiveError::from(err).to_dto("color_apply", Some(session.target_path.as_path()))
+    })?;
+    let report = db::color::apply_color_reporting(&tx, &selection, color_index, guid_seed_now())
+        .map_err(|err| err.to_dto("color_apply", Some(session.target_path.as_path())))?;
+    tx.commit().map_err(|err| {
+        error::ArchiveError::from(err).to_dto("color_apply", Some(session.target_path.as_path()))
+    })?;
+    drop(guard_pragma);
+
+    session.dirty = true;
+
+    Ok(report)
+}
+
+/// Previews the effect of deleting the given Highlights selection WITHOUT
+/// mutating the working copy (SAFE-01, D7-10): removes `BlockRange` rows
+/// only, never `UserMark` (rule #9).
+#[tauri::command]
+fn highlight_delete_dry_run(
+    ids: NonEmptyBlockRangeIds,
+    state: tauri::State<SessionState>,
+) -> Result<DryRunReport, ErrorDto> {
+    let guard = state.lock().map_err(|_| {
+        error::ArchiveError::StatePoisoned.to_dto("highlight_delete_dry_run", None)
+    })?;
+    let session = guard.as_ref().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("highlight_delete_dry_run", None)
+    })?;
+
+    let mut conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("highlight_delete_dry_run", Some(session.target_path.as_path()))
+    })?;
+
+    db::delete::dry_run_delete_highlights(&mut conn, &ids).map_err(|err| {
+        err.to_dto("highlight_delete_dry_run", Some(session.target_path.as_path()))
+    })
+}
+
+/// Applies the delete of the given Highlights selection — a single
+/// `DELETE FROM BlockRange` committed inside its own transaction (D7-10).
+/// Marks the session dirty on success.
+#[tauri::command]
+fn highlight_delete_apply(
+    ids: NonEmptyBlockRangeIds,
+    state: tauri::State<SessionState>,
+) -> Result<DryRunReport, ErrorDto> {
+    let mut guard = state.lock().map_err(|_| {
+        error::ArchiveError::StatePoisoned.to_dto("highlight_delete_apply", None)
+    })?;
+    let session = guard.as_mut().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("highlight_delete_apply", None)
+    })?;
+
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("highlight_delete_apply", Some(session.target_path.as_path()))
+    })?;
+
+    let guard_pragma = db::pragma_guard::PragmaGuard::new(&conn).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("highlight_delete_apply", Some(session.target_path.as_path()))
+    })?;
+    conn.execute_batch("PRAGMA foreign_keys = 'OFF';")
+        .map_err(|err| {
+            error::ArchiveError::from(err)
+                .to_dto("highlight_delete_apply", Some(session.target_path.as_path()))
+        })?;
+
+    let tx = conn.unchecked_transaction().map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("highlight_delete_apply", Some(session.target_path.as_path()))
+    })?;
+    let deleted = db::delete::delete_highlights(&tx, &ids).map_err(|err| {
+        err.to_dto("highlight_delete_apply", Some(session.target_path.as_path()))
+    })?;
+    tx.commit().map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("highlight_delete_apply", Some(session.target_path.as_path()))
+    })?;
+    drop(guard_pragma);
+
+    session.dirty = true;
+
+    let mut deleted_map = BTreeMap::new();
+    if deleted > 0 {
+        deleted_map.insert("BlockRange".to_string(), deleted);
+    }
+    Ok(DryRunReport {
+        added: BTreeMap::new(),
+        overwritten: BTreeMap::new(),
+        deleted: deleted_map,
+        total_deleted: deleted,
+    })
+}
+
 /// Previews the effect of downgrading the open session to v14 WITHOUT mutating
 /// the working copy (D4-08): opens the session's `db_path` and runs the real
 /// trim + merge inside a rolled-back transaction (trim-FIRST, identical order to
@@ -614,6 +782,10 @@ pub fn run() {
             list_favorite_editions,
             favorite_add_dry_run,
             favorite_add_apply,
+            color_dry_run,
+            color_apply,
+            highlight_delete_dry_run,
+            highlight_delete_apply,
             downgrade_dry_run,
             save_v14_copy,
             merge_dry_run,

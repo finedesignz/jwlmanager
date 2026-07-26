@@ -51,13 +51,18 @@ const NEEDS_SELECTION: ReadonlySet<Op> = new Set<Op>([
  * The (category, op) pairs wired to a real backend mutation. Keyed as
  * `${Category}:${Op}`. Everything not in this set renders deferred.
  * `Notes:delete` shipped in Phase 2; `Favorites:delete` (EDIT-05 unmark)
- * and `Favorites:add` (EDIT-05 mark) land in 07-01-PLAN.md. `Playlists:add`
+ * and `Favorites:add` (EDIT-05 mark) land in 07-01-PLAN.md. `Notes:color` /
+ * `Highlights:color` (EDIT-02 recolor) and `Highlights:delete` (D7-10,
+ * BlockRange-only, rule #9) land in 07-02-PLAN.md. `Playlists:add`
  * (media add) stays deferred — Phase 8 (D7-06/D7-10).
  */
 const LIVE: ReadonlySet<string> = new Set<string>([
   "Notes:delete",
+  "Notes:color",
   "Favorites:delete",
   "Favorites:add",
+  "Highlights:color",
+  "Highlights:delete",
 ]);
 
 /** A single entry in the contextual operation bar. */

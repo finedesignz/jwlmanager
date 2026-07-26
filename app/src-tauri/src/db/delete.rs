@@ -36,6 +36,7 @@
 //! (07-01-PLAN.md Task 1 — the shared safety spine every Phase 7 edit op
 //! reuses); this module imports them rather than defining them.
 
+use crate::db::color::NonEmptyBlockRangeIds;
 use crate::db::edit::{diff_snapshots, snapshot_all, DryRunReport};
 use crate::db::pragma_guard::PragmaGuard;
 use crate::db::trim::trim_sweep;
@@ -149,6 +150,65 @@ pub fn dry_run_delete_notes(
     // nothing above is ever persisted (SAFE-01).
     drop(tx);
     // Restores the snapshotted PRIOR pragma values.
+    drop(guard);
+
+    Ok(report)
+}
+
+/// Deletes EXACTLY the selected `BlockRange` rows and NOTHING else — NEVER
+/// `UserMark` (rule #9: Highlights delete targets the range geometry only; a
+/// `UserMark` left with zero remaining `BlockRange`s becomes an orphan swept
+/// later by `trim_sweep`/`trim_db` on save, exactly like the deliberate
+/// Notes-delete scope decision above). Ports the Highlights branch of
+/// `delete_items` (`JWLManager.py:3658-3671`, `BlockRange`/`BlockRangeId`,
+/// D7-10). Uses [`crate::db::color::NonEmptyBlockRangeIds`] — the same
+/// identity-PK wrapper Highlights recolor (`db::color`) already owns, rather
+/// than defining a second identical type.
+pub fn delete_highlights(
+    tx: &Transaction,
+    ids: &NonEmptyBlockRangeIds,
+) -> Result<usize, ArchiveError> {
+    let placeholders: String = std::iter::repeat_n("?", ids.len())
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!("DELETE FROM BlockRange WHERE BlockRangeId IN ({placeholders})");
+    tx.execute(&sql, rusqlite::params_from_iter(ids.iter()))
+        .map_err(|e| map_sqlite_err(e, "delete_highlights"))
+}
+
+/// Runs the REAL `delete_highlights` + `trim_sweep` inside a transaction that
+/// is NEVER committed (SAFE-01) and returns a SEMANTIC [`DryRunReport`] over
+/// the DEFAULT [`TRACKED_TABLES`] set (like [`dry_run_delete_notes`]) —
+/// broad enough to also surface any `trim_sweep` orphan-fallout (e.g. a
+/// `UserMark` now orphaned because its last `BlockRange` was just removed)
+/// truthfully in the preview, without this function needing its own narrower
+/// per-op table set.
+pub fn dry_run_delete_highlights(
+    conn: &mut Connection,
+    ids: &NonEmptyBlockRangeIds,
+) -> Result<DryRunReport, ArchiveError> {
+    let guard = PragmaGuard::new(conn).map_err(|e| map_sqlite_err(e, "snapshotting pragmas"))?;
+
+    conn.execute_batch(
+        "PRAGMA temp_store = 'MEMORY'; \
+         PRAGMA synchronous = 'OFF'; \
+         PRAGMA journal_mode = 'MEMORY'; \
+         PRAGMA foreign_keys = 'OFF';",
+    )
+    .map_err(|e| map_sqlite_err(e, "setting dry-run pragmas"))?;
+
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| map_sqlite_err(e, "opening dry-run transaction"))?;
+
+    let before = snapshot_all(&tx)?;
+    delete_highlights(&tx, ids)?;
+    trim_sweep(&tx)?;
+    let after = snapshot_all(&tx)?;
+
+    let report = diff_snapshots(&before, &after);
+
+    drop(tx);
     drop(guard);
 
     Ok(report)

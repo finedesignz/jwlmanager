@@ -5,6 +5,7 @@ import type { BrowseRow } from "../bindings/BrowseRow";
 import type { Category } from "../bindings/Category";
 import type { DryRunReport } from "../bindings/DryRunReport";
 import type { ErrorDto } from "../bindings/ErrorDto";
+import ColorMenu from "./ColorMenu";
 import EditPreviewDialog from "./EditPreviewDialog";
 import FavoriteAddDialog from "./FavoriteAddDialog";
 import { operationSet, type Op } from "../lib/operations";
@@ -42,15 +43,19 @@ const OP_LABEL: Record<Op, string> = {
  * The `(dryRun, apply)` Tauri command pair backing the LIVE "delete" op for
  * each category, keyed by category. Notes shipped in Phase 2
  * (`delete_notes_dry_run`/`delete_notes_apply`); Favorites lands in
- * 07-01-PLAN.md Task 1 (`favorite_remove_dry_run`/`favorite_remove_apply`).
- * More categories are added here as their own delete backend lands (D7-10)
- * — the render/dispatch logic below never hardcodes a category name; it only
- * asks "is this (category, op) pair LIVE?" (`operations.ts`'s `deferred`
- * flag) and, if so, looks up which commands to invoke here.
+ * 07-01-PLAN.md Task 1 (`favorite_remove_dry_run`/`favorite_remove_apply`);
+ * Highlights lands in 07-02-PLAN.md Task 3
+ * (`highlight_delete_dry_run`/`highlight_delete_apply`, D7-10 — targets
+ * `BlockRange` only, never `UserMark`, rule #9). More categories are added
+ * here as their own delete backend lands — the render/dispatch logic below
+ * never hardcodes a category name; it only asks "is this (category, op)
+ * pair LIVE?" (`operations.ts`'s `deferred` flag) and, if so, looks up which
+ * commands to invoke here.
  */
 const DELETE_COMMANDS: Partial<Record<Category, { dryRun: string; apply: string }>> = {
   Notes: { dryRun: "delete_notes_dry_run", apply: "delete_notes_apply" },
   Favorites: { dryRun: "favorite_remove_dry_run", apply: "favorite_remove_apply" },
+  Highlights: { dryRun: "highlight_delete_dry_run", apply: "highlight_delete_apply" },
 };
 
 /**
@@ -136,6 +141,11 @@ export default function CategoryList({
   // it gets its own show/hide flag rather than reusing `report` (which is
   // scoped to the selection-scoped delete flow above).
   const [showFavoriteDialog, setShowFavoriteDialog] = useState(false);
+  // "Color" (EDIT-02) — its own popover show/hide flag; ColorMenu owns its
+  // OWN dry-run/preview/apply flow internally once open, same shape as
+  // FavoriteAddDialog.
+  const [showColorMenu, setShowColorMenu] = useState(false);
+  const colorButtonRef = useRef<HTMLButtonElement>(null);
 
   // D6-05: switching categories clears stale integer keys that would collide
   // across categories (a BookmarkId means nothing in the Highlights list).
@@ -157,6 +167,7 @@ export default function CategoryList({
     setSelected(new Set());
     setReport(null);
     setShowFavoriteDialog(false);
+    setShowColorMenu(false);
   }
 
   const virtualizer = useVirtualizer({
@@ -274,6 +285,42 @@ export default function CategoryList({
               >
                 {resolveOpLabel(state.op, category)}
               </button>
+            );
+          }
+          // "Color" (EDIT-02, Notes + Highlights) — a relatively-positioned
+          // wrapper so ColorMenu's popover can anchor below-left of the
+          // trigger button (07-UI-SPEC.md: mirrors Python's own
+          // `mapToGlobal(...bottomLeft())` anchor point) without a portal.
+          if (state.op === "color" && !state.deferred) {
+            return (
+              <span key={state.op} style={{ position: "relative", display: "inline-block" }}>
+                <button
+                  ref={colorButtonRef}
+                  type="button"
+                  className="toolbar-button category-list-color-button"
+                  onClick={() => setShowColorMenu(true)}
+                  disabled={!state.enabled}
+                  data-testid="category-list-color-button"
+                >
+                  {resolveOpLabel(state.op, category)}
+                </button>
+                {showColorMenu && (
+                  <ColorMenu
+                    category={category}
+                    selectedIds={Array.from(selected)}
+                    onApplied={(freshRows) => {
+                      setShowColorMenu(false);
+                      setSelected(new Set());
+                      onRowsChanged?.(freshRows);
+                    }}
+                    onCancel={() => {
+                      setShowColorMenu(false);
+                      colorButtonRef.current?.focus();
+                    }}
+                    onError={(err) => onError?.(err)}
+                  />
+                )}
+              </span>
             );
           }
           // Every other op is surfaced-but-deferred (no backend mutation yet).

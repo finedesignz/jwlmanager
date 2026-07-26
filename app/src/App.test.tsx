@@ -191,14 +191,17 @@ describe("App — DATA-07 end-to-end (mocked IPC)", () => {
     expect(deleteButton).toBeEnabled();
     expect(deleteButton).toHaveTextContent("Delete (1)");
 
-    // Switch to Highlights: no live delete affordance; the delete op is deferred.
+    // Switch to Highlights: delete is ALSO live here (07-02-PLAN.md D7-10),
+    // routed through the same shared delete-button dispatch — but `export`
+    // (never made live this phase) stays a deferred affordance, proving the
+    // op-bar still renders the deferred branch for whatever ISN'T live.
     fireEvent.click(screen.getByTestId("category-switcher-option-Highlights"));
     await screen.findByText(/Highlighted Passage Alpha/);
 
-    expect(screen.queryByTestId("category-list-delete-button")).not.toBeInTheDocument();
-    const deferredDelete = screen.getByTestId("category-list-op-delete");
-    expect(deferredDelete).toHaveAttribute("data-deferred", "true");
-    expect(deferredDelete).toBeDisabled();
+    expect(screen.getByTestId("category-list-delete-button")).toBeInTheDocument();
+    const deferredExport = screen.getByTestId("category-list-op-export");
+    expect(deferredExport).toHaveAttribute("data-deferred", "true");
+    expect(deferredExport).toBeDisabled();
   });
 
   it("Notes delete still works end-to-end through the shell (dry-run → confirm → row removed)", async () => {

@@ -444,3 +444,72 @@ body {
   justify-content: flex-end;
   gap: var(--space-sm);
 }
+
+/* Color Menu (EDIT-02, 07-02-PLAN.md Task 3). First popover in the app (not
+   a modal — no backdrop): anchored below-left of its trigger button by the
+   caller's `position: relative` wrapper (`CategoryList.tsx`), 8px radius
+   (button-scale chrome, per UI-SPEC's "new popovers: 8px" rule, distinct
+   from dialogs' existing 12px), and the app's FIRST box-shadow — a floating
+   surface with no backdrop genuinely needs one for depth legibility. */
+.color-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: var(--space-xs);
+  min-width: 12em;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-hairline);
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  padding: var(--space-xs) 0;
+  display: flex;
+  flex-direction: column;
+  z-index: 20;
+}
+
+.color-menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  height: 44px;
+  padding: 0 var(--space-md);
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.color-menu-item:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+}
+
+.color-menu-item:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: -2px;
+}
+
+.color-menu-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* New color swatch metric (UI-SPEC Spacing Scale exceptions): 20x20px
+   visible square, 4px radius — extends this app's own rectangle shape
+   language rather than the Python's circular swatch. */
+.color-menu-swatch {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border-radius: 4px;
+}
+
+.color-menu-item-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}

@@ -11,12 +11,14 @@ describe("operationSet (D6-08 capability descriptor)", () => {
       expect(byOp.has(op), `Notes should surface ${op}`).toBe(true);
     }
 
-    // delete is LIVE but needs a selection: not deferred, but disabled at 0.
+    // delete and color are LIVE but need a selection: not deferred, but
+    // disabled at 0 (07-02-PLAN.md: Notes:color).
     expect(byOp.get("delete")).toMatchObject({ deferred: false, enabled: false });
+    expect(byOp.get("color")).toMatchObject({ deferred: false, enabled: false });
 
-    // Every op OTHER than delete is deferred (not in the LIVE set).
+    // Every op OTHER than delete/color is deferred (not in the LIVE set).
     for (const o of ops) {
-      if (o.op === "delete") continue;
+      if (o.op === "delete" || o.op === "color") continue;
       expect(o.deferred, `${o.op} should be deferred`).toBe(true);
       expect(o.enabled, `${o.op} should be disabled`).toBe(false);
     }
@@ -69,7 +71,14 @@ describe("operationSet (D6-08 capability descriptor)", () => {
     // Mirrors operations.ts's own LIVE set — kept as an explicit local list
     // (rather than importing LIVE, which is module-private) so this test
     // fails loudly the moment a new pair is flipped live without updating it.
-    const LIVE_PAIRS = new Set(["Notes:delete", "Favorites:delete", "Favorites:add"]);
+    const LIVE_PAIRS = new Set([
+      "Notes:delete",
+      "Notes:color",
+      "Favorites:delete",
+      "Favorites:add",
+      "Highlights:color",
+      "Highlights:delete",
+    ]);
     for (const cat of [
       "Notes",
       "Bookmarks",
