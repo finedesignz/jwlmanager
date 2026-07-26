@@ -206,12 +206,36 @@ fn stage_and_merge(
     source_archive: &Path,
     root: &Path,
 ) -> Result<(), ArchiveError> {
-    fs::copy(&session.db_path, root.join("userData.db"))?;
+    stage_and_merge_from(lib_path, &session.db_path, source_archive, root)
+}
+
+/// Generalized [`stage_and_merge`]: copies `copy_from` into `root/userData.db`
+/// (rather than always `session.db_path`), extracts the (untrusted, READ-ONLY)
+/// `source_archive` zip-slip-safely under `root/merge/`, then runs the REAL
+/// jwlCore merge of the source INTO the copy in place. `stage_and_merge` is a
+/// one-line delegation to this function with `copy_from = &session.db_path`,
+/// so every Phase 5 call site and test behaves bit-identically.
+///
+/// This is the primitive an N-way fold chains: step 1's `copy_from` is
+/// `session.db_path` (the live session, untouched); step i>1's `copy_from` is
+/// step (i-1)'s own `userData.db` — never `session.db_path` again (that would
+/// collapse the fold to "last source wins", RESEARCH Pitfall 2).
+///
+/// The `source_archive` file is only ever READ (extraction reads it; the merge
+/// reads `root/merge/userData.db`) — the source bytes are never mutated
+/// (MERGE-02, T-05-05 / T-10-03).
+fn stage_and_merge_from(
+    lib_path: &Path,
+    copy_from: &Path,
+    source_archive: &Path,
+    root: &Path,
+) -> Result<(), ArchiveError> {
+    fs::copy(copy_from, root.join("userData.db"))?;
     let merge_dir = root.join("merge");
     // D5-03/D11 zip-slip-safe extraction of the untrusted source archive.
     extract_zip_slip_safe(source_archive, &merge_dir)?;
     // jwlCore merges `<merge_dir>/userData.db` INTO `<root>/userData.db`
-    // (downgrade = false, D5-07). MergeFailed propagates.
+    // (downgrade = false, D5-07/D10-schema). MergeFailed propagates.
     crate::jwlcore::merge::run_merge_with_lib_path(lib_path, root, &merge_dir, false)
 }
 
@@ -370,6 +394,197 @@ pub fn merge_commit_with_lib_path(
     result
 }
 
+// ---------------------------------------------------------------------------
+// N-WAY FOLD (MERGE-03, 10-01-PLAN.md) — the pairwise machinery above
+// generalized to N sources: `dest = merge(merge(merge(dest, s1), s2), s3)`,
+// in the CALLER's list order. NOT a new algorithm: `run_fold_chain` is
+// `sources.len()` correctly-sequenced calls to `stage_and_merge_from`, shared
+// verbatim by the aggregate dry-run and the commit so the two can never
+// diverge — the same preview==commit guarantee `stage_and_merge` already
+// gives the Phase 5 pair.
+// ---------------------------------------------------------------------------
+
+/// Minimum sources an N-way fold accepts at the command boundary (D10-06):
+/// 1-2 archives already have the shipped `dry_run_merge`/`merge_commit` path;
+/// fewer than this is a caller bug and is rejected with `MergeFailed`, never
+/// silently degraded to a Phase-5-equivalent single merge.
+const FOLD_MIN_SOURCES: usize = 3;
+
+fn require_fold_sources(sources: &[PathBuf]) -> Result<(), ArchiveError> {
+    if sources.len() < FOLD_MIN_SOURCES {
+        return Err(ArchiveError::MergeFailed {
+            reason: format!(
+                "fold requires at least {FOLD_MIN_SOURCES} sources, got {}",
+                sources.len()
+            ),
+        });
+    }
+    Ok(())
+}
+
+/// Runs the shared N-way fold chain: `dest = merge(merge(merge(seed_db, s1),
+/// s2), s3)`, in the CALLER's `sources` order verbatim — never sorted,
+/// deduplicated, or normalized (D10-01). Order is REAL: `jwlCore.mergeDatabase`
+/// does in-place content UPDATEs at matched identity keys (module docs at the
+/// top of this file), so a LATER source in the list wins a contested key over
+/// an earlier one. `fold(A,B,C) != fold(A,C,B)` is CORRECT behaviour by
+/// design, not a defect — reordering the source list legitimately changes the
+/// result, and this function must never be changed to paper over that.
+///
+/// Shared verbatim by both [`fold_dry_run_merge_with_lib_path`] (throwaway
+/// root) and [`fold_merge_commit_with_lib_path`] (staging root) — the single
+/// point that makes the aggregate preview and the committed result unable to
+/// diverge.
+///
+/// Creates `root/step_1` .. `root/step_N` in order. Step 1 seeds from
+/// `seed_db` (the caller passes `session.db_path` — the live session, read
+/// only); step i>1 seeds from step (i-1)'s OWN `userData.db`, tracked
+/// explicitly as `prev_step_db` rather than recomputed from a path formula —
+/// re-seeding step i>1 from `seed_db` again would collapse the fold to "last
+/// source wins" (RESEARCH Pitfall 2, and a `MUST NOT` prohibition of this
+/// plan). Never touches `session.db_path` other than that one step-1 read —
+/// no promote happens here; that is the caller's job, exactly once, after
+/// this returns `Ok`.
+///
+/// Calls `on_step_ok(step_dir)` after each successful step (the commit path
+/// uses this to fold media back after EVERY step, D10-04). On any step's
+/// error (from staging the merge OR from `on_step_ok`), wraps a `MergeFailed`
+/// reason with the 1-indexed source position (`source {i} of {n}: {inner}`,
+/// RESEARCH Open Question 2) and returns immediately — later steps never run.
+/// On success, returns the final step's `userData.db` path.
+fn run_fold_chain(
+    lib_path: &Path,
+    seed_db: &Path,
+    sources: &[PathBuf],
+    root: &Path,
+    mut on_step_ok: impl FnMut(&Path) -> Result<(), ArchiveError>,
+) -> Result<PathBuf, ArchiveError> {
+    let wrap_step_reason = |step_num: usize, err: ArchiveError| -> ArchiveError {
+        match err {
+            ArchiveError::MergeFailed { reason } => ArchiveError::MergeFailed {
+                reason: format!("source {step_num} of {}: {reason}", sources.len()),
+            },
+            other => other,
+        }
+    };
+
+    let mut prev_step_db = seed_db.to_path_buf();
+
+    for (idx, source_archive) in sources.iter().enumerate() {
+        let step_num = idx + 1;
+        let step_dir = root.join(format!("step_{step_num}"));
+        fs::create_dir_all(&step_dir)?;
+
+        stage_and_merge_from(lib_path, &prev_step_db, source_archive, &step_dir)
+            .map_err(|err| wrap_step_reason(step_num, err))?;
+
+        on_step_ok(&step_dir).map_err(|err| wrap_step_reason(step_num, err))?;
+
+        prev_step_db = step_dir.join("userData.db");
+    }
+
+    Ok(prev_step_db)
+}
+
+/// Previews an N-way fold of `sources` into the open `session`, in list order,
+/// WITHOUT mutating the live session (MERGE-03 criterion 2 / D10-05): runs the
+/// SAME [`run_fold_chain`] the commit uses, under a throwaway root, then
+/// `content_diff`s the ORIGINAL session DB against the FINAL folded state — so
+/// a row overwritten at step 2 and again at step 3 is reported ONCE, with the
+/// step-3 content. Rejects fewer than [`FOLD_MIN_SOURCES`] sources before
+/// creating any directory.
+pub fn fold_dry_run_merge(
+    app: &tauri::AppHandle,
+    session: &ArchiveSession,
+    sources: &[PathBuf],
+) -> Result<DryRunReport, ArchiveError> {
+    let lib_path = crate::jwlcore::merge::merge_availability(app)?;
+    fold_dry_run_merge_with_lib_path(&lib_path, session, sources)
+}
+
+/// Lib-path core of [`fold_dry_run_merge`] — `pub` for the same
+/// externally-linked-integration-test reason as [`dry_run_merge_with_lib_path`].
+pub fn fold_dry_run_merge_with_lib_path(
+    lib_path: &Path,
+    session: &ArchiveSession,
+    sources: &[PathBuf],
+) -> Result<DryRunReport, ArchiveError> {
+    require_fold_sources(sources)?;
+    let root = session.temp_dir.path().join("fold_dryrun");
+
+    let result = (|| {
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root)?;
+
+        let final_step_db =
+            run_fold_chain(lib_path, &session.db_path, sources, &root, |_step_dir| Ok(()))?;
+
+        content_diff(&session.db_path, &final_step_db)
+    })();
+
+    // Best-effort cleanup on every path — the ONE fold root, never per-step.
+    let _ = fs::remove_dir_all(&root);
+    result
+}
+
+/// Commits an N-way fold of `sources` into the open `session`, in list order
+/// (MERGE-03 criterion 1 / D10-01): runs `sources.len()` sequential merges
+/// under ONE staging root via [`run_fold_chain`] (step i>1 seeded from step
+/// (i-1)'s own `userData.db`, never re-seeded from `session.db_path` —
+/// T-10-02 / Pitfall 2), folding media back after EVERY completed step
+/// (D10-04 — conservative by decision: an intermediate step's media would
+/// otherwise be dropped by the next step's re-seed). Only after the FINAL
+/// step returns `Ok` does this call `archive::save::atomic_replace` EXACTLY
+/// ONCE, promoting the final step's `userData.db` onto `session.db_path`
+/// (rename-with-replace, never `fs::copy` — a mid-promote crash must not
+/// truncate the live DB); only after THAT returns `Ok` does it set
+/// `session.dirty = true`. A step failure leaves `session.db_path` untouched
+/// and `session.dirty` unset (Core Value). Rejects fewer than
+/// [`FOLD_MIN_SOURCES`] sources before creating any directory.
+pub fn fold_merge_commit(
+    app: &tauri::AppHandle,
+    session: &mut ArchiveSession,
+    sources: &[PathBuf],
+) -> Result<(), ArchiveError> {
+    let lib_path = crate::jwlcore::merge::merge_availability(app)?;
+    fold_merge_commit_with_lib_path(&lib_path, session, sources)
+}
+
+/// Lib-path core of [`fold_merge_commit`] — `pub` for the same
+/// externally-linked-integration-test reason as [`merge_commit_with_lib_path`].
+pub fn fold_merge_commit_with_lib_path(
+    lib_path: &Path,
+    session: &mut ArchiveSession,
+    sources: &[PathBuf],
+) -> Result<(), ArchiveError> {
+    require_fold_sources(sources)?;
+    let root = session.temp_dir.path().join("fold_staging");
+
+    let result = (|| {
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root)?;
+
+        // Read-only snapshot of the seed path BEFORE the loop borrows `session`
+        // mutably (for the per-step media fold-back) — the fold never re-reads
+        // `session.db_path` after step 1 (T-10-02).
+        let seed_db = session.db_path.clone();
+        let final_step_db = run_fold_chain(lib_path, &seed_db, sources, &root, |step_dir| {
+            fold_back_media(session, step_dir)
+        })?;
+
+        // PROMOTE atomically, EXACTLY ONCE, after the LAST step succeeded —
+        // never inside the loop.
+        crate::archive::save::atomic_replace(&final_step_db, &session.db_path)?;
+
+        session.dirty = true;
+        Ok(())
+    })();
+
+    // Best-effort cleanup of the ONE fold root on every path (never per-step).
+    let _ = fs::remove_dir_all(&root);
+    result
+}
+
 /// Folds media jwlCore may have written into the staging dir back into the
 /// session inventory so a later Save keeps it (Open-Q1 / T-05-06). Walks every
 /// file under `staging` EXCEPT the merged `userData.db*` and the `merge/`
@@ -516,6 +731,23 @@ mod tests {
         let root = Path::new("/tmp/stage");
         let path = Path::new("/tmp/stage/media/blob.bin");
         assert_eq!(rel_name(root, path), "media/blob.bin");
+    }
+
+    #[test]
+    fn require_fold_sources_rejects_fewer_than_three() {
+        let sources: Vec<PathBuf> = vec![PathBuf::from("a"), PathBuf::from("b")];
+        match require_fold_sources(&sources) {
+            Err(ArchiveError::MergeFailed { reason }) => {
+                assert!(reason.contains('2'), "reason should mention the count: {reason}");
+            }
+            other => panic!("expected MergeFailed, got {other:?}"),
+        }
+        assert!(require_fold_sources(&[
+            PathBuf::from("a"),
+            PathBuf::from("b"),
+            PathBuf::from("c")
+        ])
+        .is_ok());
     }
 
     #[test]
