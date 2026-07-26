@@ -630,3 +630,55 @@ Recommendation: **(b) for this phase**, since it keeps the zero-new-dependency s
 removes an unverifiable blocker from the critical path, with (a) available as a follow-up once
 the registry is reachable. The planner may overrule with reasoning — but must not silently
 assume the crate is fine.
+
+---
+
+## ✅ Addendum — Playlist import ID strategy RESOLVED (2026-07-26)
+
+Open Question 1 flagged playlist import as possibly the phase's second-highest-risk area,
+on the theory that importing a mini-archive's `PlaylistItem`/`IndependentMedia`/`Location`
+rows into a target archive with its own PK space could collide and silently clobber existing
+user data. **Read directly; the risk does not exist. Python re-keys.**
+
+Deciding lines, `JWLManager.py:2485-2493`:
+
+```python
+existing_id = con.execute('SELECT pi.PlaylistItemId FROM PlaylistItem pi '
+    'JOIN TagMap tm ON pi.PlaylistItemId = tm.PlaylistItemId '
+    'JOIN Tag t ON tm.TagId = t.TagId '
+    'WHERE pi.Label = ? AND pi.ThumbnailFilePath = ? AND t.Name = ?;',
+    (pi_l, im_fp, playlist)).fetchone()
+...
+if available_ids.get('PlaylistItem'):
+    pi_pii = available_ids['PlaylistItem'].pop()
+    con.execute('INSERT INTO PlaylistItem (PlaylistItemId, Label, ...) VALUES (?, ?, ...)', ...)
+else:
+    pi_pii = con.execute('INSERT INTO PlaylistItem (Label, ...) VALUES (?, ...)').lastrowid
+```
+
+**Findings:**
+
+1. **Incoming PKs are never trusted.** Row identity on import is *semantic* —
+   `(Label, ThumbnailFilePath, playlist Tag Name)` — not the incoming `PlaylistItemId`. A match
+   reuses the target's existing row; a miss allocates a **fresh** id.
+2. **New ids come from the same `get_available_ids` gap-fill pool** the five `.txt` categories
+   use (`:1857-1869`), falling back to plain autoincrement (`lastrowid`) when no gap is free.
+   This is the exact helper D8-08 already wants to generalize — playlist import is another
+   consumer of it, not a special case.
+3. **No silent-clobber path.** There is no `INSERT OR REPLACE` on a trusted incoming PK
+   anywhere in the import path. The related maps use explicit
+   `ON CONFLICT(...) DO UPDATE` on their natural composite keys
+   (`PlaylistItemIndependentMediaMap` `:2480`, `PlaylistItemLocationMap` `:2550`,
+   `PlaylistItemMarkerBibleVerseMap` `:2523`, `PlaylistItemMarkerParagraphMap` `:2525`), and
+   `TagMap` inserts are guarded by `WHERE NOT EXISTS` (`:2510`, `:2512`) — all keyed on the
+   *re-keyed* `pi_pii`, never on an incoming id.
+4. **Thumbnail re-pointing is handled** — `:2452` rewrites
+   `PlaylistItem.ThumbnailFilePath` when an imported media file resolves to an existing
+   archive file, so dedup does not leave dangling references.
+
+**What the Rust implementation must therefore do:** re-key on import exactly as above — semantic
+existence check first, then allocate from the shared `get_available_ids` gap-fill pool, then
+insert with the allocated id; build the old-id → new-id mapping as you go and use the *new* id
+for every dependent row (maps, markers, TagMap). Do NOT carry incoming PKs through. Downgrades
+this from "second-highest-risk, under-researched" to a well-understood port that reuses D8-08's
+helper.
