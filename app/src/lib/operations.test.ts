@@ -45,26 +45,29 @@ describe("operationSet (D6-08 capability descriptor)", () => {
     }
   });
 
-  it("Favorites at 2 selected: Favorites:delete and Favorites:add are live (07-01-PLAN.md), export/import stay deferred", () => {
+  it("Favorites at 2 selected: Favorites:delete/add/export/import are live (07-01-PLAN.md/08-01-PLAN.md)", () => {
     const ops = operationSet("Favorites", 2);
     const del = ops.find((o) => o.op === "delete");
     expect(del).toMatchObject({ deferred: false, enabled: true });
     const add = ops.find((o) => o.op === "add");
     expect(add).toMatchObject({ deferred: false, enabled: true });
-
-    for (const o of ops) {
-      if (o.op === "delete" || o.op === "add") continue;
-      expect(o.deferred, `${o.op} should be deferred`).toBe(true);
-      expect(o.enabled, `${o.op} should be disabled`).toBe(false);
-    }
+    const exportOp = ops.find((o) => o.op === "export");
+    expect(exportOp).toMatchObject({ deferred: false, enabled: true });
+    const importOp = ops.find((o) => o.op === "import");
+    expect(importOp).toMatchObject({ deferred: false, enabled: true });
   });
 
-  it("Favorites at 0 selected: Favorites:delete is live but disabled (needs a selection); Favorites:add is live AND enabled (selection-independent)", () => {
+  it("Favorites at 0 selected: Favorites:delete is live but disabled (needs a selection); add/export/import are live AND enabled (selection-independent/-optional)", () => {
     const ops = operationSet("Favorites", 0);
     const del = ops.find((o) => o.op === "delete");
     expect(del).toMatchObject({ deferred: false, enabled: false });
     const add = ops.find((o) => o.op === "add");
     expect(add).toMatchObject({ deferred: false, enabled: true });
+    // D8-10: export is selection-OPTIONAL, never disabled at 0 selected.
+    const exportOp = ops.find((o) => o.op === "export");
+    expect(exportOp).toMatchObject({ deferred: false, enabled: true });
+    const importOp = ops.find((o) => o.op === "import");
+    expect(importOp).toMatchObject({ deferred: false, enabled: true });
   });
 
   it("Playlists' add stays deferred even though Favorites' add is live — LIVE is keyed per-category, not per-op", () => {
@@ -84,6 +87,8 @@ describe("operationSet (D6-08 capability descriptor)", () => {
       "Notes:view",
       "Favorites:delete",
       "Favorites:add",
+      "Favorites:export",
+      "Favorites:import",
       "Highlights:color",
       "Highlights:delete",
       "Bookmarks:delete",

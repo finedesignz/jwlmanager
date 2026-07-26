@@ -16,6 +16,7 @@ function makeReport(overrides: Partial<DryRunReport> = {}): DryRunReport {
     overwritten: {},
     deleted: {},
     total_deleted: 0,
+    skipped: {},
     ...overrides,
   };
 }

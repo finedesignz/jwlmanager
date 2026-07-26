@@ -1,6 +1,7 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { invoke } from "@tauri-apps/api/core";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import type { BrowseRow } from "../bindings/BrowseRow";
 import type { Category } from "../bindings/Category";
 import type { DryRunReport } from "../bindings/DryRunReport";
@@ -33,7 +34,9 @@ const NO_WRAP_STYLE: React.CSSProperties = {
 /** Human-facing op labels for the operation bar (deferred affordances). */
 const OP_LABEL: Record<Op, string> = {
   delete: "Delete",
-  export: "Export",
+  // Ellipsis signals "opens a file picker" (08-UI-SPEC.md), matching the
+  // app's existing convention ("Save v14-compatible copy…", "Merge Archive…").
+  export: "Export…",
   // "Edit" (EDIT-07, 07-05-PLAN.md) — the `view` op's real name once the
   // field-constrained record editor lands. Safe to rename globally: both
   // `view`-carrying categories (Notes, Annotations) go LIVE simultaneously
@@ -42,8 +45,30 @@ const OP_LABEL: Record<Op, string> = {
   color: "Color",
   tag: "Tag",
   add: "Add",
-  import: "Import",
+  import: "Import…",
 };
+
+/**
+ * The Tauri command backing the LIVE "export" op for each category
+ * (08-01-PLAN.md Task 1) — a single command, no dry-run pair: export never
+ * mutates the archive (D8-09).
+ */
+const EXPORT_COMMANDS: Partial<Record<Category, string>> = {
+  Favorites: "export_favorites",
+};
+
+/**
+ * The `(dryRun, apply)` Tauri command pair backing the LIVE "import" op for
+ * each category (08-01-PLAN.md Task 3).
+ */
+const IMPORT_COMMANDS: Partial<Record<Category, { dryRun: string; apply: string }>> = {
+  Favorites: { dryRun: "import_favorites_dry_run", apply: "import_favorites_apply" },
+};
+
+/** Sums a `Record<string, number>`-shaped `DryRunReport` field's values. */
+function sumCounts(counts: Record<string, number>): number {
+  return Object.values(counts).reduce((total, n) => total + n, 0);
+}
 
 /**
  * The `(dryRun, apply)` Tauri command pair backing the LIVE "delete" op for
@@ -168,6 +193,29 @@ export default function CategoryList({
   // TagDialog/FavoriteAddDialog. Only ever opened at selection size 1
   // (07-UI-SPEC.md's stricter-than-NEEDS_SELECTION precondition).
   const [showRecordEditor, setShowRecordEditor] = useState(false);
+  // "Export…" (IO-01, 08-01-PLAN.md) — no preview dialog (D8-09, export
+  // never mutates the archive); a transient post-success button-label flash
+  // instead of a toast (this app has never shipped a toast system).
+  const [exportPending, setExportPending] = useState(false);
+  const [exportFlash, setExportFlash] = useState(false);
+  const exportFlashTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // "Import…" (IO-02, 08-01-PLAN.md) — dry-run parses the picked file and
+  // returns the would-be result; a malformed file surfaces through
+  // `onError` BEFORE this ever opens (D8-04 fail-fast — `importPreview`
+  // stays `null`). Separate from `report` (the selection-scoped delete
+  // preview above) since import is never selection-scoped.
+  const [importPreview, setImportPreview] = useState<{ report: DryRunReport; path: string } | null>(
+    null,
+  );
+  const [importPending, setImportPending] = useState(false);
+
+  useEffect(() => {
+    return () => {
+      if (exportFlashTimeoutRef.current !== null) {
+        clearTimeout(exportFlashTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // D6-05: switching categories clears stale integer keys that would collide
   // across categories (a BookmarkId means nothing in the Highlights list).
@@ -192,6 +240,7 @@ export default function CategoryList({
     setShowColorMenu(false);
     setShowTagDialog(false);
     setShowRecordEditor(false);
+    setImportPreview(null);
   }
 
   const virtualizer = useVirtualizer({
@@ -249,6 +298,88 @@ export default function CategoryList({
 
   const handleCancel = useCallback(() => {
     setReport(null);
+  }, []);
+
+  const exportCommand = EXPORT_COMMANDS[category];
+
+  // "Export…" (D8-09): native save dialog -> direct file write (no dry-run,
+  // no `EditPreviewDialog`) -> transient "Exported" flash or `ErrorBanner`.
+  // Selection-optional (D8-10): with a selection, exports exactly the
+  // selected rows; with none, exports the whole category.
+  const handleExportClick = useCallback(async () => {
+    if (exportPending || !exportCommand) {
+      return;
+    }
+    const target = await save({
+      filters: [{ name: "Text files", extensions: ["txt"] }],
+      defaultPath: `${category}.txt`,
+    });
+    if (typeof target !== "string") {
+      return; // cancelled — no backend call
+    }
+    setExportPending(true);
+    try {
+      const ids = selected.size > 0 ? Array.from(selected) : null;
+      await invoke(exportCommand, { path: target, ids });
+      if (exportFlashTimeoutRef.current !== null) {
+        clearTimeout(exportFlashTimeoutRef.current);
+      }
+      setExportFlash(true);
+      exportFlashTimeoutRef.current = setTimeout(() => setExportFlash(false), 2000);
+    } catch (err) {
+      onError?.(err as ErrorDto);
+    } finally {
+      setExportPending(false);
+    }
+  }, [exportPending, exportCommand, category, selected, onError]);
+
+  const importCommands = IMPORT_COMMANDS[category];
+
+  // "Import…": native open dialog -> dry-run (fail-fast `ErrorBanner` on a
+  // malformed file, D8-04 — `EditPreviewDialog` never opens for it) ->
+  // `EditPreviewDialog` with the added/updated/skipped summary.
+  const handleImportClick = useCallback(async () => {
+    if (importPending || !importCommands) {
+      return;
+    }
+    const selectedFile = await open({
+      multiple: false,
+      directory: false,
+      filters: [{ name: "Text files", extensions: ["txt"] }],
+    });
+    if (typeof selectedFile !== "string") {
+      return; // cancelled — no backend call
+    }
+    setImportPending(true);
+    try {
+      const dryRunReport = await invoke<DryRunReport>(importCommands.dryRun, {
+        path: selectedFile,
+      });
+      setImportPreview({ report: dryRunReport, path: selectedFile });
+    } catch (err) {
+      onError?.(err as ErrorDto);
+    } finally {
+      setImportPending(false);
+    }
+  }, [importPending, importCommands, onError]);
+
+  const handleImportConfirm = useCallback(async () => {
+    if (!importCommands || !importPreview) {
+      return;
+    }
+    try {
+      await invoke(importCommands.apply, { path: importPreview.path });
+      const freshRows = await invoke<BrowseRow[]>("list_category", { category });
+      onRowsChanged?.(freshRows);
+    } catch (err) {
+      onError?.(err as ErrorDto);
+    } finally {
+      setImportPreview(null);
+    }
+  }, [importCommands, importPreview, category, onRowsChanged, onError]);
+
+  const handleImportCancel = useCallback(() => {
+    setImportPreview(null);
   }, []);
 
   const ops = operationSet(category, selected.size);
@@ -313,6 +444,42 @@ export default function CategoryList({
                 data-testid="category-list-add-button"
               >
                 {resolveOpLabel(state.op, category)}
+              </button>
+            );
+          }
+          // "Export…" (IO-01, D8-09) — no dry-run, no `EditPreviewDialog`;
+          // selection-optional (D8-10), so `state.enabled` is always true
+          // once LIVE. The tooltip surfaces the "exports everything" hint
+          // only when nothing is selected (08-UI-SPEC.md: title= only, no
+          // permanent helper text).
+          if (state.op === "export" && !state.deferred) {
+            return (
+              <button
+                key={state.op}
+                type="button"
+                className="toolbar-button category-list-export-button"
+                onClick={handleExportClick}
+                disabled={!state.enabled || exportPending}
+                title={selected.size === 0 ? `No rows selected — exports all ${category}.` : undefined}
+                data-testid="category-list-export-button"
+              >
+                {exportPending ? "Exporting…" : exportFlash ? "Exported" : resolveOpLabel(state.op, category)}
+              </button>
+            );
+          }
+          // "Import…" (IO-02) — archive-wide-into-category, never
+          // selection-gated (D8-10).
+          if (state.op === "import" && !state.deferred) {
+            return (
+              <button
+                key={state.op}
+                type="button"
+                className="toolbar-button category-list-import-button"
+                onClick={handleImportClick}
+                disabled={!state.enabled || importPending}
+                data-testid="category-list-import-button"
+              >
+                {importPending ? "Importing…" : resolveOpLabel(state.op, category)}
               </button>
             );
           }
@@ -485,6 +652,48 @@ export default function CategoryList({
           report={report}
           onConfirm={handleConfirm}
           onCancel={handleCancel}
+        />
+      )}
+      {importPreview && (
+        <EditPreviewDialog
+          report={importPreview.report}
+          onConfirm={handleImportConfirm}
+          onCancel={handleImportCancel}
+          title={`Import ${category}?`}
+          ariaLabel={`Import ${category}`}
+          confirmLabel={`Import ${category}`}
+          confirmPendingLabel="Importing…"
+          summary={
+            sumCounts(importPreview.report.added) === 0 &&
+            sumCounts(importPreview.report.overwritten) === 0 &&
+            sumCounts(importPreview.report.skipped) === 0 ? (
+              <>Nothing in this file is new — every record already matches what's in this archive.</>
+            ) : (
+              <>
+                {sumCounts(importPreview.report.added) > 0 && (
+                  <>
+                    {sumCounts(importPreview.report.added)} new record
+                    {sumCounts(importPreview.report.added) === 1 ? "" : "s"} will be added.
+                    <br />
+                  </>
+                )}
+                {sumCounts(importPreview.report.overwritten) > 0 && (
+                  <>
+                    {sumCounts(importPreview.report.overwritten)} existing record
+                    {sumCounts(importPreview.report.overwritten) === 1 ? "" : "s"} will be updated.
+                    <br />
+                  </>
+                )}
+                {sumCounts(importPreview.report.skipped) > 0 && (
+                  <>
+                    {sumCounts(importPreview.report.skipped)} record
+                    {sumCounts(importPreview.report.skipped) === 1 ? "" : "s"} in this file will be
+                    skipped (already present).
+                  </>
+                )}
+              </>
+            )
+          }
         />
       )}
       {showFavoriteDialog && (

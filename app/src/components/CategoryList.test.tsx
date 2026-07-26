@@ -4,9 +4,16 @@ import CategoryList from "./CategoryList";
 import type { BrowseRow } from "../bindings/BrowseRow";
 
 const invokeMock = vi.fn();
+const openMock = vi.fn();
+const saveMock = vi.fn();
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
+}));
+
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  open: (...args: unknown[]) => openMock(...args),
+  save: (...args: unknown[]) => saveMock(...args),
 }));
 
 function makeRow(id: number, overrides: Partial<BrowseRow> = {}): BrowseRow {
@@ -68,6 +75,8 @@ beforeAll(() => {
 
 beforeEach(() => {
   invokeMock.mockReset();
+  openMock.mockReset();
+  saveMock.mockReset();
 });
 
 describe("CategoryList — virtualization + row contract (D6-07)", () => {
@@ -305,5 +314,69 @@ describe("CategoryList — Edit precondition (EDIT-07, 07-05-PLAN.md Task 2)", (
     fireEvent.click(screen.getByTestId("category-list-edit-button"));
 
     expect(await screen.findByTestId("record-editor")).toBeInTheDocument();
+  });
+});
+
+describe("CategoryList — Favorites import flow (IO-02, 08-01-PLAN.md)", () => {
+  it("a malformed dry-run rejection renders the error banner and never mounts edit-preview-dialog", async () => {
+    openMock.mockResolvedValue("/tmp/malformed.txt");
+    const err = {
+      code: "import_malformed",
+      operation: "import_favorites_dry_run",
+      safe_file_name: "malformed.txt",
+      message_key: "error.archive.import_malformed",
+    };
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "import_favorites_dry_run") {
+        return Promise.reject(err);
+      }
+      return Promise.reject(new Error(`unexpected invoke: ${cmd}`));
+    });
+    const onError = vi.fn();
+    render(<CategoryList rows={[]} category="Favorites" onError={onError} />);
+
+    fireEvent.click(screen.getByTestId("category-list-import-button"));
+
+    await vi.waitFor(() => expect(onError).toHaveBeenCalledWith(err));
+    expect(screen.queryByTestId("edit-preview-dialog")).not.toBeInTheDocument();
+  });
+
+  it("a successful dry-run opens edit-preview-dialog with the import preview", async () => {
+    openMock.mockResolvedValue("/tmp/favorites.txt");
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "import_favorites_dry_run") {
+        return Promise.resolve({
+          added: { TagMap: 1 },
+          overwritten: {},
+          deleted: {},
+          total_deleted: 0,
+          skipped: {},
+        });
+      }
+      return Promise.reject(new Error(`unexpected invoke: ${cmd}`));
+    });
+    render(<CategoryList rows={[]} category="Favorites" />);
+
+    fireEvent.click(screen.getByTestId("category-list-import-button"));
+
+    expect(await screen.findByTestId("edit-preview-dialog")).toBeInTheDocument();
+    expect(screen.getByTestId("edit-preview-summary").textContent).toContain(
+      "1 new record will be added.",
+    );
+  });
+
+  it("clicking Export invokes export_favorites with the picked path and a null selection", async () => {
+    saveMock.mockResolvedValue("/tmp/favorites-out.txt");
+    invokeMock.mockResolvedValue(2);
+    render(<CategoryList rows={[]} category="Favorites" />);
+
+    fireEvent.click(screen.getByTestId("category-list-export-button"));
+
+    await vi.waitFor(() =>
+      expect(invokeMock).toHaveBeenCalledWith("export_favorites", {
+        path: "/tmp/favorites-out.txt",
+        ids: null,
+      }),
+    );
   });
 });

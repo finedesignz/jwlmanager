@@ -9,6 +9,7 @@ function makeReport(overrides: Partial<DryRunReport> = {}): DryRunReport {
     overwritten: { TagMap: 2 },
     deleted: { Note: 1, TagMap: 1 },
     total_deleted: 2,
+    skipped: {},
     ...overrides,
   };
 }

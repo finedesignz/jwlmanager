@@ -35,13 +35,18 @@ const CAPABILITY: Record<Category, Op[]> = {
 
 /**
  * Operations that require at least one selected row to be actionable
- * (delete/export/view/color/tag act ON the selection). `add`/`import` are
+ * (delete/view/color/tag act ON the selection). `add`/`import` are
  * selection-independent (they act on the whole category), so they are never
- * gated on selection size.
+ * gated on selection size. `export` is DELIBERATELY excluded (D8-10,
+ * 08-01-PLAN.md, corrected from a pre-Phase-8 assumption that it belonged
+ * here alongside delete): export is selection-OPTIONAL — with a selection
+ * it exports exactly the selected rows, with none it exports the whole
+ * category — so it must never be disabled at selection size 0. `Favorites:
+ * export` is the first (category, "export") pair to go LIVE and surface
+ * this; every non-LIVE `(cat, "export")` pair stays deferred regardless.
  */
 const NEEDS_SELECTION: ReadonlySet<Op> = new Set<Op>([
   "delete",
-  "export",
   "view",
   "color",
   "tag",
@@ -62,6 +67,11 @@ const NEEDS_SELECTION: ReadonlySet<Op> = new Set<Op>([
  * `Playlists:delete` (ref-counted media) stay deferred — Phase 8
  * (D7-06/D7-10).
  *
+ * `Favorites:export`/`Favorites:import` (IO-01/IO-02, 08-01-PLAN.md) land
+ * this phase's tracer — the simplest of the five `.txt` categories, proving
+ * the whole export/import spine end to end before Plans 02-05 flip the
+ * remaining four categories' `export`/`import` pairs LIVE.
+ *
  * Sort Tags (EDIT-04) is ARCHIVE-WIDE, never selection-scoped, so it
  * deliberately does NOT enter this descriptor at all — it lives entirely
  * on the "Utilities ▾" `CommandBar` button / `UtilitiesMenu`
@@ -81,6 +91,8 @@ const LIVE: ReadonlySet<string> = new Set<string>([
   "Bookmarks:delete",
   "Annotations:delete",
   "Annotations:view",
+  "Favorites:export",
+  "Favorites:import",
 ]);
 
 /** A single entry in the contextual operation bar. */
