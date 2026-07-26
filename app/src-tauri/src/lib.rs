@@ -18,6 +18,7 @@ use db::delete::{NonEmptyBookmarkIds, NonEmptyLocationIds, NonEmptyNoteIds};
 use db::edit::DryRunReport;
 use db::favorites::{FavoriteEditionRef, NonEmptyTagMapIds};
 use db::ids::compute_available_ids;
+use db::io::diff::{export_notes_incremental as export_notes_incremental_impl, IncrementalExportSummary};
 use db::io::export::{
     export_annotations as export_annotations_impl, export_bookmarks as export_bookmarks_impl,
     export_favorites as export_favorites_impl, export_highlights as export_highlights_impl,
@@ -39,7 +40,7 @@ use error::ErrorDto;
 use serde::Serialize;
 use session::{ArchiveSession, SessionState};
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 use ts_rs::TS;
@@ -2048,6 +2049,73 @@ fn export_notes(
     .map_err(|err| err.to_dto("export_notes", Some(out_path.as_path())))
 }
 
+/// Exports only the Notes changed since a prior export (IO-04, D9-01..D9-05,
+/// 09-01-PLAN.md) — read-only on the archive, same never-mutates contract as
+/// [`export_notes`]. `prior_path` is `None` for "no prior file", which
+/// exports the whole category exactly as [`export_notes`] does (D9-05).
+/// When present, `prior_path`'s text is read as strict UTF-8 and handed to
+/// [`export_notes_incremental_impl`], which runs it through the same
+/// fail-fast `parse_notes_file` validation gate the shipped Notes import
+/// path uses BEFORE any output file is written — a malformed prior file
+/// surfaces the typed `import_malformed` error and writes nothing.
+#[tauri::command]
+fn export_notes_incremental(
+    path: String,
+    prior_path: Option<String>,
+    app: tauri::AppHandle,
+    state: tauri::State<SessionState>,
+) -> Result<IncrementalExportSummary, ErrorDto> {
+    let resources_db_path = db::resources::resolve_resources_db_path(&app)
+        .map_err(|err| err.to_dto("export_notes_incremental", None))?;
+    let guard = state.lock().map_err(|_| {
+        error::ArchiveError::StatePoisoned.to_dto("export_notes_incremental", None)
+    })?;
+    let session = guard.as_ref().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("export_notes_incremental", None)
+    })?;
+
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("export_notes_incremental", Some(session.target_path.as_path()))
+    })?;
+    let catalog = db::resources::ResourceCatalog::load(&resources_db_path, "en")
+        .map_err(|err| err.to_dto("export_notes_incremental", None))?;
+
+    let archive_name = session
+        .target_path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "NEW ARCHIVE".to_string());
+    let header = ExportHeaderCtx {
+        category_tag: "{NOTES=}",
+        archive_name,
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        timestamp: time::now_export_header_timestamp(),
+    };
+
+    let prior_text = match &prior_path {
+        Some(p) => {
+            let text = std::fs::read_to_string(p).map_err(|err| {
+                error::ArchiveError::from(err)
+                    .to_dto("export_notes_incremental", Some(Path::new(p)))
+            })?;
+            Some(text)
+        }
+        None => None,
+    };
+
+    let out_path = PathBuf::from(&path);
+    export_notes_incremental_impl(
+        &conn,
+        prior_text.as_deref(),
+        &catalog,
+        &header,
+        &time::now_iso8601_utc(),
+        &out_path,
+    )
+    .map_err(|err| err.to_dto("export_notes_incremental", Some(out_path.as_path())))
+}
+
 /// The Tauri-facing result of a Notes import preview (IO-02, D8-09) — the
 /// standard [`DryRunReport`] PLUS the file's own detected bucket-delete
 /// character (if any), so the frontend can render the Notes-only extra
@@ -2641,6 +2709,7 @@ pub fn run() {
             import_highlights_dry_run,
             import_highlights_apply,
             export_notes,
+            export_notes_incremental,
             import_notes_dry_run,
             import_notes_apply,
             export_playlist,
