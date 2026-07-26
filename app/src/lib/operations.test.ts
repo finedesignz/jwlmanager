@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { operationSet } from "./operations";
 
 describe("operationSet (D6-08 capability descriptor)", () => {
-  it("Notes at 0 selected: delete/export/view/color/tag present, Notes:delete is the sole live op (all disabled at 0)", () => {
+  it("Notes at 0 selected: delete/export/view/color/tag present, Notes:delete/color/tag are the live ops (all disabled at 0)", () => {
     const ops = operationSet("Notes", 0);
     const byOp = new Map(ops.map((o) => [o.op, o]));
 
@@ -11,14 +11,15 @@ describe("operationSet (D6-08 capability descriptor)", () => {
       expect(byOp.has(op), `Notes should surface ${op}`).toBe(true);
     }
 
-    // delete and color are LIVE but need a selection: not deferred, but
-    // disabled at 0 (07-02-PLAN.md: Notes:color).
+    // delete/color/tag are LIVE but need a selection: not deferred, but
+    // disabled at 0 (07-02-PLAN.md: Notes:color; 07-03-PLAN.md: Notes:tag).
     expect(byOp.get("delete")).toMatchObject({ deferred: false, enabled: false });
     expect(byOp.get("color")).toMatchObject({ deferred: false, enabled: false });
+    expect(byOp.get("tag")).toMatchObject({ deferred: false, enabled: false });
 
-    // Every op OTHER than delete/color is deferred (not in the LIVE set).
+    // Every op OTHER than delete/color/tag is deferred (not in the LIVE set).
     for (const o of ops) {
-      if (o.op === "delete" || o.op === "color") continue;
+      if (o.op === "delete" || o.op === "color" || o.op === "tag") continue;
       expect(o.deferred, `${o.op} should be deferred`).toBe(true);
       expect(o.enabled, `${o.op} should be disabled`).toBe(false);
     }
@@ -74,6 +75,7 @@ describe("operationSet (D6-08 capability descriptor)", () => {
     const LIVE_PAIRS = new Set([
       "Notes:delete",
       "Notes:color",
+      "Notes:tag",
       "Favorites:delete",
       "Favorites:add",
       "Highlights:color",

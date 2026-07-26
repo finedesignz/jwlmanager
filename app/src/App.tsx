@@ -80,6 +80,8 @@ export default function App() {
         onSaved={handleSaved}
         onError={handleError}
         onCancelled={handleCancelled}
+        currentCategory={category}
+        onCategoryRowsChanged={handleRowsChanged}
       />
 
       <JwlCoreNotice />

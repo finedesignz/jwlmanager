@@ -8,6 +8,7 @@ import type { ErrorDto } from "../bindings/ErrorDto";
 import ColorMenu from "./ColorMenu";
 import EditPreviewDialog from "./EditPreviewDialog";
 import FavoriteAddDialog from "./FavoriteAddDialog";
+import TagDialog from "./TagDialog";
 import { operationSet, type Op } from "../lib/operations";
 
 /**
@@ -146,6 +147,9 @@ export default function CategoryList({
   // FavoriteAddDialog.
   const [showColorMenu, setShowColorMenu] = useState(false);
   const colorButtonRef = useRef<HTMLButtonElement>(null);
+  // "Tag" (EDIT-03) — its own show/hide flag; TagDialog owns its OWN
+  // fetch/dry-run/preview/apply flow internally once open.
+  const [showTagDialog, setShowTagDialog] = useState(false);
 
   // D6-05: switching categories clears stale integer keys that would collide
   // across categories (a BookmarkId means nothing in the Highlights list).
@@ -168,6 +172,7 @@ export default function CategoryList({
     setReport(null);
     setShowFavoriteDialog(false);
     setShowColorMenu(false);
+    setShowTagDialog(false);
   }
 
   const virtualizer = useVirtualizer({
@@ -323,6 +328,22 @@ export default function CategoryList({
               </span>
             );
           }
+          // "Tag" (EDIT-03, Notes only) — opens the modal TagDialog, which
+          // owns its own fetch/dry-run/preview/apply flow internally.
+          if (state.op === "tag" && !state.deferred) {
+            return (
+              <button
+                key={state.op}
+                type="button"
+                className="toolbar-button category-list-tag-button"
+                onClick={() => setShowTagDialog(true)}
+                disabled={!state.enabled}
+                data-testid="category-list-tag-button"
+              >
+                {resolveOpLabel(state.op, category)}
+              </button>
+            );
+          }
           // Every other op is surfaced-but-deferred (no backend mutation yet).
           return (
             <button
@@ -426,6 +447,18 @@ export default function CategoryList({
             onRowsChanged?.(freshRows);
           }}
           onCancel={() => setShowFavoriteDialog(false)}
+          onError={(err) => onError?.(err)}
+        />
+      )}
+      {showTagDialog && (
+        <TagDialog
+          selectedIds={Array.from(selected)}
+          onApplied={(freshRows) => {
+            setShowTagDialog(false);
+            setSelected(new Set());
+            onRowsChanged?.(freshRows);
+          }}
+          onCancel={() => setShowTagDialog(false)}
           onError={(err) => onError?.(err)}
         />
       )}

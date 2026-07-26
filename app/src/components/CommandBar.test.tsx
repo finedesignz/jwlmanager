@@ -25,6 +25,8 @@ function renderBar(overrides: Partial<Parameters<typeof CommandBar>[0]> = {}) {
     onSaved: vi.fn(),
     onError: vi.fn(),
     onCancelled: vi.fn(),
+    currentCategory: "Notes" as const,
+    onCategoryRowsChanged: vi.fn(),
     ...overrides,
   };
   render(<CommandBar {...handlers} />);

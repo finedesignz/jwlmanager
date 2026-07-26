@@ -2,9 +2,11 @@ import { useCallback, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type { BrowseRow } from "../bindings/BrowseRow";
+import type { Category } from "../bindings/Category";
 import type { ErrorDto } from "../bindings/ErrorDto";
 import type { DryRunReport } from "../bindings/DryRunReport";
 import EditPreviewDialog from "./EditPreviewDialog";
+import UtilitiesMenu from "./UtilitiesMenu";
 
 type ActionName = "open" | "new" | "save" | "saveAs" | "saveV14" | "merge";
 
@@ -44,6 +46,11 @@ interface CommandBarProps {
   onError: (err: ErrorDto) => void;
   /** Native dialog dismissed — a clean cancel, never an error (finding 15). */
   onCancelled: () => void;
+  /** The category currently displayed — needed so "Sort Tags…" (archive-wide,
+   * Utilities menu) knows which category's rows to re-fetch after it applies
+   * (its only visible effect is the tags column, wherever it's shown). */
+  currentCategory: Category;
+  onCategoryRowsChanged: (rows: BrowseRow[]) => void;
 }
 
 const FILTERS = [{ name: "JW Library Backup", extensions: ["jwlibrary"] }];
@@ -63,8 +70,15 @@ export default function CommandBar({
   onSaved,
   onError,
   onCancelled,
+  currentCategory,
+  onCategoryRowsChanged,
 }: CommandBarProps) {
   const [pending, setPending] = useState<ActionName | null>(null);
+  // "Utilities ▾" (new, 07-03-PLAN.md Task 3) — the popover's own show/hide
+  // flag; UtilitiesMenu owns its OWN dry-run/preview/apply flow internally
+  // for "Sort Tags…", same shape as ColorMenu/FavoriteAddDialog.
+  const [showUtilitiesMenu, setShowUtilitiesMenu] = useState(false);
+  const utilitiesButtonRef = useRef<HTMLButtonElement>(null);
   // The v14 export is preview-then-write (D4-07): the dry-run report + chosen
   // path live here between the dialog opening and Confirm/Cancel. `null` = no
   // preview open.
@@ -268,6 +282,17 @@ export default function CommandBar({
     setMergePreview(null);
   }, []);
 
+  const handleSortTagsApplied = useCallback(async () => {
+    try {
+      const freshRows = await invoke<BrowseRow[]>("list_category", { category: currentCategory });
+      setShowUtilitiesMenu(false);
+      onCategoryRowsChanged(freshRows);
+    } catch (err) {
+      onError(err as ErrorDto);
+      setShowUtilitiesMenu(false);
+    }
+  }, [currentCategory, onCategoryRowsChanged, onError]);
+
   const anyPending = pending !== null;
   const v14LocationsMerged = v14Preview?.report.deleted["Location"] ?? 0;
 
@@ -330,6 +355,28 @@ export default function CommandBar({
       >
         {pending === "merge" ? "Preparing…" : "Merge Archive…"}
       </button>
+      <span style={{ position: "relative", display: "inline-block" }}>
+        <button
+          ref={utilitiesButtonRef}
+          type="button"
+          className="toolbar-button toolbar-button-secondary"
+          onClick={() => setShowUtilitiesMenu(true)}
+          disabled={anyPending || !archiveOpen}
+          data-testid="utilities-button"
+        >
+          Utilities ▾
+        </button>
+        {showUtilitiesMenu && (
+          <UtilitiesMenu
+            onCancel={() => {
+              setShowUtilitiesMenu(false);
+              utilitiesButtonRef.current?.focus();
+            }}
+            onError={onError}
+            onSorted={handleSortTagsApplied}
+          />
+        )}
+      </span>
     </div>
     {v14Preview && (
       <EditPreviewDialog

@@ -53,12 +53,21 @@ const NEEDS_SELECTION: ReadonlySet<Op> = new Set<Op>([
  * `Notes:delete` shipped in Phase 2; `Favorites:delete` (EDIT-05 unmark)
  * and `Favorites:add` (EDIT-05 mark) land in 07-01-PLAN.md. `Notes:color` /
  * `Highlights:color` (EDIT-02 recolor) and `Highlights:delete` (D7-10,
- * BlockRange-only, rule #9) land in 07-02-PLAN.md. `Playlists:add`
- * (media add) stays deferred — Phase 8 (D7-06/D7-10).
+ * BlockRange-only, rule #9) land in 07-02-PLAN.md. `Notes:tag` (EDIT-03)
+ * lands in 07-03-PLAN.md. `Playlists:add` (media add) stays deferred —
+ * Phase 8 (D7-06/D7-10).
+ *
+ * Sort Tags (EDIT-04) is ARCHIVE-WIDE, never selection-scoped, so it
+ * deliberately does NOT enter this descriptor at all — it lives entirely
+ * on the "Utilities ▾" `CommandBar` button / `UtilitiesMenu`
+ * (07-03-PLAN.md Task 3). Do not "fix" this by adding a `Notes:sort`-style
+ * entry here; there is no selection for `NEEDS_SELECTION`/`CAPABILITY` to
+ * gate it on.
  */
 const LIVE: ReadonlySet<string> = new Set<string>([
   "Notes:delete",
   "Notes:color",
+  "Notes:tag",
   "Favorites:delete",
   "Favorites:add",
   "Highlights:color",
