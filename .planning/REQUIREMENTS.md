@@ -52,7 +52,7 @@
 - [ ] **EDIT-02**: User can change highlight colors, with overlapping ranges union-merged as the Python app does
 - [ ] **EDIT-03**: User can add, remove, and rename tags
 - [ ] **EDIT-04**: User can reorder items (preserving the two-pass negative-position technique that dodges TagMap uniqueness)
-- [ ] **EDIT-05**: User can mark items as favorites
+- [x] **EDIT-05**: User can mark items as favorites
 - [ ] **EDIT-06**: User can clean/mask data
 - [ ] **EDIT-07**: User can view and edit underlying records directly (data viewer/editor)
 
