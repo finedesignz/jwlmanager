@@ -15,13 +15,17 @@
 //! prevent (see `<the_one_invariant_that_matters>`, 09-01-PLAN.md).
 
 use super::export::{
-    export_bookmarks, export_favorites, export_highlights, export_notes, read_bookmark_id_lines,
-    read_favorite_id_lines, read_highlight_id_lines, read_note_id_records,
+    export_annotations, export_bookmarks, export_favorites, export_highlights, export_notes,
+    format_annotation_record, read_annotation_id_rows, read_bookmark_id_lines, read_favorite_id_lines,
+    read_highlight_id_lines, read_note_id_records,
 };
 use super::header::ExportHeaderCtx;
-use super::import::{parse_bookmarks_file, parse_favorites_file, parse_highlights_file, parse_notes_file};
+use super::import::{
+    parse_annotations_file, parse_bookmarks_file, parse_favorites_file, parse_highlights_file,
+    parse_notes_file,
+};
 use crate::db::color::NonEmptyBlockRangeIds;
-use crate::db::delete::{NonEmptyBookmarkIds, NonEmptyNoteIds};
+use crate::db::delete::{NonEmptyBookmarkIds, NonEmptyLocationIds, NonEmptyNoteIds};
 use crate::db::favorites::NonEmptyTagMapIds;
 use crate::db::resources::ResourceCatalog;
 use crate::error::ArchiveError;
@@ -496,6 +500,182 @@ pub fn export_highlights_incremental(
     })
 }
 
+/// Annotations' wire-recoverable identity key (09-03-PLAN.md
+/// `<annotations_identity_resolution>`): the Annotations wire format never
+/// encodes `LocationId`, so identity must be the pair actually ON the wire —
+/// `DOC` (the `{DOC=}` bracket text, literally `None` when NULL) joined with
+/// `LABEL` (the raw `TextTag`, e.g. `p1`/`h2`). Two annotations sharing one
+/// `LocationId` but carrying different `TextTag`s therefore get distinct
+/// keys and are diffed independently — never collapsed into one identity.
+pub(crate) fn annotations_identity(doc: &str, label: &str) -> String {
+    format!("{doc}{KEY_UNIT_SEP}{label}")
+}
+
+/// Scans a record's header text for the `{DOC=...}` and `{LABEL=...}`
+/// bracket values — the same forward-scan-for-`{key=value}` shape
+/// [`extract_created`] and `import::parse_header_attrs` use, kept as its own
+/// small helper rather than pulling in the full `BTreeMap` scan since only
+/// two keys are ever needed here.
+fn extract_bracket(header: &str, key: &str) -> Option<String> {
+    let needle = format!("{{{key}=");
+    header.find(&needle).and_then(|idx| {
+        let after = &header[idx + needle.len()..];
+        after.find('}').map(|end| after[..end].to_string())
+    })
+}
+
+/// Splits a CRLF-normalized prior Annotations export's TEXT into
+/// `((doc, label), record_text)` pairs, sharing the exact `\n===` forward-scan
+/// boundary discipline [`super::import::parse_annotations_file`] uses (line 1
+/// is the `{ANNOTATIONS}` tag, a boundary is any `\n===` immediately followed
+/// by `{`, and the trailing `==={END}===` sentinel is consumed only as the
+/// FINAL boundary — never emitted as a record of its own, since
+/// `windows(2)` never pairs it with a boundary after it). The record text
+/// hashed is the record's verbatim bytes (module doc's two-layer rule) — DOC
+/// and LABEL are extracted from the header text purely to build the identity
+/// key, never fed back into the hash.
+///
+/// Assumes `text` already passed [`parse_annotations_file`] as a fail-fast
+/// validation gate — a chunk this function can't find a header in is
+/// silently skipped rather than panicking, but that path is not expected to
+/// be reached in practice since the caller never calls this on a file
+/// `parse_annotations_file` rejected.
+pub(crate) fn split_prior_annotation_records(text: &str) -> Vec<((String, String), String)> {
+    let normalized = normalize_line_endings(text);
+    let text: &str = &normalized;
+
+    let first_line_end = text.find('\n').unwrap_or(text.len());
+    let rest = if first_line_end < text.len() {
+        &text[first_line_end + 1..]
+    } else {
+        ""
+    };
+
+    let boundaries: Vec<usize> = rest
+        .match_indices("\n===")
+        .filter(|(idx, _)| rest[*idx + 4..].starts_with('{'))
+        .map(|(idx, _)| idx)
+        .collect();
+
+    let mut records = Vec::new();
+    if boundaries.len() < 2 {
+        return records;
+    }
+
+    for window in boundaries.windows(2) {
+        let (start, end) = (window[0], window[1]);
+        let chunk = &rest[start + 4..end];
+        let Some(header_end) = chunk.find("===\n") else {
+            continue;
+        };
+        let header = &chunk[..header_end];
+        let doc = extract_bracket(header, "DOC").unwrap_or_default();
+        let label = extract_bracket(header, "LABEL").unwrap_or_default();
+        let record_text = format!("\n==={chunk}");
+        records.push(((doc, label), record_text));
+    }
+
+    records
+}
+
+/// Exports Annotations changed since `prior_text` (IO-04, 09-03-PLAN.md Task
+/// 2) — the sharpest identity case in this phase, see
+/// `<annotations_identity_resolution>`. Same two-layer shape as
+/// [`export_notes_incremental`]: the exported set is decided PURELY by
+/// hash-set membership over [`format_annotation_record`]'s output (never the
+/// `(DOC, LABEL)` identity key), and [`diff_records`] runs separately, keyed
+/// by [`annotations_identity`], only to label the summary counts.
+///
+/// **The disclosed over-selection.** [`export_annotations`] selects by
+/// `LocationId` ([`NonEmptyLocationIds`]) — the Annotations wire format has
+/// no per-record selection finer than that, so exporting one changed
+/// annotation pulls every OTHER `InputField` row at the same `LocationId`
+/// along with it (its unchanged siblings ride along). This is over-export,
+/// which the phase's central invariant declares safe, and matches the
+/// precedent already shipped for annotation delete
+/// (`CategoryList.tsx`'s DELETE_COMMANDS comment). Rather than forking the
+/// exporter to avoid it (D9-06 forbids that), the returned summary's
+/// `exported` field carries the EXPORTER'S OWN written-record count — not
+/// `added.len() + modified.len()` — so a caller seeing more records written
+/// than were added/modified has the explanation (LocationId over-selection)
+/// visible in the summary rather than a silently misleading count.
+pub fn export_annotations_incremental(
+    conn: &Connection,
+    prior_text: Option<&str>,
+    header: &ExportHeaderCtx,
+    out_path: &Path,
+) -> Result<IncrementalExportSummary, ArchiveError> {
+    let prior_hashed: Vec<(String, String)> = match prior_text {
+        Some(text) => {
+            // Fail-fast validation gate (D9-05): a malformed prior file
+            // aborts here, before any output file is created.
+            parse_annotations_file(text)?;
+            split_prior_annotation_records(text)
+                .into_iter()
+                .map(|((doc, label), record_text)| {
+                    (annotations_identity(&doc, &label), record_hash(&record_text))
+                })
+                .collect()
+        }
+        None => Vec::new(),
+    };
+    let prior_hash_set: HashSet<&str> =
+        prior_hashed.iter().map(|(_, hash)| hash.as_str()).collect();
+
+    let live_rows = read_annotation_id_rows(conn, None)?;
+    let live_annotated: Vec<(i64, String, String)> = live_rows
+        .iter()
+        .map(|(location_id, row)| {
+            let key = annotations_identity(&row.doc, &row.label);
+            let hash = record_hash(&format_annotation_record(row));
+            (*location_id, key, hash)
+        })
+        .collect();
+
+    // Exported set: hash-set membership ONLY, never the identity key — the
+    // invariant that makes an identity failure bias toward over-export,
+    // never under-export. Collects the DISTINCT LocationIds of every
+    // selected record, since `export_annotations` selects by LocationId.
+    let mut selected_location_ids: Vec<i64> = live_annotated
+        .iter()
+        .filter(|(_, _, hash)| !prior_hash_set.contains(hash.as_str()))
+        .map(|(location_id, _, _)| *location_id)
+        .collect();
+    selected_location_ids.sort_unstable();
+    selected_location_ids.dedup();
+
+    // Summary counts: identity-keyed, computed independently over EVERY live
+    // record's own hash (never the LocationId-expanded selection above), so
+    // an unchanged sibling pulled in by over-selection is never mislabeled
+    // as added/modified.
+    let live_hashed: Vec<(String, String)> = live_annotated
+        .into_iter()
+        .map(|(_, key, hash)| (key, hash))
+        .collect();
+    let diff = diff_records(&prior_hashed, &live_hashed);
+
+    let written = match NonEmptyLocationIds::try_from(selected_location_ids) {
+        Ok(ids) => export_annotations(conn, Some(&ids), header, out_path)?,
+        Err(_) => {
+            // Empty selection is unrepresentable by `NonEmptyLocationIds` by
+            // construction — still write a valid, well-formed empty export
+            // via the SAME exporter (D9-01/D9-04 pattern). `-1` never
+            // matches a real `LocationId`.
+            let Ok(sentinel) = NonEmptyLocationIds::try_from(vec![-1_i64]) else {
+                unreachable!("a single-element Vec is always a valid NonEmptyLocationIds");
+            };
+            export_annotations(conn, Some(&sentinel), header, out_path)?
+        }
+    };
+
+    Ok(IncrementalExportSummary {
+        added: diff.added.len(),
+        modified: diff.modified.len(),
+        deleted_candidates: diff.deleted_candidates.len(),
+        exported: written,
+    })
+}
+
 /// Exports Notes changed since `prior_text` (IO-04, 09-01-PLAN.md Task 2) —
 /// the `export_notes_incremental` Tauri command's pure body, callable
 /// directly by tests (this codebase's established `*_impl` shape: a thin
@@ -737,5 +917,45 @@ mod tests {
         let records = split_prior_note_records(text);
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].0, "2026-01-01T00:00:00");
+    }
+
+    #[test]
+    fn annotations_identity_varies_by_label_at_the_same_doc() {
+        // Two annotations sharing DOC ("None") but carrying different
+        // TextTags must never collapse into one identity
+        // (09-03-PLAN.md prohibitions).
+        assert_ne!(
+            annotations_identity("None", "p1"),
+            annotations_identity("None", "p2")
+        );
+    }
+
+    #[test]
+    fn split_prior_annotation_records_retains_both_siblings_at_one_location() {
+        let text = "{ANNOTATIONS}\n \
+            \n==={PUB=w}{DOC=None}{LABEL=p1}===\nFirst value\
+            \n==={PUB=w}{DOC=None}{LABEL=p2}===\nSecond value\
+            \n==={END}===";
+        let records = split_prior_annotation_records(text);
+        assert_eq!(records.len(), 2, "both siblings at one LocationId's DOC must be retained");
+        assert_eq!(records[0].0, ("None".to_string(), "p1".to_string()));
+        assert_eq!(records[1].0, ("None".to_string(), "p2".to_string()));
+        assert_ne!(
+            annotations_identity(&records[0].0 .0, &records[0].0 .1),
+            annotations_identity(&records[1].0 .0, &records[1].0 .1),
+        );
+    }
+
+    #[test]
+    fn split_prior_annotation_records_never_emits_the_end_sentinel() {
+        let text = "{ANNOTATIONS}\n \
+            \n==={PUB=w}{DOC=None}{LABEL=p1}===\nOnly value\
+            \n==={END}===";
+        let records = split_prior_annotation_records(text);
+        assert_eq!(records.len(), 1);
+        assert!(
+            !records.iter().any(|(_, text)| text.contains("{END}")),
+            "the sentinel record must never be diffed as data"
+        );
     }
 }

@@ -259,36 +259,42 @@ pub fn export_bookmarks(
 
 /// One exported Annotation record's already-formatted attributes, ordered
 /// per `JWLManager.py:1394-1404`.
-struct AnnotationExportRow {
-    label: String,
-    value: String,
+pub(crate) struct AnnotationExportRow {
+    pub(crate) label: String,
+    pub(crate) value: String,
     /// `str(DocumentId)` — literally the four-character string `None` when
     /// NULL (`JWLManager.py:1418`'s `str(item['DOC'])`), unlike `pub_sym`
     /// below which is never wrapped in `str()` by Python.
-    doc: String,
+    pub(crate) doc: String,
     /// `IssueTagNumber` when `> 10000000`, else omitted entirely (never
     /// rendered as `{ISSUE=None}` or `{ISSUE=0}`) — `JWLManager.py:1400-1403`.
-    issue: Option<i64>,
+    pub(crate) issue: Option<i64>,
     /// The raw `KeySymbol` string. Python concatenates this directly
     /// (`'{PUB='+item['PUB']+'}'`, NOT `str()`-wrapped) — a NULL `KeySymbol`
     /// would raise a `TypeError` and crash Python's own export; this is a
     /// pathological/corrupt-archive case no valid data hits, so Rust renders
     /// an empty string rather than reproducing a crash (a documented,
     /// harmless strengthening, not a behavior Rust needs "parity" with).
-    pub_sym: String,
+    pub(crate) pub_sym: String,
 }
 
 /// Reads every Annotation (`InputField`) row (or, when `ids` is given,
 /// exactly the selected `LocationId`s — the Annotations browse-list identity,
 /// `db::delete::NonEmptyLocationIds`'s doc comment) into
-/// [`AnnotationExportRow`]s, `ORDER BY doc, i` exactly as Python's SQL
-/// (`JWLManager.py:1378-1392`) — `i` is the numeric suffix parsed out of
-/// `TextTag` via `CAST(TRIM(TextTag, 'abcdefghijklmnopqrstuvwxyz') AS INT)`.
-fn read_annotation_rows(
+/// `(LocationId, AnnotationExportRow)` pairs, `ORDER BY doc, i` exactly as
+/// Python's SQL (`JWLManager.py:1378-1392`) — `i` is the numeric suffix
+/// parsed out of `TextTag` via
+/// `CAST(TRIM(TextTag, 'abcdefghijklmnopqrstuvwxyz') AS INT)`. The SAME query
+/// as [`read_annotation_rows`], with `LocationId` selected as a leading
+/// column so incremental export's diff engine (`db::io::diff`,
+/// 09-03-PLAN.md Task 1) can pair each record with the `LocationId` that
+/// would select it — [`read_annotation_rows`] is now a thin projection over
+/// this function — exactly one SQL column list exists for Annotations.
+pub(crate) fn read_annotation_id_rows(
     conn: &Connection,
     ids: Option<&NonEmptyLocationIds>,
-) -> Result<Vec<AnnotationExportRow>, ArchiveError> {
-    let base_sql = "SELECT TextTag, Value, l.DocumentId doc, l.IssueTagNumber, l.KeySymbol, \
+) -> Result<Vec<(i64, AnnotationExportRow)>, ArchiveError> {
+    let base_sql = "SELECT LocationId, TextTag, Value, l.DocumentId doc, l.IssueTagNumber, l.KeySymbol, \
          CAST(TRIM(TextTag, 'abcdefghijklmnopqrstuvwxyz') AS INT) i \
          FROM InputField LEFT JOIN Location l USING (LocationId) \
          WHERE Value <> '' AND Value IS NOT NULL";
@@ -308,31 +314,66 @@ fn read_annotation_rows(
 
     let mut stmt = conn
         .prepare(&sql)
-        .map_err(|e| map_sqlite_err(e, "read_annotation_rows: prepare"))?;
+        .map_err(|e| map_sqlite_err(e, "read_annotation_id_rows: prepare"))?;
     let rows = stmt
         .query_map(rusqlite::params_from_iter(bound.iter()), |row| {
-            let label: String = row.get(0)?;
-            let value: String = row.get(1)?;
-            let doc: Option<i64> = row.get(2)?;
-            let issue_tag_number: Option<i64> = row.get(3)?;
-            let pub_sym: Option<String> = row.get(4)?;
-            Ok((label, value, doc, issue_tag_number, pub_sym))
+            let location_id: i64 = row.get(0)?;
+            let label: String = row.get(1)?;
+            let value: String = row.get(2)?;
+            let doc: Option<i64> = row.get(3)?;
+            let issue_tag_number: Option<i64> = row.get(4)?;
+            let pub_sym: Option<String> = row.get(5)?;
+            Ok((location_id, label, value, doc, issue_tag_number, pub_sym))
         })
-        .map_err(|e| map_sqlite_err(e, "read_annotation_rows: query"))?;
+        .map_err(|e| map_sqlite_err(e, "read_annotation_id_rows: query"))?;
 
     let mut out = Vec::new();
     for row in rows {
-        let (label, value, doc, issue_tag_number, pub_sym) =
-            row.map_err(|e| map_sqlite_err(e, "read_annotation_rows: read row"))?;
-        out.push(AnnotationExportRow {
-            label,
-            value: value.trim().to_string(),
-            doc: doc.map(|d| d.to_string()).unwrap_or_else(|| "None".to_string()),
-            issue: issue_tag_number.filter(|n| *n > 10_000_000),
-            pub_sym: pub_sym.unwrap_or_default(),
-        });
+        let (location_id, label, value, doc, issue_tag_number, pub_sym) =
+            row.map_err(|e| map_sqlite_err(e, "read_annotation_id_rows: read row"))?;
+        out.push((
+            location_id,
+            AnnotationExportRow {
+                label,
+                value: value.trim().to_string(),
+                doc: doc.map(|d| d.to_string()).unwrap_or_else(|| "None".to_string()),
+                issue: issue_tag_number.filter(|n| *n > 10_000_000),
+                pub_sym: pub_sym.unwrap_or_default(),
+            },
+        ));
     }
     Ok(out)
+}
+
+fn read_annotation_rows(
+    conn: &Connection,
+    ids: Option<&NonEmptyLocationIds>,
+) -> Result<Vec<AnnotationExportRow>, ArchiveError> {
+    Ok(read_annotation_id_rows(conn, ids)?
+        .into_iter()
+        .map(|(_, row)| row)
+        .collect())
+}
+
+/// Formats one Annotation record's exact bytes — the SAME bytes
+/// [`export_annotations`]' write loop writes per record, extracted into a
+/// pure function so incremental export's diff engine (`db::io::diff`,
+/// 09-03-PLAN.md Task 1) can hash the identical text `export_annotations`
+/// writes, rather than maintaining a second, independently-drifting
+/// formatter. Includes the leading `\n===` opener and the record's `\n`
+/// header terminator plus its `Value` body; does NOT include the trailing
+/// `==={END}===` sentinel, which stays in `export_annotations` (it is written
+/// once per file, not once per record).
+pub(crate) fn format_annotation_record(row: &AnnotationExportRow) -> String {
+    let mut out = String::new();
+    out.push_str("\n===");
+    out.push_str(&format!("{{PUB={}}}", row.pub_sym));
+    if let Some(issue) = row.issue {
+        out.push_str(&format!("{{ISSUE={issue}}}"));
+    }
+    out.push_str(&format!("{{DOC={}}}{{LABEL={}}}===\n", row.doc, row.label));
+    out.push_str(&row.value);
+    out
 }
 
 /// Exports Annotations (whole category when `ids` is `None`, D8-10
@@ -354,16 +395,7 @@ pub fn export_annotations(
     file.write_all(build_export_header(header).as_bytes())
         .map_err(ArchiveError::from)?;
     for row in &rows {
-        file.write_all(b"\n===").map_err(ArchiveError::from)?;
-        file.write_all(format!("{{PUB={}}}", row.pub_sym).as_bytes())
-            .map_err(ArchiveError::from)?;
-        if let Some(issue) = row.issue {
-            file.write_all(format!("{{ISSUE={issue}}}").as_bytes())
-                .map_err(ArchiveError::from)?;
-        }
-        file.write_all(format!("{{DOC={}}}{{LABEL={}}}===\n", row.doc, row.label).as_bytes())
-            .map_err(ArchiveError::from)?;
-        file.write_all(row.value.as_bytes())
+        file.write_all(format_annotation_record(row).as_bytes())
             .map_err(ArchiveError::from)?;
     }
     file.write_all(b"\n==={END}===").map_err(ArchiveError::from)?;
