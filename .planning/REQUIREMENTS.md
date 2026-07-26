@@ -49,7 +49,7 @@
 ### Editing (EDIT)
 
 - [x] **EDIT-01**: User can delete selected items from any category
-- [ ] **EDIT-02**: User can change highlight colors, with overlapping ranges union-merged as the Python app does
+- [x] **EDIT-02**: User can change highlight colors, with overlapping ranges union-merged as the Python app does
 - [ ] **EDIT-03**: User can add, remove, and rename tags
 - [ ] **EDIT-04**: User can reorder items (preserving the two-pass negative-position technique that dodges TagMap uniqueness)
 - [x] **EDIT-05**: User can mark items as favorites

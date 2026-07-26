@@ -161,11 +161,11 @@
   4. User can open a raw data viewer/editor and directly edit underlying records
   5. Each of the above is covered by a round-trip semantic-equivalence test
 
-**Plans**: 1/5 plans executed
+**Plans**: 2/5 plans executed
 **UI hint**: yes
 
 - [x] 07-01-PLAN.md — Tracer: shared db/edit.rs spine + EditPreviewDialog rename + Favorites mark/unmark end-to-end (EDIT-05) (Wave 1)
-- [ ] 07-02-PLAN.md — merge_block_ranges primitive + highlight recolor + Highlights delete; D7-03 decision checkpoint (EDIT-02) (Wave 2)
+- [x] 07-02-PLAN.md — merge_block_ranges primitive + highlight recolor + Highlights delete; D7-03 decision checkpoint (EDIT-02) (Wave 2)
 - [ ] 07-03-PLAN.md — Tag add/remove/rename + archive-wide reorder + Utilities menu (EDIT-03, EDIT-04) (Wave 3)
 - [ ] 07-04-PLAN.md — Clean + Mask with typed-confirm gate (EDIT-06) (Wave 4)
 - [ ] 07-05-PLAN.md — Field-constrained record editor + remaining per-category deletes + cross-op round-trip suite (EDIT-07) (Wave 5)
@@ -236,7 +236,7 @@
 | 4. Schema Downgrade | 3/3 | Complete   | 2026-07-22 |
 | 5. Two-Archive Merge | 3/3 | Complete | SHIP |
 | 6. Full Data Browsing | 4/4 | In Progress|  |
-| 7. Full Editing | 1/5 | In Progress|  |
+| 7. Full Editing | 2/5 | In Progress|  |
 | 8. Import / Export Parity | 0/TBD | Not started | - |
 | 9. Incremental Export | 0/TBD | Not started | - |
 | 10. N-Way Merge Fold | 0/TBD | Not started | - |

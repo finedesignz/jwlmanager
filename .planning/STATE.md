@@ -5,13 +5,13 @@ milestone_name: milestone
 current_phase: 1
 current_phase_name: Foundation Slice
 status: verifying
-stopped_at: Completed 07-01-PLAN.md
-last_updated: "2026-07-26T13:41:21.915Z"
+stopped_at: Completed 07-02-PLAN.md
+last_updated: "2026-07-26T14:35:07.133Z"
 progress:
   total_phases: 7
   completed_phases: 6
   total_plans: 29
-  completed_plans: 24
+  completed_plans: 25
 ---
 
 # Project State — JWL Manager (Tauri)
@@ -28,7 +28,7 @@ Plan: 3 of 3 complete (delete preview/confirm UI)
 **Phase:** 1 of 11 — Open, View, Save (Foundation Slice)
 **Plan:** 7 of 7
 **Status:** Phase complete — ready for verification
-**Progress:** [████████░░] 83%
+**Progress:** [█████████░] 86%
 
 ## Performance Metrics
 
@@ -43,6 +43,7 @@ Plan: 3 of 3 complete (delete preview/confirm UI)
 | Phase 6 P02 | 30m | 3 tasks | 5 files |
 | Phase 06 P04 | ~8m | 2 tasks | 3 files |
 | Phase 07 P01 | resumed | 3 tasks | 13 files |
+| Phase 07 P02 | single session | 3 tasks | 16 files |
 
 ## Accumulated Context
 
@@ -82,6 +83,7 @@ Plan: 3 of 3 complete (delete preview/confirm UI)
 - [Phase ?]: jwlCore dir-pair merge wrote only userData.db (no loose media relocated); media fold-back is an empirically-verified no-op (branch a)
 - [Phase ?]: 06-02: five category getters (db/browse.rs) surface the correct identity PK as row.id (Bookmark=BookmarkId, Favorite=TagMapId, Highlight=BlockRangeId, Annotation=LocationId, Playlist=PlaylistItemId), never the join's LocationId
 - [Phase ?]: 06-02: one generic list_category(Category) command dispatches all six getters keyed by the ts-rs enum, not six commands nor a translated display string
+- [Phase ?]: D7-03 resolved strict Python parity: merge_block_ranges ships standalone, recolor never invokes it
 
 ### Todos
 
@@ -97,6 +99,6 @@ Plan: 3 of 3 complete (delete preview/confirm UI)
 
 **Resume file:** None
 
-**Last session:** 2026-07-26T13:41:21.885Z
-**Stopped at:** Completed 07-01-PLAN.md
+**Last session:** 2026-07-26T14:35:07.107Z
+**Stopped at:** Completed 07-02-PLAN.md
 **Next action:** Execute 03-03-PLAN.md (Python differential test against real v14 owner archives), then Phase 3 verification.
