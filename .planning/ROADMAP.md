@@ -223,7 +223,11 @@ Plans:
   2. The dry-run preview from Phase 5 extends to show the cumulative effect across all inputs
   3. Result matches performing the equivalent sequence of pairwise merges, verified by round-trip test
 
-**Plans**: TBD
+**Plans**: 3 plans (2 waves)
+
+- [ ] 10-01-PLAN.md — Fold chain: generalized copy source, shared dry-run/commit loop, single atomic promote, two Tauri commands, criterion 1+3 tests (Wave 1)
+- [ ] 10-02-PLAN.md — Failure envelope (step-k pristine, cleanup, immediate abort), intermediate-step media, D10-06 playlist-graph attempt (Wave 2)
+- [ ] 10-03-PLAN.md — FoldMergeDialog reorderable source list + CommandBar multi-pick, aggregate preview, single busy state (Wave 2)
 
 ### Phase 11: Platform Polish (Signing, Localization, Theme)
 
