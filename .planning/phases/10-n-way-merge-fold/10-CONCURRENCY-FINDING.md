@@ -111,3 +111,52 @@ Additionally:
 - Typed errors / no `unwrap`/`panic` rule applies to production code; the test file already used
   `.unwrap()`/`.expect()` throughout (permitted in test code), and the new `.lock().unwrap()`
   matches that existing convention.
+
+## 5. Follow-up — extending the lock to the other jwlCore-invoking binaries
+
+Section 3's fix was scoped to `fold_merge_tests.rs` only, because that was the one binary where
+the flake had actually been *observed*. `merge_orchestration.rs` and `merge_ffi.rs` invoke the
+same DLL via the same `*_with_lib_path` cores and carry the identical theoretical risk (same
+`PATH`-mutating loader, same process-global `getLastResult()`), but were left unguarded. Absence
+of an observed flake there is not evidence of safety — the fold-tests flake itself was only
+1-in-4 — so this follow-up closes the gap before release.
+
+**Key nuance:** `cargo test` runs each test *binary* as its own OS process. The shared state
+(`PATH` env var, jwlCore's process-global result buffer) is process-global, so cross-binary
+parallelism was never at risk — `merge_orchestration`, `merge_ffi`, and `fold_merge_tests`
+running concurrently as three separate `cargo test` child processes cannot race each other. The
+race is only ever between the `#[test]` fn *threads* Cargo's runner schedules within one binary.
+Each binary therefore needs its own `static Mutex` — sharing one across binaries is both
+impossible (separate processes, separate address spaces) and would misstate the actual risk.
+
+**Binaries guarded:**
+
+- **`merge_orchestration.rs`** — 5 tests invoke the real DLL (`merge_source_immutable`,
+  `merge_dry_run_matches_commit`, `merge_overwrite_content_counted`,
+  `merge_commit_promote_atomic`, `merge_media_verification`). Added its own
+  `static JWLCORE_TEST_LOCK: Mutex<()>` (doc comment mirrors `fold_merge_tests.rs`'s, cross-
+  referencing it and explaining the per-binary-process rationale above) and a
+  `let _lock = JWLCORE_TEST_LOCK.lock().unwrap();` immediately after each test's
+  `host_lib_or_skip` gate, before any DLL-touching call.
+
+**Binary skipped:**
+
+- **`merge_ffi.rs`** — carries exactly ONE `#[test]` fn that touches the real DLL
+  (`merge_databases_ffi_merges_synthetic_pair`). A single test cannot race itself within a
+  binary, so adding a mutex here would be pointless ceremony with no test to serialize against.
+  Left unmodified.
+
+**Per-run results (Windows host, `--jobs 2` mandatory — default parallelism OOMs the linker,
+`os error 1455`, unrelated to this issue):**
+
+| Binary | Run 1 | Run 2 | Run 3 |
+|---|---|---|---|
+| `merge_orchestration` (5 tests) | ok — 5 passed | ok — 5 passed | ok — 5 passed |
+| `merge_ffi` (1 test, unguarded by design) | ok — 1 passed | ok — 1 passed | ok — 1 passed |
+
+- `cargo test --jobs 2` (full suite, once, after the change): all binaries `test result: ok`,
+  `0 failed` — no regression.
+- `cargo clippy --all-targets -- -D warnings`: clean, no warnings.
+
+**Constraints honored:** no new Cargo dependency (`std::sync::Mutex` only, matching Section 3's
+convention); no production code touched; no existing assertion weakened or restructured.
