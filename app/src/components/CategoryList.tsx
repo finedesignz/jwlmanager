@@ -70,11 +70,18 @@ const EXPORT_COMMANDS: Partial<Record<Category, string>> = {
 /**
  * The Tauri command backing "Export changed…" (IO-04, 09-01-PLAN.md) — a
  * prior-file-then-target-file flow distinct from [`EXPORT_COMMANDS`]'s
- * plain export. Notes-only this plan; plans 02-04 add the remaining
- * categories to this SAME map, never a parallel one.
+ * plain export. Covers all five .txt-wire categories (plans 01-03).
+ * Playlists has NO entry and never will (D9-06): its export is a
+ * whole-database copy inside a zip container, not per-row wire records —
+ * there is nothing to diff. The render/dispatch logic below only asks
+ * whether a category has an entry here, never which category it is.
  */
 const INCREMENTAL_EXPORT_COMMANDS: Partial<Record<Category, string>> = {
   Notes: "export_notes_incremental",
+  Favorites: "export_favorites_incremental",
+  Bookmarks: "export_bookmarks_incremental",
+  Annotations: "export_annotations_incremental",
+  Highlights: "export_highlights_incremental",
 };
 
 /**

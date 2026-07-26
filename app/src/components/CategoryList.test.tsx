@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import CategoryList from "./CategoryList";
 import type { BrowseRow } from "../bindings/BrowseRow";
+import type { Category } from "../bindings/Category";
 
 const invokeMock = vi.fn();
 const openMock = vi.fn();
@@ -382,16 +383,40 @@ describe("CategoryList — Favorites import flow (IO-02, 08-01-PLAN.md)", () => 
   });
 });
 
-describe("CategoryList — Notes incremental export flow (IO-04, 09-01-PLAN.md)", () => {
-  it("the action is absent for a category with no incremental export command", () => {
-    render(<CategoryList rows={[]} category="Favorites" />);
+describe("CategoryList — incremental export UI, all five categories (IO-04, 09-01..09-04-PLAN.md)", () => {
+  it("the action is absent for Playlists — no per-row wire records to diff (D9-06)", () => {
+    render(<CategoryList rows={[]} category="Playlists" />);
     expect(screen.queryByTestId("category-list-export-incremental-button")).not.toBeInTheDocument();
   });
 
-  it("the action is present for Notes", () => {
-    render(<CategoryList rows={[]} category="Notes" />);
-    expect(screen.getByTestId("category-list-export-incremental-button")).toBeInTheDocument();
-  });
+  const incrementalCases: Array<{ category: Category; command: string }> = [
+    { category: "Notes", command: "export_notes_incremental" },
+    { category: "Favorites", command: "export_favorites_incremental" },
+    { category: "Bookmarks", command: "export_bookmarks_incremental" },
+    { category: "Annotations", command: "export_annotations_incremental" },
+    { category: "Highlights", command: "export_highlights_incremental" },
+  ];
+
+  it.each(incrementalCases)(
+    "the action is present for $category and invokes $command with the prior and target paths",
+    async ({ category, command }) => {
+      openMock.mockResolvedValue(`/tmp/${category}_prior.txt`);
+      saveMock.mockResolvedValue(`/tmp/${category}-changed.txt`);
+      invokeMock.mockResolvedValue({ added: 1, modified: 1, deleted_candidates: 0, exported: 2 });
+      render(<CategoryList rows={[]} category={category} />);
+
+      const button = screen.getByTestId("category-list-export-incremental-button");
+      expect(button).toBeInTheDocument();
+      fireEvent.click(button);
+
+      await vi.waitFor(() =>
+        expect(invokeMock).toHaveBeenCalledWith(command, {
+          path: `/tmp/${category}-changed.txt`,
+          priorPath: `/tmp/${category}_prior.txt`,
+        }),
+      );
+    },
+  );
 
   it("cancelling the prior-file picker makes no backend call", async () => {
     openMock.mockResolvedValue(null);
