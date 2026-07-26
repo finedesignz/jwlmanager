@@ -1310,3 +1310,819 @@ fn annotations_incremental_converges() {
     assert_eq!(second_summary.added, 0, "second run must converge to zero added");
     assert_eq!(second_summary.modified, 0, "second run must converge to zero modified");
 }
+
+// ---------------------------------------------------------------------------
+// Cross-category adversarial invariant, CRLF-equivalence, wrong-category and
+// empty-prior-body suites (09-04-PLAN.md Task 2). These prove the phase's
+// central property category by category: the exported set is
+// `{live records whose hash is absent from the prior hash set}` and NEVER
+// consults the identity key — so an identity collision, ambiguity, or churn
+// can only bias toward over-export, never under-export.
+// ---------------------------------------------------------------------------
+
+use std::collections::HashSet;
+
+/// Extracts each Note's own content body into a set — a content-level
+/// fingerprint, not a count, so a coincidental record-count match can never
+/// pass this comparison.
+fn notes_record_set(text: &str) -> HashSet<String> {
+    let (_, records) = parse_notes_file(text).expect("valid Notes file");
+    records.into_iter().map(|r| r.note).collect()
+}
+
+fn favorites_record_set(text: &str) -> HashSet<String> {
+    let records = parse_favorites_file(text).expect("valid Favorites file");
+    records.into_iter().map(|r| format!("{r:?}")).collect()
+}
+
+fn bookmarks_record_set(text: &str) -> HashSet<String> {
+    let records = parse_bookmarks_file(text).expect("valid Bookmarks file");
+    records.into_iter().map(|r| format!("{r:?}")).collect()
+}
+
+fn highlights_record_set(text: &str) -> HashSet<String> {
+    let records = parse_highlights_file(text).expect("valid Highlights file");
+    records.into_iter().map(|r| format!("{r:?}")).collect()
+}
+
+fn annotations_record_set(text: &str) -> HashSet<String> {
+    let records = parse_annotations_file(text).expect("valid Annotations file");
+    records.into_iter().map(|r| r.value).collect()
+}
+
+/// **The invariant test (Notes).** Two notes with an IDENTICAL `{CREATED=}`
+/// value — a genuine identity-key collision, not merely a theoretical one —
+/// prove `diff_records` never uses the key to decide membership: it iterates
+/// the live Vec directly, so a collision can only mislabel added-vs-modified,
+/// never drop a record from the exported set. One collides-with-and-is-edited,
+/// the sibling with the SAME key stays untouched; a third, brand-new note is
+/// also added. Asserted by comparing extracted content sets, never counts.
+#[test]
+fn notes_invariant_identity_collision_and_new_record_all_exported() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    let same_created = "2024-03-01T00:00:00";
+    {
+        let conn = Connection::open(&db_path).expect("open db");
+        conn.execute(
+            "INSERT INTO Note (Guid, UserMarkId, LocationId, Title, Content, BlockType, \
+             BlockIdentifier, LastModified, Created) \
+             VALUES ('note-collide-1', NULL, NULL, 'T1', 'Untouched content', 0, NULL, ?1, ?1)",
+            rusqlite::params![same_created],
+        )
+        .expect("insert collider 1");
+        conn.execute(
+            "INSERT INTO Note (Guid, UserMarkId, LocationId, Title, Content, BlockType, \
+             BlockIdentifier, LastModified, Created) \
+             VALUES ('note-collide-2', NULL, NULL, 'T2', 'Original content 2', 0, NULL, ?1, ?1)",
+            rusqlite::params![same_created],
+        )
+        .expect("insert collider 2");
+    }
+
+    let out_dir = TempDir::new().expect("tempdir");
+    let prior_path = out_dir.path().join("prior.txt");
+    let prior_text = export_baseline(&db_path, &prior_path);
+
+    // Edit ONLY the second colliding note; the first (same identity key)
+    // stays untouched, and a brand-new note is also added.
+    {
+        let conn = Connection::open(&db_path).expect("open db");
+        conn.execute(
+            "UPDATE Note SET Content = 'Edited content 2' WHERE Guid = 'note-collide-2'",
+            [],
+        )
+        .expect("edit collider 2");
+    }
+    seed_new_note(&db_path);
+
+    let conn = Connection::open(&db_path).expect("open db");
+    let incremental_path = out_dir.path().join("incremental.txt");
+    let summary = export_notes_incremental(
+        &conn,
+        Some(&prior_text),
+        &catalog(),
+        &pinned_header(),
+        "2099-01-01T00:00:00Z",
+        &incremental_path,
+    )
+    .expect("incremental export");
+
+    assert_eq!(summary.added, 1, "the identity collision must not swallow the new note into 'modified'");
+    assert_eq!(summary.modified, 1);
+
+    let text = std::fs::read_to_string(&incremental_path).expect("read incremental output");
+    let exported = notes_record_set(&text);
+    assert!(
+        exported.contains("Edited content 2"),
+        "the edited record must be exported despite sharing its identity key with an untouched sibling"
+    );
+    assert!(
+        exported.contains("Second note content"),
+        "the brand-new record must be exported"
+    );
+    assert!(
+        !exported.contains("Untouched content"),
+        "the untouched sibling — same identity key as the edited record — must NOT be exported"
+    );
+}
+
+/// **The invariant test (Favorites).** Every wire field is identity (D9-02
+/// `<identity_key_specification>`), so there is no possible edited-but-same-
+/// key case — this proves the weaker but still content-level property: an
+/// untouched Favorite is excluded and a newly added one is included, via a
+/// record-set comparison rather than a count.
+#[test]
+fn favorites_invariant_untouched_excluded_added_included() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_one_favorite(&db_path);
+    let prior_text = read_favorites_prior_fixture();
+
+    seed_second_favorite(&db_path);
+
+    let conn = Connection::open(&db_path).expect("open db");
+    let out_dir = TempDir::new().expect("tempdir");
+    let incremental_path = out_dir.path().join("incremental.txt");
+    export_favorites_incremental(
+        &conn,
+        Some(&prior_text),
+        &pinned_header_for("{FAVORITES}"),
+        &incremental_path,
+    )
+    .expect("incremental export");
+
+    let text = std::fs::read_to_string(&incremental_path).expect("read incremental output");
+    let exported = favorites_record_set(&text);
+    let prior_records = favorites_record_set(&prior_text);
+    assert_eq!(exported.len(), 1, "exactly the newly added favorite is written");
+    assert!(
+        exported.is_disjoint(&prior_records),
+        "the untouched prior favorite must not appear in the exported set"
+    );
+}
+
+/// **The invariant test (Bookmarks).** Two bookmarks share an IDENTICAL
+/// identity key (BookNumber/Chapter/DocumentId/IssueTagNumber/KeySymbol/
+/// MepsLanguage/Type/Slot all equal) but different `Title` — a real identity
+/// collision, constructed via two Bookmarks sharing one `LocationId` and
+/// `Slot`. Editing the first and adding the second means BOTH live records
+/// differ in hash from the single prior entry at that shared key —
+/// `diff_records` never removes a key from `prior_keys` once matched, so a
+/// genuine collision like this labels BOTH `modified` rather than one
+/// `added`/one `modified`. The mislabeling is exactly the "identity is wrong
+/// or ambiguous" case this test exists to probe: the LABEL can be wrong, but
+/// membership in the exported set (hash-based, never key-based) cannot drop
+/// either record.
+#[test]
+fn bookmarks_invariant_identity_collision_and_new_record_all_exported() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    let bookmark_id = seed_one_bookmark(&db_path);
+    let prior_text = read_bookmarks_prior_fixture();
+
+    // A second bookmark at a DIFFERENT PublicationLocationId, but pointing at
+    // the SAME LocationId (910) as `seed_one_bookmark`'s — since Bookmarks'
+    // identity key is built entirely from the resolved Location fields plus
+    // Slot, two Bookmarks sharing one LocationId AND Slot are a genuine
+    // identity collision (`Location`'s own UNIQUE constraint on
+    // BookNumber/ChapterNumber/KeySymbol/MepsLanguage/Type rules out a
+    // second, distinct Location row with identical resolved fields).
+    {
+        let conn = Connection::open(&db_path).expect("open db");
+        conn.execute(
+            "INSERT INTO Location (LocationId, BookNumber, ChapterNumber, DocumentId, Track, \
+             IssueTagNumber, KeySymbol, MepsLanguage, Type) \
+             VALUES (911, NULL, NULL, 1001, 5, 0, 'pub-x', 0, 0)",
+            [],
+        )
+        .expect("insert second PublicationLocationId");
+        conn.execute(
+            "INSERT INTO Bookmark (BookmarkId, LocationId, PublicationLocationId, Slot, Title, \
+             Snippet, BlockType, BlockIdentifier) \
+             VALUES (911, 910, 911, 0, 'Untouched Title', 'Untouched Snippet', 0, NULL)",
+            [],
+        )
+        .expect("insert colliding Bookmark");
+    }
+
+    {
+        let conn = Connection::open(&db_path).expect("open db");
+        conn.execute(
+            "UPDATE Bookmark SET Title = 'Edited Title' WHERE BookmarkId = ?1",
+            rusqlite::params![bookmark_id],
+        )
+        .expect("edit first bookmark");
+    }
+
+    let conn = Connection::open(&db_path).expect("open db");
+    let out_dir = TempDir::new().expect("tempdir");
+    let incremental_path = out_dir.path().join("incremental.txt");
+    let summary = export_bookmarks_incremental(
+        &conn,
+        Some(&prior_text),
+        &pinned_header_for("{BOOKMARKS}"),
+        &incremental_path,
+    )
+    .expect("incremental export");
+
+    assert_eq!(
+        summary.modified, 2,
+        "an identity-key collision must mislabel neither bookmark OUT of the exported set"
+    );
+    assert_eq!(summary.added, 0);
+
+    let text = std::fs::read_to_string(&incremental_path).expect("read incremental output");
+    assert!(text.contains("Edited Title"), "the edited bookmark must be exported");
+    assert!(text.contains("Untouched Snippet"), "the new colliding bookmark must be exported");
+}
+
+/// **The invariant test (Highlights).** Two highlights share an IDENTICAL
+/// identity key (BlockType/Identifier/StartToken/EndToken plus all seven
+/// Location fields) but different `ColorIndex` — a real collision. Recoloring
+/// only one must not suppress its export, and must not falsely export the
+/// untouched collider.
+#[test]
+fn highlights_invariant_identity_collision_and_new_record_all_exported() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    let user_mark_id = seed_one_highlight(&db_path);
+    let prior_text = read_highlights_prior_fixture();
+
+    // A second highlight — its OWN UserMark/BlockRange, but pointing at the
+    // SAME LocationId (920) and the SAME BlockType/Identifier/StartToken/
+    // EndToken as `seed_one_highlight`'s — since Highlights' identity key
+    // excludes ColorIndex/Version, this is a genuine identity collision
+    // (`Location`'s own UNIQUE constraint rules out a second, distinct
+    // Location row with identical resolved fields).
+    {
+        let conn = Connection::open(&db_path).expect("open db");
+        conn.execute(
+            "INSERT INTO UserMark (UserMarkId, ColorIndex, LocationId, StyleIndex, UserMarkGuid, Version) \
+             VALUES (921, 2, 920, 0, 'fixture-highlight-usermark-0921', 1)",
+            [],
+        )
+        .expect("insert colliding UserMark");
+        conn.execute(
+            "INSERT INTO BlockRange (BlockRangeId, BlockType, Identifier, StartToken, EndToken, UserMarkId) \
+             VALUES (921, 1, 1, 0, 5, 921)",
+            [],
+        )
+        .expect("insert colliding BlockRange");
+    }
+
+    {
+        let conn = Connection::open(&db_path).expect("open db");
+        conn.execute(
+            "UPDATE UserMark SET ColorIndex = 3 WHERE UserMarkId = ?1",
+            rusqlite::params![user_mark_id],
+        )
+        .expect("recolor first highlight");
+    }
+
+    let conn = Connection::open(&db_path).expect("open db");
+    let out_dir = TempDir::new().expect("tempdir");
+    let incremental_path = out_dir.path().join("incremental.txt");
+    let summary = export_highlights_incremental(
+        &conn,
+        Some(&prior_text),
+        &pinned_header_for("{HIGHLIGHTS}"),
+        &incremental_path,
+    )
+    .expect("incremental export");
+
+    // Both live highlights share ONE identity key (ColorIndex/Version are
+    // excluded from it) and BOTH differ in hash from the single prior entry
+    // at that key — `diff_records` never removes a key from `prior_keys`
+    // once matched, so a genuine collision like this labels BOTH `modified`
+    // rather than one `added`/one `modified`. This mislabeling is exactly
+    // the "identity is wrong or ambiguous" case the invariant test exists to
+    // probe: the label can be wrong, but membership in the exported set
+    // (hash-set based, never key-based) cannot drop either record.
+    assert_eq!(
+        summary.modified, 2,
+        "an identity-key collision must mislabel neither highlight OUT of the exported set"
+    );
+    assert_eq!(summary.added, 0);
+
+    let text = std::fs::read_to_string(&incremental_path).expect("read incremental output");
+    let exported = highlights_record_set(&text);
+    let recolored = exported.iter().any(|r| r.contains("color_index: 3"));
+    let new_one = exported.iter().any(|r| r.contains("color_index: 2"));
+    let untouched_original = exported.iter().any(|r| r.contains("color_index: 1"));
+    assert!(recolored, "the recolored highlight must be exported");
+    assert!(new_one, "the new colliding highlight must be exported");
+    assert!(
+        !untouched_original,
+        "the prior's own (now-superseded) colorindex-1 hash must not itself appear as a live record"
+    );
+}
+
+/// **The invariant test (Annotations)**, the phase's sharpest case: 09-03
+/// already proved the composite `(DOC, LABEL)` identity is diffed
+/// independently at one `LocationId` (`annotations_composite_identity`); this
+/// adds a THIRD, brand-new annotation at a different Location on top of that
+/// same edited/untouched pair, so the assertion spans an edit, an add, and an
+/// untouched sibling together, via record-set comparison.
+#[test]
+fn annotations_invariant_edit_add_and_untouched_sibling_all_correct() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_one_annotation(&db_path);
+    seed_second_annotation_at_same_location(&db_path);
+
+    let conn = Connection::open(&db_path).expect("open db");
+    let out_dir = TempDir::new().expect("tempdir");
+    let baseline_path = out_dir.path().join("baseline.txt");
+    export_annotations(&conn, None, &pinned_header_for("{ANNOTATIONS}"), &baseline_path)
+        .expect("baseline export");
+    let baseline_text = std::fs::read_to_string(&baseline_path).expect("read baseline export");
+    drop(conn);
+
+    {
+        let conn = Connection::open(&db_path).expect("open db");
+        conn.execute(
+            "UPDATE InputField SET Value = 'Edited value' WHERE LocationId = 930 AND TextTag = 'p1'",
+            [],
+        )
+        .expect("edit p1");
+        conn.execute(
+            "INSERT INTO Location (LocationId, DocumentId, IssueTagNumber, KeySymbol, MepsLanguage, Type) \
+             VALUES (931, 1002, 0, 'w', NULL, 0)",
+            [],
+        )
+        .expect("insert new Location");
+        conn.execute(
+            "INSERT INTO InputField (LocationId, TextTag, Value) VALUES (931, 'p1', 'Brand new value')",
+            [],
+        )
+        .expect("insert new annotation");
+    }
+
+    let conn = Connection::open(&db_path).expect("open db");
+    let incremental_path = out_dir.path().join("incremental.txt");
+    let summary = export_annotations_incremental(
+        &conn,
+        Some(&baseline_text),
+        &pinned_header_for("{ANNOTATIONS}"),
+        &incremental_path,
+    )
+    .expect("incremental export");
+
+    assert_eq!(summary.added, 1);
+    assert_eq!(summary.modified, 1);
+
+    let text = std::fs::read_to_string(&incremental_path).expect("read incremental output");
+    let exported = annotations_record_set(&text);
+    assert!(exported.contains("Edited value"), "the edited annotation must be exported");
+    assert!(exported.contains("Brand new value"), "the brand-new annotation must be exported");
+    assert!(
+        exported.contains("Sibling value"),
+        "p2 (the unchanged sibling at p1's LocationId) rides along — LocationId over-selection, disclosed not hidden"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// CRLF equivalence — the real Python-on-Windows byte shape (08-DIFFERENTIAL-
+// WIRE.md's finding). A prior file with CRLF line endings must diff
+// identically to the same content with LF endings, for every category.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn notes_crlf_prior_diffs_identically_to_lf() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_one_note(&db_path, "Title", "Content");
+    let prior_lf = read_notes_prior_fixture();
+    let prior_crlf = prior_lf.replace('\n', "\r\n");
+
+    {
+        let conn = Connection::open(&db_path).expect("open db");
+        conn.execute("UPDATE Note SET Content = 'Changed content'", [])
+            .expect("change content");
+    }
+
+    let out_dir = TempDir::new().expect("tempdir");
+    let lf_path = out_dir.path().join("lf.txt");
+    let crlf_path = out_dir.path().join("crlf.txt");
+    let conn = Connection::open(&db_path).expect("open db");
+    let lf_summary = export_notes_incremental(
+        &conn, Some(&prior_lf), &catalog(), &pinned_header(), "2099-01-01T00:00:00Z", &lf_path,
+    )
+    .expect("lf export");
+    let crlf_summary = export_notes_incremental(
+        &conn, Some(&prior_crlf), &catalog(), &pinned_header(), "2099-01-01T00:00:00Z", &crlf_path,
+    )
+    .expect("crlf export");
+
+    assert_eq!(lf_summary.added, crlf_summary.added);
+    assert_eq!(lf_summary.modified, crlf_summary.modified);
+    assert_eq!(lf_summary.deleted_candidates, crlf_summary.deleted_candidates);
+    assert_eq!(
+        notes_record_set(&std::fs::read_to_string(&lf_path).unwrap()),
+        notes_record_set(&std::fs::read_to_string(&crlf_path).unwrap()),
+    );
+}
+
+#[test]
+fn favorites_crlf_prior_diffs_identically_to_lf() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_one_favorite(&db_path);
+    let prior_lf = read_favorites_prior_fixture();
+    let prior_crlf = prior_lf.replace('\n', "\r\n");
+    seed_second_favorite(&db_path);
+
+    let out_dir = TempDir::new().expect("tempdir");
+    let lf_path = out_dir.path().join("lf.txt");
+    let crlf_path = out_dir.path().join("crlf.txt");
+    let conn = Connection::open(&db_path).expect("open db");
+    let lf_summary = export_favorites_incremental(&conn, Some(&prior_lf), &pinned_header_for("{FAVORITES}"), &lf_path)
+        .expect("lf export");
+    let crlf_summary =
+        export_favorites_incremental(&conn, Some(&prior_crlf), &pinned_header_for("{FAVORITES}"), &crlf_path)
+            .expect("crlf export");
+
+    assert_eq!(lf_summary.added, crlf_summary.added);
+    assert_eq!(lf_summary.modified, crlf_summary.modified);
+    assert_eq!(lf_summary.deleted_candidates, crlf_summary.deleted_candidates);
+    assert_eq!(
+        favorites_record_set(&std::fs::read_to_string(&lf_path).unwrap()),
+        favorites_record_set(&std::fs::read_to_string(&crlf_path).unwrap()),
+    );
+}
+
+#[test]
+fn bookmarks_crlf_prior_diffs_identically_to_lf() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    let bookmark_id = seed_one_bookmark(&db_path);
+    let prior_lf = read_bookmarks_prior_fixture();
+    let prior_crlf = prior_lf.replace('\n', "\r\n");
+    {
+        let conn = Connection::open(&db_path).expect("open db");
+        conn.execute(
+            "UPDATE Bookmark SET Title = 'Changed Title' WHERE BookmarkId = ?1",
+            rusqlite::params![bookmark_id],
+        )
+        .expect("change title");
+    }
+
+    let out_dir = TempDir::new().expect("tempdir");
+    let lf_path = out_dir.path().join("lf.txt");
+    let crlf_path = out_dir.path().join("crlf.txt");
+    let conn = Connection::open(&db_path).expect("open db");
+    let lf_summary = export_bookmarks_incremental(&conn, Some(&prior_lf), &pinned_header_for("{BOOKMARKS}"), &lf_path)
+        .expect("lf export");
+    let crlf_summary =
+        export_bookmarks_incremental(&conn, Some(&prior_crlf), &pinned_header_for("{BOOKMARKS}"), &crlf_path)
+            .expect("crlf export");
+
+    assert_eq!(lf_summary.added, crlf_summary.added);
+    assert_eq!(lf_summary.modified, crlf_summary.modified);
+    assert_eq!(lf_summary.deleted_candidates, crlf_summary.deleted_candidates);
+    assert_eq!(
+        bookmarks_record_set(&std::fs::read_to_string(&lf_path).unwrap()),
+        bookmarks_record_set(&std::fs::read_to_string(&crlf_path).unwrap()),
+    );
+}
+
+#[test]
+fn highlights_crlf_prior_diffs_identically_to_lf() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    let user_mark_id = seed_one_highlight(&db_path);
+    let prior_lf = read_highlights_prior_fixture();
+    let prior_crlf = prior_lf.replace('\n', "\r\n");
+    {
+        let conn = Connection::open(&db_path).expect("open db");
+        conn.execute(
+            "UPDATE UserMark SET ColorIndex = 2 WHERE UserMarkId = ?1",
+            rusqlite::params![user_mark_id],
+        )
+        .expect("change color");
+    }
+
+    let out_dir = TempDir::new().expect("tempdir");
+    let lf_path = out_dir.path().join("lf.txt");
+    let crlf_path = out_dir.path().join("crlf.txt");
+    let conn = Connection::open(&db_path).expect("open db");
+    let lf_summary =
+        export_highlights_incremental(&conn, Some(&prior_lf), &pinned_header_for("{HIGHLIGHTS}"), &lf_path)
+            .expect("lf export");
+    let crlf_summary =
+        export_highlights_incremental(&conn, Some(&prior_crlf), &pinned_header_for("{HIGHLIGHTS}"), &crlf_path)
+            .expect("crlf export");
+
+    assert_eq!(lf_summary.added, crlf_summary.added);
+    assert_eq!(lf_summary.modified, crlf_summary.modified);
+    assert_eq!(lf_summary.deleted_candidates, crlf_summary.deleted_candidates);
+    assert_eq!(
+        highlights_record_set(&std::fs::read_to_string(&lf_path).unwrap()),
+        highlights_record_set(&std::fs::read_to_string(&crlf_path).unwrap()),
+    );
+}
+
+#[test]
+fn annotations_crlf_prior_diffs_identically_to_lf() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_one_annotation(&db_path);
+    let prior_lf = read_annotations_prior_fixture();
+    let prior_crlf = prior_lf.replace('\n', "\r\n");
+    {
+        let conn = Connection::open(&db_path).expect("open db");
+        conn.execute(
+            "UPDATE InputField SET Value = 'Changed value' WHERE LocationId = 930 AND TextTag = 'p1'",
+            [],
+        )
+        .expect("change value");
+    }
+
+    let out_dir = TempDir::new().expect("tempdir");
+    let lf_path = out_dir.path().join("lf.txt");
+    let crlf_path = out_dir.path().join("crlf.txt");
+    let conn = Connection::open(&db_path).expect("open db");
+    let lf_summary =
+        export_annotations_incremental(&conn, Some(&prior_lf), &pinned_header_for("{ANNOTATIONS}"), &lf_path)
+            .expect("lf export");
+    let crlf_summary =
+        export_annotations_incremental(&conn, Some(&prior_crlf), &pinned_header_for("{ANNOTATIONS}"), &crlf_path)
+            .expect("crlf export");
+
+    assert_eq!(lf_summary.added, crlf_summary.added);
+    assert_eq!(lf_summary.modified, crlf_summary.modified);
+    assert_eq!(lf_summary.deleted_candidates, crlf_summary.deleted_candidates);
+    assert_eq!(
+        annotations_record_set(&std::fs::read_to_string(&lf_path).unwrap()),
+        annotations_record_set(&std::fs::read_to_string(&crlf_path).unwrap()),
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Wrong-category prior file — the category-tag guard (T-09-14). Feeding a
+// prior file exported from a DIFFERENT category returns the typed malformed
+// error and writes no output, for every category.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn notes_wrong_category_prior_file_rejected() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_one_note(&db_path, "Title", "Content");
+    let conn = Connection::open(&db_path).expect("open db");
+    let out_dir = TempDir::new().expect("tempdir");
+    let incremental_path = out_dir.path().join("incremental.txt");
+
+    let result = export_notes_incremental(
+        &conn,
+        Some(&read_favorites_prior_fixture()),
+        &catalog(),
+        &pinned_header(),
+        "2099-01-01T00:00:00Z",
+        &incremental_path,
+    );
+
+    match result {
+        Err(ArchiveError::ImportMalformed { .. }) => {}
+        other => panic!("expected ImportMalformed, got {other:?}"),
+    }
+    assert!(!incremental_path.exists(), "no output file when the prior file's category tag is wrong");
+}
+
+#[test]
+fn favorites_wrong_category_prior_file_rejected() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_one_favorite(&db_path);
+    let conn = Connection::open(&db_path).expect("open db");
+    let out_dir = TempDir::new().expect("tempdir");
+    let incremental_path = out_dir.path().join("incremental.txt");
+
+    let result = export_favorites_incremental(
+        &conn,
+        Some(&read_bookmarks_prior_fixture()),
+        &pinned_header_for("{FAVORITES}"),
+        &incremental_path,
+    );
+
+    match result {
+        Err(ArchiveError::ImportMalformed { .. }) => {}
+        other => panic!("expected ImportMalformed, got {other:?}"),
+    }
+    assert!(!incremental_path.exists());
+}
+
+#[test]
+fn bookmarks_wrong_category_prior_file_rejected() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_one_bookmark(&db_path);
+    let conn = Connection::open(&db_path).expect("open db");
+    let out_dir = TempDir::new().expect("tempdir");
+    let incremental_path = out_dir.path().join("incremental.txt");
+
+    let result = export_bookmarks_incremental(
+        &conn,
+        Some(&read_highlights_prior_fixture()),
+        &pinned_header_for("{BOOKMARKS}"),
+        &incremental_path,
+    );
+
+    match result {
+        Err(ArchiveError::ImportMalformed { .. }) => {}
+        other => panic!("expected ImportMalformed, got {other:?}"),
+    }
+    assert!(!incremental_path.exists());
+}
+
+#[test]
+fn highlights_wrong_category_prior_file_rejected() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_one_highlight(&db_path);
+    let conn = Connection::open(&db_path).expect("open db");
+    let out_dir = TempDir::new().expect("tempdir");
+    let incremental_path = out_dir.path().join("incremental.txt");
+
+    let result = export_highlights_incremental(
+        &conn,
+        Some(&read_annotations_prior_fixture()),
+        &pinned_header_for("{HIGHLIGHTS}"),
+        &incremental_path,
+    );
+
+    match result {
+        Err(ArchiveError::ImportMalformed { .. }) => {}
+        other => panic!("expected ImportMalformed, got {other:?}"),
+    }
+    assert!(!incremental_path.exists());
+}
+
+#[test]
+fn annotations_wrong_category_prior_file_rejected() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_one_annotation(&db_path);
+    let conn = Connection::open(&db_path).expect("open db");
+    let out_dir = TempDir::new().expect("tempdir");
+    let incremental_path = out_dir.path().join("incremental.txt");
+
+    let result = export_annotations_incremental(
+        &conn,
+        Some(&read_notes_prior_fixture()),
+        &pinned_header_for("{ANNOTATIONS}"),
+        &incremental_path,
+    );
+
+    match result {
+        Err(ArchiveError::ImportMalformed { .. }) => {}
+        other => panic!("expected ImportMalformed, got {other:?}"),
+    }
+    assert!(!incremental_path.exists());
+}
+
+// ---------------------------------------------------------------------------
+// Empty-prior-body — header present, zero records. Must behave exactly as
+// "no prior file" for what gets exported (everything reports as `added`, no
+// `deleted_candidates`), while still being a real, valid prior file for
+// fail-fast validation purposes (the category-tag check still runs and
+// passes; this is NOT the malformed-file path).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn notes_empty_prior_body_behaves_as_no_prior_file() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    // An empty-but-valid prior: a real export of a database with zero Notes.
+    let empty_prior_dir = TempDir::new().expect("tempdir");
+    let empty_prior_path = empty_prior_dir.path().join("empty_prior.txt");
+    {
+        let conn = Connection::open(&db_path).expect("open db");
+        export_notes(&conn, None, &catalog(), &pinned_header(), "2099-01-01T00:00:00Z", &empty_prior_path)
+            .expect("export empty prior");
+    }
+    let empty_prior_text = std::fs::read_to_string(&empty_prior_path).expect("read empty prior");
+
+    seed_one_note(&db_path, "Title", "Content");
+    let conn = Connection::open(&db_path).expect("open db");
+    let out_dir = TempDir::new().expect("tempdir");
+    let full_path = out_dir.path().join("full.txt");
+    let incremental_path = out_dir.path().join("incremental.txt");
+    export_notes(&conn, None, &catalog(), &pinned_header(), "2099-01-01T00:00:00Z", &full_path)
+        .expect("full export");
+
+    let summary = export_notes_incremental(
+        &conn,
+        Some(&empty_prior_text),
+        &catalog(),
+        &pinned_header(),
+        "2099-01-01T00:00:00Z",
+        &incremental_path,
+    )
+    .expect("incremental export against an empty-but-valid prior");
+
+    assert_eq!(summary.added, 1, "an empty prior body must export everything, exactly like no prior file");
+    assert_eq!(summary.deleted_candidates, 0);
+    assert_eq!(
+        common::read_file_bytes(&full_path),
+        common::read_file_bytes(&incremental_path),
+        "empty-prior-body output must be byte-identical to a full export, same as D9-05's no-prior-file case"
+    );
+}
+
+#[test]
+fn favorites_empty_prior_body_behaves_as_no_prior_file() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    let empty_prior_dir = TempDir::new().expect("tempdir");
+    let empty_prior_path = empty_prior_dir.path().join("empty_prior.txt");
+    {
+        let conn = Connection::open(&db_path).expect("open db");
+        export_favorites(&conn, None, &pinned_header_for("{FAVORITES}"), &empty_prior_path)
+            .expect("export empty prior");
+    }
+    let empty_prior_text = std::fs::read_to_string(&empty_prior_path).expect("read empty prior");
+
+    seed_one_favorite(&db_path);
+    let conn = Connection::open(&db_path).expect("open db");
+    let out_dir = TempDir::new().expect("tempdir");
+    let incremental_path = out_dir.path().join("incremental.txt");
+    let summary = export_favorites_incremental(
+        &conn,
+        Some(&empty_prior_text),
+        &pinned_header_for("{FAVORITES}"),
+        &incremental_path,
+    )
+    .expect("incremental export against an empty-but-valid prior");
+
+    assert_eq!(summary.added, 1);
+    assert_eq!(summary.deleted_candidates, 0);
+}
+
+#[test]
+fn bookmarks_empty_prior_body_behaves_as_no_prior_file() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    let empty_prior_dir = TempDir::new().expect("tempdir");
+    let empty_prior_path = empty_prior_dir.path().join("empty_prior.txt");
+    {
+        let conn = Connection::open(&db_path).expect("open db");
+        export_bookmarks(&conn, None, &pinned_header_for("{BOOKMARKS}"), &empty_prior_path)
+            .expect("export empty prior");
+    }
+    let empty_prior_text = std::fs::read_to_string(&empty_prior_path).expect("read empty prior");
+
+    seed_one_bookmark(&db_path);
+    let conn = Connection::open(&db_path).expect("open db");
+    let out_dir = TempDir::new().expect("tempdir");
+    let incremental_path = out_dir.path().join("incremental.txt");
+    let summary = export_bookmarks_incremental(
+        &conn,
+        Some(&empty_prior_text),
+        &pinned_header_for("{BOOKMARKS}"),
+        &incremental_path,
+    )
+    .expect("incremental export against an empty-but-valid prior");
+
+    assert_eq!(summary.added, 1);
+    assert_eq!(summary.deleted_candidates, 0);
+}
+
+#[test]
+fn highlights_empty_prior_body_behaves_as_no_prior_file() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    let empty_prior_dir = TempDir::new().expect("tempdir");
+    let empty_prior_path = empty_prior_dir.path().join("empty_prior.txt");
+    {
+        let conn = Connection::open(&db_path).expect("open db");
+        export_highlights(&conn, None, &pinned_header_for("{HIGHLIGHTS}"), &empty_prior_path)
+            .expect("export empty prior");
+    }
+    let empty_prior_text = std::fs::read_to_string(&empty_prior_path).expect("read empty prior");
+
+    seed_one_highlight(&db_path);
+    let conn = Connection::open(&db_path).expect("open db");
+    let out_dir = TempDir::new().expect("tempdir");
+    let incremental_path = out_dir.path().join("incremental.txt");
+    let summary = export_highlights_incremental(
+        &conn,
+        Some(&empty_prior_text),
+        &pinned_header_for("{HIGHLIGHTS}"),
+        &incremental_path,
+    )
+    .expect("incremental export against an empty-but-valid prior");
+
+    assert_eq!(summary.added, 1);
+    assert_eq!(summary.deleted_candidates, 0);
+}
+
+#[test]
+fn annotations_empty_prior_body_behaves_as_no_prior_file() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    let empty_prior_dir = TempDir::new().expect("tempdir");
+    let empty_prior_path = empty_prior_dir.path().join("empty_prior.txt");
+    {
+        let conn = Connection::open(&db_path).expect("open db");
+        export_annotations(&conn, None, &pinned_header_for("{ANNOTATIONS}"), &empty_prior_path)
+            .expect("export empty prior");
+    }
+    let empty_prior_text = std::fs::read_to_string(&empty_prior_path).expect("read empty prior");
+
+    seed_one_annotation(&db_path);
+    let conn = Connection::open(&db_path).expect("open db");
+    let out_dir = TempDir::new().expect("tempdir");
+    let incremental_path = out_dir.path().join("incremental.txt");
+    let summary = export_annotations_incremental(
+        &conn,
+        Some(&empty_prior_text),
+        &pinned_header_for("{ANNOTATIONS}"),
+        &incremental_path,
+    )
+    .expect("incremental export against an empty-but-valid prior");
+
+    assert_eq!(summary.added, 1);
+    assert_eq!(summary.deleted_candidates, 0);
+}
