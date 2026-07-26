@@ -7,10 +7,12 @@ import type { Category } from "../bindings/Category";
 import type { DryRunReport } from "../bindings/DryRunReport";
 import type { ErrorDto } from "../bindings/ErrorDto";
 import type { NotesImportPreview } from "../bindings/NotesImportPreview";
+import type { PlaylistDeleteReport } from "../bindings/PlaylistDeleteReport";
 import type { PlaylistImportPreview } from "../bindings/PlaylistImportPreview";
 import ColorMenu from "./ColorMenu";
 import EditPreviewDialog from "./EditPreviewDialog";
 import FavoriteAddDialog from "./FavoriteAddDialog";
+import MediaAddDialog from "./MediaAddDialog";
 import RecordEditor from "./RecordEditor";
 import TagDialog from "./TagDialog";
 import { operationSet, type Op } from "../lib/operations";
@@ -110,6 +112,11 @@ const DELETE_COMMANDS: Partial<Record<Category, { dryRun: string; apply: string 
   // crossed with this one.
   Bookmarks: { dryRun: "bookmark_delete_dry_run", apply: "bookmark_delete_apply" },
   Annotations: { dryRun: "annotation_delete_dry_run", apply: "annotation_delete_apply" },
+  // Playlists (D8-07, 08-06-PLAN.md) — ref-counted media delete. Returns a
+  // `PlaylistDeleteReport` (a `DryRunReport` PLUS media_removed/media_kept
+  // counts), NOT a bare `DryRunReport` like every other category — handled
+  // specially below (`playlistDeleteReport` state, distinct from `report`).
+  Playlists: { dryRun: "playlist_delete_dry_run", apply: "playlist_delete_apply" },
 };
 
 /**
@@ -144,6 +151,11 @@ function resolveLabel(row: BrowseRow, category: Category): string {
 function resolveOpLabel(op: Op, category: Category): string {
   if (op === "add" && category === "Favorites") {
     return "Add Favorite";
+  }
+  // "Add Media…" (Playlists, IO-02, 08-06-PLAN.md) — the ellipsis signals
+  // "opens a native multi-file picker, not an instant action" (08-UI-SPEC.md).
+  if (op === "add" && category === "Playlists") {
+    return "Add Media…";
   }
   return OP_LABEL[op];
 }
@@ -190,7 +202,18 @@ export default function CategoryList({
   const parentRef = useRef<HTMLDivElement>(null);
   const [selected, setSelected] = useState<Set<bigint>>(new Set());
   const [report, setReport] = useState<DryRunReport | null>(null);
+  // Playlists delete (D8-07, 08-06-PLAN.md) returns a `PlaylistDeleteReport`
+  // (media_removed/media_kept counts alongside the standard report) instead
+  // of a bare `DryRunReport` — kept in its OWN state so every other
+  // category's delete flow (`report` above) stays untouched.
+  const [playlistDeleteReport, setPlaylistDeleteReport] = useState<PlaylistDeleteReport | null>(
+    null,
+  );
   const [dryRunPending, setDryRunPending] = useState(false);
+  // "Add Media…" (Playlists, IO-02, 08-06-PLAN.md Task 2) — its own show/hide
+  // flag; MediaAddDialog owns its OWN picker/precheck/apply flow internally,
+  // same shape as FavoriteAddDialog/TagDialog.
+  const [showMediaAddDialog, setShowMediaAddDialog] = useState(false);
   // Favorites "Add Favorite" (EDIT-05 mark) — a selection-INDEPENDENT op, so
   // it gets its own show/hide flag rather than reusing `report` (which is
   // scoped to the selection-scoped delete flow above).
@@ -262,10 +285,12 @@ export default function CategoryList({
     setRenderedCategory(category);
     setSelected(new Set());
     setReport(null);
+    setPlaylistDeleteReport(null);
     setShowFavoriteDialog(false);
     setShowColorMenu(false);
     setShowTagDialog(false);
     setShowRecordEditor(false);
+    setShowMediaAddDialog(false);
     setImportPreview(null);
     setBucketDeleteOptIn(false);
   }
@@ -298,14 +323,19 @@ export default function CategoryList({
     setDryRunPending(true);
     try {
       const ids = Array.from(selected);
-      const dryRunReport = await invoke<DryRunReport>(deleteCommands.dryRun, { ids });
-      setReport(dryRunReport);
+      if (category === "Playlists") {
+        const dryRunReport = await invoke<PlaylistDeleteReport>(deleteCommands.dryRun, { ids });
+        setPlaylistDeleteReport(dryRunReport);
+      } else {
+        const dryRunReport = await invoke<DryRunReport>(deleteCommands.dryRun, { ids });
+        setReport(dryRunReport);
+      }
     } catch (err) {
       onError?.(err as ErrorDto);
     } finally {
       setDryRunPending(false);
     }
-  }, [selected, dryRunPending, deleteCommands, onError]);
+  }, [selected, dryRunPending, deleteCommands, category, onError]);
 
   const handleConfirm = useCallback(async () => {
     if (!deleteCommands) {
@@ -320,11 +350,13 @@ export default function CategoryList({
       onError?.(err as ErrorDto);
     } finally {
       setReport(null);
+      setPlaylistDeleteReport(null);
     }
   }, [selected, rows, deleteCommands, onRowsChanged, onError]);
 
   const handleCancel = useCallback(() => {
     setReport(null);
+    setPlaylistDeleteReport(null);
   }, []);
 
   const exportCommand = EXPORT_COMMANDS[category];
@@ -517,7 +549,9 @@ export default function CategoryList({
                 key={state.op}
                 type="button"
                 className="toolbar-button category-list-add-button"
-                onClick={() => setShowFavoriteDialog(true)}
+                onClick={() =>
+                  category === "Playlists" ? setShowMediaAddDialog(true) : setShowFavoriteDialog(true)
+                }
                 disabled={!state.enabled}
                 data-testid="category-list-add-button"
               >
@@ -732,6 +766,32 @@ export default function CategoryList({
           onCancel={handleCancel}
         />
       )}
+      {playlistDeleteReport && (
+        <EditPreviewDialog
+          report={playlistDeleteReport.report}
+          onConfirm={handleConfirm}
+          onCancel={handleCancel}
+          title={`Delete ${selected.size} playlist item${selected.size === 1 ? "" : "s"}?`}
+          ariaLabel="Confirm delete"
+          summary={
+            <>
+              This deletes {selected.size} playlist item{selected.size === 1 ? "" : "s"}.{" "}
+              {playlistDeleteReport.media_removed} media file
+              {playlistDeleteReport.media_removed === 1 ? "" : "s"} used only by these items will also
+              be removed.
+              {playlistDeleteReport.media_kept > 0 && (
+                <>
+                  {" "}
+                  {playlistDeleteReport.media_kept} media file
+                  {playlistDeleteReport.media_kept === 1 ? "" : "s"} will be kept because{" "}
+                  {playlistDeleteReport.media_kept === 1 ? "it's" : "they're"} still used by other
+                  playlist items.
+                </>
+              )}
+            </>
+          }
+        />
+      )}
       {importPreview && (
         <EditPreviewDialog
           report={importPreview.report}
@@ -814,6 +874,18 @@ export default function CategoryList({
             onRowsChanged?.(freshRows);
           }}
           onCancel={() => setShowFavoriteDialog(false)}
+          onError={(err) => onError?.(err)}
+        />
+      )}
+      {showMediaAddDialog && (
+        <MediaAddDialog
+          onApplied={() => {
+            setShowMediaAddDialog(false);
+            invoke<BrowseRow[]>("list_category", { category: "Playlists" })
+              .then((freshRows) => onRowsChanged?.(freshRows))
+              .catch((err) => onError?.(err as ErrorDto));
+          }}
+          onCancel={() => setShowMediaAddDialog(false)}
           onError={(err) => onError?.(err)}
         />
       )}

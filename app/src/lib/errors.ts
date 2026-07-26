@@ -74,6 +74,12 @@ export function describeError(err: ErrorDto): string {
       return "Couldn't export this playlist — the archive is unchanged. Check that the destination folder is writable, then try again.";
     case "playlist_import_failed":
       return "Couldn't import this playlist — the archive is unchanged. Try again, or close and reopen the archive if the problem continues.";
+    case "media_add_failed":
+      return "Couldn't add media — no files were added and the archive is unchanged. Try again, or choose different files.";
+    case "media_unsupported_format":
+      return "This file isn't a supported image format and wasn't added.";
+    case "media_delete_failed":
+      return "Couldn't delete the selected playlist items — the archive is unchanged. Try again, or close and reopen the archive if the problem continues.";
     default:
       return `Couldn't complete this operation (${err.operation}). Choose a different file or try again.`;
   }

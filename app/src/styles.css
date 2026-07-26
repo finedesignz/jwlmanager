@@ -357,6 +357,114 @@ body {
   font-size: 14px;
 }
 
+/* MediaAddDialog ("Add Media…", Playlists, IO-02, 08-06-PLAN.md). Matches
+   .edit-preview-dialog's radius/surface/padding scale exactly — no new
+   radius, shadow, or color value beyond what 08-UI-SPEC.md names. */
+.media-add-dialog {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-hairline);
+  border-radius: 12px;
+  padding: var(--space-lg);
+  max-width: 32em;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.media-add-playlist-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.media-add-playlist-field label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Same box metrics as every other first-class text input in the app
+   (.tag-dialog-add-input/.favorite-dialog-select/.record-editor-title-input):
+   --bg-tertiary background, 44px min-height, --space-md horizontal padding. */
+.media-add-playlist-input {
+  min-height: 44px;
+  padding: 0 var(--space-md);
+  border-radius: 8px;
+  border: none;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.media-add-list-header {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.media-add-empty {
+  margin: 0;
+  padding: var(--space-md) 0;
+  color: var(--text-muted);
+}
+
+/* Same 44px-row, non-virtualized, max-height-scroll treatment as Phase 7's
+   bounded lists (TagDialog's .tag-dialog-list) — a file-picker selection is
+   tens of files, not thousands (08-UI-SPEC.md Spacing). */
+.media-add-file-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 40vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.media-add-file-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-height: 44px;
+  padding: 0 var(--space-sm);
+}
+
+.media-add-status-glyph {
+  flex-shrink: 0;
+  width: 1.5em;
+  text-align: center;
+  font-weight: 600;
+}
+
+/* No new color token — reuses the three existing text-color tokens the
+   08-UI-SPEC.md rule mandates: --text-primary (added), --text-muted
+   (skipped/duplicate), --destructive (failed/unsupported). */
+.media-add-status-added {
+  color: var(--text-primary);
+}
+
+.media-add-status-muted {
+  color: var(--text-muted);
+}
+
+.media-add-status-failed {
+  color: var(--destructive);
+}
+
+.media-add-file-name {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.media-add-file-status {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 .edit-preview-typed-confirm-input:focus-visible {
   outline: 2px solid var(--brand-primary);
   outline-offset: 2px;

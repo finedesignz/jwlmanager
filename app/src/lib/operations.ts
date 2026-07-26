@@ -64,8 +64,8 @@ const NEEDS_SELECTION: ReadonlySet<Op> = new Set<Op>([
  * `Annotations:delete` (D7-10, the remaining per-category deletes —
  * Annotations delete is by `LocationId`, an intentional over-deletion, rule
  * #10) land in 07-05-PLAN.md. `Playlists:add` (media add) and
- * `Playlists:delete` (ref-counted media) stay deferred — Phase 8
- * (D7-06/D7-10).
+ * `Playlists:delete` (ref-counted media) land in 08-06-PLAN.md — the last
+ * two deferred `(category, op)` slots in the app, closing D7-06/D7-10.
  *
  * `Favorites:export`/`Favorites:import` (IO-01/IO-02, 08-01-PLAN.md) landed
  * this phase's tracer — the simplest of the five `.txt` categories, proving
@@ -106,6 +106,8 @@ const LIVE: ReadonlySet<string> = new Set<string>([
   "Notes:import",
   "Playlists:export",
   "Playlists:import",
+  "Playlists:add",
+  "Playlists:delete",
 ]);
 
 /** A single entry in the contextual operation bar. */
