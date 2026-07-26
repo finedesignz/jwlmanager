@@ -10,8 +10,9 @@ use common::{fresh_v16_db, fresh_v16_db_for_favorites_io, seed_id_gap_fixture, s
 use jwlmanager_lib::db::ids::compute_available_ids;
 use jwlmanager_lib::db::io::import::{
     apply_import_annotations, apply_import_bookmarks, apply_import_favorites,
-    dry_run_import_annotations, dry_run_import_bookmarks, dry_run_import_favorites,
-    parse_annotations_file, parse_bookmarks_file, parse_favorites_file,
+    apply_import_highlights, dry_run_import_annotations, dry_run_import_bookmarks,
+    dry_run_import_favorites, dry_run_import_highlights, parse_annotations_file,
+    parse_bookmarks_file, parse_favorites_file, parse_highlights_file,
 };
 use rusqlite::Connection;
 
@@ -335,4 +336,137 @@ fn annotation_without_issue_bracket_creates_location_with_zero_not_null() {
         )
         .expect("read issue tag number");
     assert_eq!(issue, 0, "a missing {{ISSUE}} bracket must fill IssueTagNumber to 0, never NULL");
+}
+
+// ---------------------------------------------------------------------------
+// Highlights (08-03-PLAN.md Task 2, IO-02/IO-03) — basic correctness. The
+// overlap/chain-merge/cross-color/re-import-convergence geometry lives in
+// `import_range_merge_tests.rs`.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn scripture_highlight_creates_location_usermark_and_blockrange() {
+    let (_dir, db_path) = fresh_v16_db();
+    let text = "{HIGHLIGHTS}\n1|1|0|5|1|1|1|1|None|0|nwt|0|0";
+    let records = parse_highlights_file(text).expect("parse");
+    assert_eq!(records.len(), 1);
+
+    let mut conn = Connection::open(&db_path).expect("open db");
+    {
+        let tx = conn.transaction().expect("begin tx");
+        let mut available = compute_available_ids(&tx).expect("compute ids");
+        apply_import_highlights(&tx, &records, &mut available, 42).expect("apply");
+        tx.commit().expect("commit");
+    }
+
+    assert_eq!(count(&conn, "Location"), 1);
+    assert_eq!(count(&conn, "UserMark"), 1);
+    assert_eq!(count(&conn, "BlockRange"), 1);
+
+    let (start, end): (i64, i64) = conn
+        .query_row("SELECT StartToken, EndToken FROM BlockRange", [], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
+        .expect("read range");
+    assert_eq!((start, end), (0, 5));
+}
+
+#[test]
+fn publication_highlight_when_book_number_field_is_empty() {
+    let (_dir, db_path) = fresh_v16_db();
+    // Field 6 (BookNumber) empty -> the publication branch (Python's own
+    // `if attribs[6]:` truthiness check).
+    let text = "{HIGHLIGHTS}\n2|2|10|20|3|1||0|1001|0|pub-x|0|0";
+    let records = parse_highlights_file(text).expect("parse");
+    assert_eq!(records.len(), 1);
+
+    let mut conn = Connection::open(&db_path).expect("open db");
+    {
+        let tx = conn.transaction().expect("begin tx");
+        let mut available = compute_available_ids(&tx).expect("compute ids");
+        apply_import_highlights(&tx, &records, &mut available, 7).expect("apply");
+        tx.commit().expect("commit");
+    }
+
+    let location_type: (Option<i64>, String) = conn
+        .query_row("SELECT DocumentId, KeySymbol FROM Location", [], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
+        .expect("read location");
+    assert_eq!(location_type, (Some(1001), "pub-x".to_string()));
+}
+
+#[test]
+fn scripture_highlight_reuses_existing_location_not_a_duplicate() {
+    let (_dir, db_path) = fresh_v16_db();
+    let existing_id = {
+        let conn = Connection::open(&db_path).expect("open db");
+        conn.execute_batch("PRAGMA foreign_keys = OFF").expect("fk off");
+        conn.execute(
+            "INSERT INTO Location (BookNumber, ChapterNumber, DocumentId, Track, IssueTagNumber, KeySymbol, MepsLanguage, Type) \
+             VALUES (1, 1, NULL, NULL, 0, 'nwt', 0, 0)",
+            [],
+        )
+        .expect("insert scripture location");
+        conn.last_insert_rowid()
+    };
+
+    let text = "{HIGHLIGHTS}\n1|1|0|5|1|1|1|1|None|0|nwt|0|0";
+    let records = parse_highlights_file(text).expect("parse");
+
+    let mut conn = Connection::open(&db_path).expect("reopen");
+    {
+        let tx = conn.transaction().expect("begin tx");
+        let mut available = compute_available_ids(&tx).expect("compute ids");
+        apply_import_highlights(&tx, &records, &mut available, 1).expect("apply");
+        tx.commit().expect("commit");
+    }
+
+    assert_eq!(count(&conn, "Location"), 1, "must reuse the existing scripture Location");
+    let user_mark_location: i64 = conn
+        .query_row("SELECT LocationId FROM UserMark", [], |r| r.get(0))
+        .expect("read usermark location");
+    assert_eq!(user_mark_location, existing_id);
+}
+
+#[test]
+fn reimporting_the_same_highlight_creates_a_second_usermark_but_one_blockrange() {
+    // RESEARCH Pitfall 5 / must-have: Highlights import is NOT idempotent at
+    // the UserMark level — re-importing grows UserMark count while
+    // BlockRange geometry converges (the same range absorbs itself).
+    let (_dir, db_path) = fresh_v16_db();
+    let text = "{HIGHLIGHTS}\n1|1|0|5|1|1|1|1|None|0|nwt|0|0";
+    let records = parse_highlights_file(text).expect("parse");
+
+    let mut conn = Connection::open(&db_path).expect("open db");
+    for seed in [1_u64, 2_u64] {
+        let tx = conn.transaction().expect("begin tx");
+        let mut available = compute_available_ids(&tx).expect("compute ids");
+        apply_import_highlights(&tx, &records, &mut available, seed).expect("apply");
+        tx.commit().expect("commit");
+    }
+
+    assert_eq!(count(&conn, "UserMark"), 2, "each import synthesizes a fresh UserMark");
+    assert_eq!(count(&conn, "BlockRange"), 1, "the identical range absorbs into itself, not two rows");
+}
+
+#[test]
+fn highlights_dry_run_leaves_every_affected_table_row_count_unchanged() {
+    let (_dir, db_path) = fresh_v16_db();
+    let text = "{HIGHLIGHTS}\n1|1|0|5|1|1|1|1|None|0|nwt|0|0";
+    let records = parse_highlights_file(text).expect("parse");
+
+    let mut conn = Connection::open(&db_path).expect("open db");
+    let before_location = count(&conn, "Location");
+    let before_usermark = count(&conn, "UserMark");
+    let before_blockrange = count(&conn, "BlockRange");
+
+    let report = dry_run_import_highlights(&mut conn, &records, 99).expect("dry run");
+    assert_eq!(report.added.get("Location"), Some(&1));
+    assert_eq!(report.added.get("UserMark"), Some(&1));
+    assert_eq!(report.added.get("BlockRange"), Some(&1));
+
+    assert_eq!(count(&conn, "Location"), before_location, "dry run must not commit");
+    assert_eq!(count(&conn, "UserMark"), before_usermark, "dry run must not commit");
+    assert_eq!(count(&conn, "BlockRange"), before_blockrange, "dry run must not commit");
 }

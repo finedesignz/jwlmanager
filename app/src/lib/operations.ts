@@ -100,6 +100,8 @@ const LIVE: ReadonlySet<string> = new Set<string>([
   "Bookmarks:import",
   "Annotations:export",
   "Annotations:import",
+  "Highlights:export",
+  "Highlights:import",
 ]);
 
 /** A single entry in the contextual operation bar. */

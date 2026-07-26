@@ -70,6 +70,16 @@ describe("operationSet (D6-08 capability descriptor)", () => {
     expect(importOp).toMatchObject({ deferred: false, enabled: true });
   });
 
+  it("Highlights at 2 selected: Highlights:export/import are live and enabled alongside the existing color/delete (08-03-PLAN.md)", () => {
+    const ops = operationSet("Highlights", 2);
+    const exportOp = ops.find((o) => o.op === "export");
+    expect(exportOp).toMatchObject({ deferred: false, enabled: true });
+    const importOp = ops.find((o) => o.op === "import");
+    expect(importOp).toMatchObject({ deferred: false, enabled: true });
+    const del = ops.find((o) => o.op === "delete");
+    expect(del).toMatchObject({ deferred: false, enabled: true });
+  });
+
   it("Playlists' add stays deferred even though Favorites' add is live — LIVE is keyed per-category, not per-op", () => {
     const ops = operationSet("Playlists", 0);
     const add = ops.find((o) => o.op === "add");
@@ -98,6 +108,8 @@ describe("operationSet (D6-08 capability descriptor)", () => {
       "Annotations:view",
       "Annotations:export",
       "Annotations:import",
+      "Highlights:export",
+      "Highlights:import",
     ]);
     for (const cat of [
       "Notes",

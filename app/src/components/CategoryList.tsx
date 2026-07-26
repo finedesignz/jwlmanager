@@ -57,6 +57,7 @@ const EXPORT_COMMANDS: Partial<Record<Category, string>> = {
   Favorites: "export_favorites",
   Bookmarks: "export_bookmarks",
   Annotations: "export_annotations",
+  Highlights: "export_highlights",
 };
 
 /**
@@ -67,6 +68,7 @@ const IMPORT_COMMANDS: Partial<Record<Category, { dryRun: string; apply: string 
   Favorites: { dryRun: "import_favorites_dry_run", apply: "import_favorites_apply" },
   Bookmarks: { dryRun: "import_bookmarks_dry_run", apply: "import_bookmarks_apply" },
   Annotations: { dryRun: "import_annotations_dry_run", apply: "import_annotations_apply" },
+  Highlights: { dryRun: "import_highlights_dry_run", apply: "import_highlights_apply" },
 };
 
 /** Sums a `Record<string, number>`-shaped `DryRunReport` field's values. */

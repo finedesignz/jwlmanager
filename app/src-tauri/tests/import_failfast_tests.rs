@@ -6,7 +6,9 @@
 mod common;
 
 use common::{fresh_v16_db, fresh_v16_db_for_favorites_io};
-use jwlmanager_lib::db::io::import::{parse_annotations_file, parse_bookmarks_file, parse_favorites_file};
+use jwlmanager_lib::db::io::import::{
+    parse_annotations_file, parse_bookmarks_file, parse_favorites_file, parse_highlights_file,
+};
 use jwlmanager_lib::error::ArchiveError;
 use rusqlite::Connection;
 
@@ -22,6 +24,16 @@ fn bookmark_count(conn: &Connection) -> i64 {
 
 fn inputfield_count(conn: &Connection) -> i64 {
     conn.query_row("SELECT COUNT(*) FROM InputField", [], |r| r.get(0))
+        .expect("count")
+}
+
+fn usermark_count(conn: &Connection) -> i64 {
+    conn.query_row("SELECT COUNT(*) FROM UserMark", [], |r| r.get(0))
+        .expect("count")
+}
+
+fn blockrange_count(conn: &Connection) -> i64 {
+    conn.query_row("SELECT COUNT(*) FROM BlockRange", [], |r| r.get(0))
         .expect("count")
 }
 
@@ -160,4 +172,86 @@ fn annotations_record_missing_required_key_is_rejected() {
     let text = "{ANNOTATIONS}\n \nheader\n==={PUB=w}{LABEL=tag1}===\nValue\n==={END}===";
     let err = parse_annotations_file(text).expect_err("must reject a header missing {DOC=...}");
     assert!(matches!(err, ArchiveError::ImportMalformed { .. }));
+}
+
+// ---------------------------------------------------------------------------
+// Highlights (08-03-PLAN.md Task 2, D8-04) — a malformed line aborts the
+// WHOLE import: zero UserMark and zero BlockRange rows changed.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn highlights_missing_tag_line_is_rejected_at_line_1() {
+    let (_dir, db_path) = fresh_v16_db();
+    let conn = Connection::open(&db_path).expect("open db");
+    let before_um = usermark_count(&conn);
+    let before_br = blockrange_count(&conn);
+
+    let text = "no tag line here\n1|1|0|5|1|1|1|1|None|0|nwt|0|0";
+    let err = parse_highlights_file(text).expect_err("must reject a missing {HIGHLIGHTS} tag line");
+    match err {
+        ArchiveError::ImportMalformed { category, line, .. } => {
+            assert_eq!(category, "Highlights");
+            assert_eq!(line, 1);
+        }
+        other => panic!("expected ImportMalformed, got {other:?}"),
+    }
+    assert_eq!(usermark_count(&conn), before_um, "a rejected parse must never touch the archive");
+    assert_eq!(blockrange_count(&conn), before_br, "a rejected parse must never touch the archive");
+}
+
+#[test]
+fn highlights_twelve_field_line_is_rejected_and_leaves_row_counts_unchanged() {
+    let (_dir, db_path) = fresh_v16_db();
+    let conn = Connection::open(&db_path).expect("open db");
+    let before_um = usermark_count(&conn);
+    let before_br = blockrange_count(&conn);
+
+    // 12 pipe-delimited fields instead of the required 13; still passes the
+    // `^(\d+\|){6}` line-shape guard.
+    let text = "{HIGHLIGHTS}\n1|1|0|5|1|1|1|1|0|0|nwt|0";
+    let err = parse_highlights_file(text).expect_err("must reject a 12-field line");
+    match err {
+        ArchiveError::ImportMalformed { line, reason, .. } => {
+            assert_eq!(line, 2);
+            assert!(reason.contains("12"), "reason should name the actual field count: {reason}");
+        }
+        other => panic!("expected ImportMalformed, got {other:?}"),
+    }
+    assert_eq!(usermark_count(&conn), before_um, "a rejected parse must never touch the archive");
+    assert_eq!(blockrange_count(&conn), before_br, "a rejected parse must never touch the archive");
+}
+
+#[test]
+fn highlights_fourteen_field_line_is_rejected() {
+    let text = "{HIGHLIGHTS}\n1|1|0|5|1|1|1|1|0|0|nwt|0|0|extra";
+    let err = parse_highlights_file(text).expect_err("must reject a 14-field line");
+    assert!(matches!(err, ArchiveError::ImportMalformed { .. }));
+}
+
+#[test]
+fn highlights_overflowing_start_token_is_rejected() {
+    // Still all-ASCII-digits (so the `^(\d+\|){6}` line-shape guard treats it
+    // as a data line), but too large to fit `i64` — the parse-time int check
+    // must still catch it rather than panicking or silently truncating.
+    let text = "{HIGHLIGHTS}\n1|1|99999999999999999999|5|1|1|1|1|0|0|nwt|0|0";
+    let err = parse_highlights_file(text).expect_err("must reject an overflowing StartToken");
+    assert!(matches!(err, ArchiveError::ImportMalformed { .. }));
+}
+
+#[test]
+fn highlights_header_and_divider_lines_are_skipped_without_error() {
+    let text = "{HIGHLIGHTS}\n \nExported from x\nby y (1) on z\n****\n1|1|0|5|1|1|1|1|None|0|nwt|0|0";
+    let records = parse_highlights_file(text).expect("header/divider lines must not error");
+    assert_eq!(records.len(), 1);
+}
+
+#[test]
+fn highlights_earlier_well_formed_lines_do_not_partially_apply_before_a_later_malformed_line() {
+    // D8-04: the WHOLE file is parsed before any transaction opens.
+    let text = "{HIGHLIGHTS}\n1|1|0|5|1|1|1|1|None|0|nwt|0|0\n2|2|10|20|3|1|broken";
+    let err = parse_highlights_file(text).expect_err("must reject the whole file");
+    match err {
+        ArchiveError::ImportMalformed { line, .. } => assert_eq!(line, 3),
+        other => panic!("expected ImportMalformed, got {other:?}"),
+    }
 }

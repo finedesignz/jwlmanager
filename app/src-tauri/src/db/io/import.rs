@@ -20,9 +20,10 @@
 //! forbids reproducing even for import compatibility.
 
 use super::export::{join_row, read_favorite_lines};
+use super::usermark::{merge_range_into, synthesize_usermark};
 use crate::db::edit::{
     diff_snapshots, snapshot_tables, DryRunReport, ANNOTATION_SNAPSHOT_TABLES,
-    BOOKMARK_SNAPSHOT_TABLES, FAVORITE_SNAPSHOT_TABLES,
+    BOOKMARK_SNAPSHOT_TABLES, FAVORITE_SNAPSHOT_TABLES, HIGHLIGHT_SNAPSHOT_TABLES,
 };
 use crate::db::ids::{compute_available_ids, take_id};
 use crate::db::pragma_guard::PragmaGuard;
@@ -1000,6 +1001,358 @@ pub fn dry_run_import_annotations(
     Ok(report)
 }
 
+// ---------------------------------------------------------------------------
+// Highlights (08-03-PLAN.md Task 2) — the RANGE-MERGE import call site.
+// Ports `import_highlights` (`JWLManager.py:2124-2211`).
+// ---------------------------------------------------------------------------
+
+/// One parsed Highlights data row, fields in the SQL's column order
+/// (`JWLManager.py:1476`/`:2191`). `block_type`/`identifier`/`start_token`/
+/// `end_token`/`color_index`/`version` are parsed to `i64` because
+/// [`crate::db::io::usermark::synthesize_usermark`] and
+/// [`crate::db::io::usermark::merge_range_into`] both require typed
+/// integers — a strengthening over Python's untyped SQL bind for exactly
+/// these six fields (which the schema declares NOT NULL on the
+/// `UserMark`/`BlockRange` side, so a genuine file would never carry
+/// anything else there). The remaining seven Location-predicate fields stay
+/// raw `String` (never `Option<String>`) because [`parse_highlights_file`]
+/// ports Python's BLANKET `'None'`->`''` replacement BEFORE splitting
+/// (RESEARCH assumption A5) rather than a per-field None-check — an actual
+/// NULL renders as an EMPTY STRING here, not a Rust `None`, exactly
+/// reproducing Python's fragile-but-intentional behavior.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HighlightRecord {
+    pub block_type: i64,
+    pub identifier: i64,
+    pub start_token: i64,
+    pub end_token: i64,
+    pub color_index: i64,
+    pub version: i64,
+    pub book_number: String,
+    pub chapter_number: String,
+    pub document_id: String,
+    pub issue_tag_number: String,
+    pub key_symbol: String,
+    pub meps_language: String,
+    /// The `Type` column — named `kind` because `type` is a Rust keyword.
+    pub kind: String,
+}
+
+/// Parses a whole Highlights `.txt` file's TEXT into records, entirely
+/// BEFORE any transaction opens (D8-04). Line 1 must contain `{HIGHLIGHTS}`.
+///
+/// Every SUBSEQUENT line is tested against the line-shape guard
+/// `^(\d+\|){6}` (`JWLManager.py:2188`) — at least 6 digit-groups each
+/// followed by `|` — which skips header/blank/divider lines WITHOUT needing
+/// a line-count offset (RESEARCH `## Wire Formats` Highlights subsection). A
+/// line that passes the guard has the literal substring `None` BLANKET-
+/// replaced with the empty string, ported verbatim (NOT "fixed" into a
+/// per-field check — RESEARCH assumption A5: a field whose real value
+/// happens to contain the substring "None" would be corrupted, exactly as in
+/// Python, but `KeySymbol`s are always short alphanumeric codes that never
+/// contain it in practice), THEN split on `|` and required to yield EXACTLY
+/// 13 fields or the whole parse fails naming the 1-indexed line. The six
+/// integer fields ([`HighlightRecord::block_type`] etc.) are parsed here too
+/// — an unparseable one is also `ImportMalformed` (Python's own bare `except`
+/// around `int(attribs[2])`/`int(attribs[3])` at `:2168-2169` aborts the
+/// whole import with a ROLLBACK the same way, `:2197-2200`).
+pub fn parse_highlights_file(text: &str) -> Result<Vec<HighlightRecord>, ArchiveError> {
+    let mut lines = text.split('\n');
+    let first_line = lines.next().unwrap_or("");
+    if !first_line.contains("{HIGHLIGHTS}") {
+        return Err(ArchiveError::ImportMalformed {
+            category: "Highlights".to_string(),
+            line: 1,
+            reason: "missing {HIGHLIGHTS} tag line".to_string(),
+        });
+    }
+
+    // Matches `^(\d+\|){6}`: at least 6 groups of one-or-more ASCII digits
+    // each immediately followed by `|`.
+    fn has_highlights_line_shape(line: &str) -> bool {
+        let mut rest = line;
+        for _ in 0..6 {
+            let digit_count = rest.chars().take_while(|c| c.is_ascii_digit()).count();
+            if digit_count == 0 {
+                return false;
+            }
+            rest = &rest[digit_count..];
+            let Some(stripped) = rest.strip_prefix('|') else {
+                return false;
+            };
+            rest = stripped;
+        }
+        true
+    }
+
+    let mut records = Vec::new();
+    for (offset, raw_line) in lines.enumerate() {
+        let line_no = offset + 2; // 1-indexed; line 1 already consumed above
+        if !has_highlights_line_shape(raw_line) {
+            continue;
+        }
+        // Python: `line.rstrip().replace('None', '')` — rstrip (all
+        // trailing whitespace) BEFORE the blanket replace, then split.
+        let cleaned = raw_line.trim_end().replace("None", "");
+        let fields: Vec<&str> = cleaned.split('|').collect();
+        if fields.len() != 13 {
+            return Err(ArchiveError::ImportMalformed {
+                category: "Highlights".to_string(),
+                line: line_no,
+                reason: format!("expected 13 pipe-delimited fields, found {}", fields.len()),
+            });
+        }
+
+        let malformed_int = |field_name: &str, raw: &str| ArchiveError::ImportMalformed {
+            category: "Highlights".to_string(),
+            line: line_no,
+            reason: format!("unparseable {field_name} value: {raw:?}"),
+        };
+        let parse_i64 = |idx: usize, field_name: &str| -> Result<i64, ArchiveError> {
+            fields[idx]
+                .parse::<i64>()
+                .map_err(|_| malformed_int(field_name, fields[idx]))
+        };
+
+        records.push(HighlightRecord {
+            block_type: parse_i64(0, "BlockType")?,
+            identifier: parse_i64(1, "Identifier")?,
+            start_token: parse_i64(2, "StartToken")?,
+            end_token: parse_i64(3, "EndToken")?,
+            color_index: parse_i64(4, "ColorIndex")?,
+            version: parse_i64(5, "Version")?,
+            book_number: fields[6].to_string(),
+            chapter_number: fields[7].to_string(),
+            document_id: fields[8].to_string(),
+            issue_tag_number: fields[9].to_string(),
+            key_symbol: fields[10].to_string(),
+            meps_language: fields[11].to_string(),
+            kind: fields[12].to_string(),
+        });
+    }
+    Ok(records)
+}
+
+/// Finds-or-inserts a SCRIPTURE `Location` for a Highlight record — ports
+/// `add_scripture_location` (`JWLManager.py:2136-2146`). Dedup key:
+/// `KeySymbol + MepsLanguage + BookNumber + ChapterNumber` — DISTINCT from
+/// [`find_or_insert_highlight_publication_location`] (D8-04: two separate
+/// predicates per category, never collapsed, and never shared with
+/// Bookmarks' own same-shaped predicate — each category's location
+/// resolution is its own port of its own Python function).
+fn find_or_insert_highlight_scripture_location(
+    tx: &Transaction,
+    record: &HighlightRecord,
+    available: &mut HashMap<&'static str, Vec<i64>>,
+) -> Result<i64, ArchiveError> {
+    let existing: Option<i64> = tx
+        .query_row(
+            "SELECT LocationId FROM Location \
+             WHERE KeySymbol = ? AND MepsLanguage = ? AND BookNumber = ? AND ChapterNumber = ?",
+            rusqlite::params![
+                record.key_symbol,
+                record.meps_language,
+                record.book_number,
+                record.chapter_number
+            ],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| map_sqlite_err(e, "find_or_insert_highlight_scripture_location: select"))?;
+    if let Some(id) = existing {
+        return Ok(id);
+    }
+
+    if let Some(id) = take_id(available, "Location") {
+        tx.execute(
+            "INSERT INTO Location (LocationId, KeySymbol, MepsLanguage, BookNumber, ChapterNumber, Type) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                id,
+                record.key_symbol,
+                record.meps_language,
+                record.book_number,
+                record.chapter_number,
+                record.kind
+            ],
+        )
+        .map_err(|e| {
+            map_sqlite_err(e, "find_or_insert_highlight_scripture_location: insert recycled id")
+        })?;
+        Ok(id)
+    } else {
+        tx.execute(
+            "INSERT INTO Location (KeySymbol, MepsLanguage, BookNumber, ChapterNumber, Type) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![
+                record.key_symbol,
+                record.meps_language,
+                record.book_number,
+                record.chapter_number,
+                record.kind
+            ],
+        )
+        .map_err(|e| {
+            map_sqlite_err(e, "find_or_insert_highlight_scripture_location: insert autoincrement")
+        })?;
+        Ok(tx.last_insert_rowid())
+    }
+}
+
+/// Finds-or-inserts a PUBLICATION `Location` for a Highlight record — ports
+/// `add_publication_location` (`JWLManager.py:2148-2158`). Dedup key:
+/// `KeySymbol + MepsLanguage + IssueTagNumber + DocumentId + Type` — DISTINCT
+/// from the scripture predicate above.
+fn find_or_insert_highlight_publication_location(
+    tx: &Transaction,
+    record: &HighlightRecord,
+    available: &mut HashMap<&'static str, Vec<i64>>,
+) -> Result<i64, ArchiveError> {
+    let existing: Option<i64> = tx
+        .query_row(
+            "SELECT LocationId FROM Location \
+             WHERE KeySymbol = ? AND MepsLanguage = ? AND IssueTagNumber = ? AND DocumentId = ? AND Type = ?",
+            rusqlite::params![
+                record.key_symbol,
+                record.meps_language,
+                record.issue_tag_number,
+                record.document_id,
+                record.kind
+            ],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(|e| map_sqlite_err(e, "find_or_insert_highlight_publication_location: select"))?;
+    if let Some(id) = existing {
+        return Ok(id);
+    }
+
+    if let Some(id) = take_id(available, "Location") {
+        tx.execute(
+            "INSERT INTO Location (LocationId, IssueTagNumber, KeySymbol, MepsLanguage, DocumentId, Type) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                id,
+                record.issue_tag_number,
+                record.key_symbol,
+                record.meps_language,
+                record.document_id,
+                record.kind
+            ],
+        )
+        .map_err(|e| {
+            map_sqlite_err(e, "find_or_insert_highlight_publication_location: insert recycled id")
+        })?;
+        Ok(id)
+    } else {
+        tx.execute(
+            "INSERT INTO Location (IssueTagNumber, KeySymbol, MepsLanguage, DocumentId, Type) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![
+                record.issue_tag_number,
+                record.key_symbol,
+                record.meps_language,
+                record.document_id,
+                record.kind
+            ],
+        )
+        .map_err(|e| {
+            map_sqlite_err(
+                e,
+                "find_or_insert_highlight_publication_location: insert autoincrement",
+            )
+        })?;
+        Ok(tx.last_insert_rowid())
+    }
+}
+
+/// Runs the ALREADY-PARSED Highlights `records` inside the caller's
+/// transaction (`JWLManager.py:2186-2201`): for each record, in FILE order,
+/// resolves the LOCATED Location (scripture if `BookNumber` is
+/// present/non-empty — Python's own `if attribs[6]:` truthiness check, else
+/// publication), synthesizes a FRESH `UserMark`
+/// ([`synthesize_usermark`] — never looked up/reused, D8-05/RESEARCH
+/// Pitfall 5), then merges the record's range into the existing BlockRange
+/// set at `(Identifier, LocationId)` via [`merge_range_into`], which
+/// delegates the geometry entirely to `db::highlights::merge_block_ranges`.
+/// `guid_seed` is XORed with the record's index so a multi-record file never
+/// mints two identical GUIDs in one run, while the SAME seed across two
+/// separate calls (e.g. dry-run then apply) reproduces the same GUIDs —
+/// mirrors `db::color::apply_color`'s `guid_seed ^ note_id` pattern exactly.
+pub fn apply_import_highlights(
+    tx: &Transaction,
+    records: &[HighlightRecord],
+    available: &mut HashMap<&'static str, Vec<i64>>,
+    guid_seed: u64,
+) -> Result<(), ArchiveError> {
+    for (index, record) in records.iter().enumerate() {
+        let is_scripture = !record.book_number.is_empty();
+        let location_id = if is_scripture {
+            find_or_insert_highlight_scripture_location(tx, record, available)?
+        } else {
+            find_or_insert_highlight_publication_location(tx, record, available)?
+        };
+
+        let user_mark_id = synthesize_usermark(
+            tx,
+            location_id,
+            record.color_index,
+            record.version,
+            guid_seed ^ (index as u64),
+            available,
+        )?;
+
+        merge_range_into(
+            tx,
+            record.identifier,
+            location_id,
+            record.start_token,
+            record.end_token,
+            record.block_type,
+            user_mark_id,
+            available,
+        )?;
+    }
+    Ok(())
+}
+
+/// Runs the REAL [`apply_import_highlights`] + `trim_sweep` inside a
+/// transaction that is NEVER committed, returning a SEMANTIC [`DryRunReport`]
+/// over [`HIGHLIGHT_SNAPSHOT_TABLES`] — same shape as
+/// [`dry_run_import_bookmarks`]/[`dry_run_import_annotations`].
+pub fn dry_run_import_highlights(
+    conn: &mut Connection,
+    records: &[HighlightRecord],
+    guid_seed: u64,
+) -> Result<DryRunReport, ArchiveError> {
+    let guard = PragmaGuard::new(conn).map_err(|e| map_sqlite_err(e, "snapshotting pragmas"))?;
+
+    conn.execute_batch(
+        "PRAGMA temp_store = 'MEMORY'; \
+         PRAGMA synchronous = 'OFF'; \
+         PRAGMA journal_mode = 'MEMORY'; \
+         PRAGMA foreign_keys = 'OFF';",
+    )
+    .map_err(|e| map_sqlite_err(e, "setting dry-run pragmas"))?;
+
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|e| map_sqlite_err(e, "opening dry-run transaction"))?;
+
+    let mut available = compute_available_ids(&tx)?;
+    let before = snapshot_tables(&tx, HIGHLIGHT_SNAPSHOT_TABLES)?;
+    apply_import_highlights(&tx, records, &mut available, guid_seed)?;
+    trim_sweep(&tx)?;
+    let after = snapshot_tables(&tx, HIGHLIGHT_SNAPSHOT_TABLES)?;
+
+    let report = diff_snapshots(&before, &after);
+
+    drop(tx);
+    drop(guard);
+
+    Ok(report)
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
@@ -1038,5 +1391,73 @@ mod tests {
         let text = "{FAVORITES}\n \nheader line with no pipe\n1|2|0|nwt|0|1";
         let records = parse_favorites_file(text).unwrap();
         assert_eq!(records.len(), 1);
+    }
+
+    // -----------------------------------------------------------------
+    // Highlights (08-03-PLAN.md Task 2)
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn highlights_parse_rejects_missing_tag_line() {
+        let err = parse_highlights_file("not a tag line\n1|1|0|5|1|1|1|1|0|0|nwt|0|0").unwrap_err();
+        match err {
+            ArchiveError::ImportMalformed { category, line, .. } => {
+                assert_eq!(category, "Highlights");
+                assert_eq!(line, 1);
+            }
+            other => panic!("expected ImportMalformed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn highlights_parse_skips_header_and_divider_lines_without_offset() {
+        let text = "{HIGHLIGHTS}\n \nExported from x\nby y (1) on z\n****\n1|1|0|5|1|1|1|1|0|0|nwt|0|0";
+        let records = parse_highlights_file(text).unwrap();
+        assert_eq!(records.len(), 1, "only the one real data line should parse");
+        assert_eq!(records[0].identifier, 1);
+    }
+
+    #[test]
+    fn highlights_parse_rejects_wrong_field_count() {
+        // Passes the `^(\d+\|){6}` shape guard but has only 12 fields total.
+        let text = "{HIGHLIGHTS}\n1|1|0|5|1|1|1|1|0|0|nwt|0";
+        let err = parse_highlights_file(text).unwrap_err();
+        match err {
+            ArchiveError::ImportMalformed { line, reason, .. } => {
+                assert_eq!(line, 2);
+                assert!(reason.contains("12"), "reason should name the actual field count: {reason}");
+            }
+            other => panic!("expected ImportMalformed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn highlights_parse_blanket_replaces_none_before_splitting() {
+        // Field 6 (BookNumber) is the literal string "None" -> becomes "" after
+        // the blanket replace, NOT a Rust `Option::None` (RESEARCH A5).
+        let text = "{HIGHLIGHTS}\n1|1|0|5|1|1|None|None|1001|0|pub-x|0|0";
+        let records = parse_highlights_file(text).unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].book_number, "");
+        assert_eq!(records[0].chapter_number, "");
+        assert_eq!(records[0].document_id, "1001");
+    }
+
+    #[test]
+    fn highlights_parse_rejects_unparseable_integer_field() {
+        // All-digits (so the `^(\d+\|){6}` line-shape guard still treats it
+        // as a data line) but too large to fit `i64`.
+        let text = "{HIGHLIGHTS}\n1|1|99999999999999999999|5|1|1|1|1|0|0|nwt|0|0";
+        let err = parse_highlights_file(text).unwrap_err();
+        assert!(matches!(err, ArchiveError::ImportMalformed { .. }));
+    }
+
+    #[test]
+    fn highlights_parse_scripture_truthiness_matches_bookmarks_pattern() {
+        // A publication record: BookNumber (field 6) is empty.
+        let text = "{HIGHLIGHTS}\n1|1|0|5|1|1||0|1001|0|pub-x|0|0";
+        let records = parse_highlights_file(text).unwrap();
+        assert_eq!(records.len(), 1);
+        assert!(records[0].book_number.is_empty());
     }
 }

@@ -143,6 +143,20 @@ pub(crate) const ANNOTATION_SNAPSHOT_TABLES: &[(&str, &str)] = &[
     ("InputField", "rowid"),
 ];
 
+/// Highlights import (08-03-PLAN.md Task 2) affected-table set: `Location`
+/// (the scripture/publication Locations `apply_import_highlights`
+/// finds-or-inserts), `UserMark` (ALWAYS a fresh row per record — the
+/// accepted non-idempotency, RESEARCH Pitfall 5), and `BlockRange` (the
+/// merged/inserted range; absorbed rows are DELETEd by
+/// `merge_block_ranges`, so a `BlockRangeId` present before and absent after
+/// reports as `deleted`, never silently vanishing from the count). Same
+/// narrow-set-over-`TRACKED_TABLES` precedent as the other categories above.
+pub(crate) const HIGHLIGHT_SNAPSHOT_TABLES: &[(&str, &str)] = &[
+    ("Location", "LocationId"),
+    ("UserMark", "UserMarkId"),
+    ("BlockRange", "BlockRangeId"),
+];
+
 pub(crate) fn snapshot_pks(
     tx: &Transaction,
     table: &str,

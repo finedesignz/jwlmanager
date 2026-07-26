@@ -7,6 +7,7 @@
 //! never a normalized/parsed comparison.
 
 use super::header::{build_export_header, ExportHeaderCtx};
+use crate::db::color::NonEmptyBlockRangeIds;
 use crate::db::delete::{NonEmptyBookmarkIds, NonEmptyLocationIds};
 use crate::db::favorites::NonEmptyTagMapIds;
 use crate::error::ArchiveError;
@@ -334,6 +335,93 @@ pub fn export_annotations(
     file.write_all(b"\n==={END}===").map_err(ArchiveError::from)?;
 
     Ok(rows.len())
+}
+
+// ---------------------------------------------------------------------------
+// Highlights (08-03-PLAN.md Task 1) — 13 flat pipe fields, no `¦` escaping,
+// no `{END}` sentinel. Ports `export_highlights` (`JWLManager.py:1470-1484`).
+// ---------------------------------------------------------------------------
+
+/// Highlights never writes an `==={END}===` sentinel — same asymmetry as
+/// [`BOOKMARKS_WRITES_END_SENTINEL`]/[`FAVORITES_WRITES_END_SENTINEL`].
+#[allow(dead_code)] // documented fact, referenced by module docs/tests rather than code
+pub(crate) const HIGHLIGHTS_WRITES_END_SENTINEL: bool = false;
+
+/// Reads every Highlight (`BlockRange`) row (or, when `ids` is given, exactly
+/// the selected `BlockRangeId`s — the Highlights browse-list identity,
+/// `db::color::NonEmptyBlockRangeIds`'s doc comment) formatted via
+/// [`join_row`], in the exact 13-column order Python's SQL selects:
+/// `BlockType, Identifier, StartToken, EndToken, ColorIndex, Version,
+/// BookNumber, ChapterNumber, DocumentId, IssueTagNumber, KeySymbol,
+/// MepsLanguage, Type` (`JWLManager.py:1476`). No `ORDER BY` — Python's own
+/// `export_highlights` has none either.
+fn read_highlight_lines(
+    conn: &Connection,
+    ids: Option<&NonEmptyBlockRangeIds>,
+) -> Result<Vec<String>, ArchiveError> {
+    let base_sql = "SELECT b.BlockType, b.Identifier, b.StartToken, b.EndToken, u.ColorIndex, \
+         u.Version, l.BookNumber, l.ChapterNumber, l.DocumentId, l.IssueTagNumber, \
+         l.KeySymbol, l.MepsLanguage, l.Type \
+         FROM UserMark u JOIN Location l USING (LocationId) JOIN BlockRange b USING (UserMarkId)";
+
+    let (sql, bound): (String, Vec<i64>) = match ids {
+        Some(ids) => {
+            let placeholders: String = std::iter::repeat_n("?", ids.len())
+                .collect::<Vec<_>>()
+                .join(",");
+            (
+                format!("{base_sql} WHERE b.BlockRangeId IN ({placeholders})"),
+                ids.iter().copied().collect(),
+            )
+        }
+        None => (base_sql.to_string(), Vec::new()),
+    };
+
+    let mut stmt = conn
+        .prepare(&sql)
+        .map_err(|e| map_sqlite_err(e, "read_highlight_lines: prepare"))?;
+    let rows = stmt
+        .query_map(rusqlite::params_from_iter(bound.iter()), |row| {
+            let mut fields = Vec::with_capacity(13);
+            for i in 0..13 {
+                let value: Value = row.get(i)?;
+                fields.push(value);
+            }
+            Ok(fields)
+        })
+        .map_err(|e| map_sqlite_err(e, "read_highlight_lines: query"))?;
+
+    let mut lines = Vec::new();
+    for row in rows {
+        let fields = row.map_err(|e| map_sqlite_err(e, "read_highlight_lines: read row"))?;
+        let fields: Vec<Option<String>> = fields.into_iter().map(value_to_field).collect();
+        lines.push(join_row(&fields));
+    }
+    Ok(lines)
+}
+
+/// Exports Highlights (whole category when `ids` is `None`, D8-10
+/// selection-optional) to `path` as a `.txt` file: [`build_export_header`]
+/// tagged `{HIGHLIGHTS}`, then one `\n`-prefixed 13-field data row per
+/// BlockRange. Writes NO `==={END}===` sentinel
+/// ([`HIGHLIGHTS_WRITES_END_SENTINEL`]). Never mutates the archive (D8-09).
+pub fn export_highlights(
+    conn: &Connection,
+    ids: Option<&NonEmptyBlockRangeIds>,
+    header: &ExportHeaderCtx,
+    path: &Path,
+) -> Result<usize, ArchiveError> {
+    let lines = read_highlight_lines(conn, ids)?;
+
+    let mut file = std::fs::File::create(path).map_err(ArchiveError::from)?;
+    file.write_all(build_export_header(header).as_bytes())
+        .map_err(ArchiveError::from)?;
+    for line in &lines {
+        file.write_all(b"\n").map_err(ArchiveError::from)?;
+        file.write_all(line.as_bytes()).map_err(ArchiveError::from)?;
+    }
+
+    Ok(lines.len())
 }
 
 #[cfg(test)]

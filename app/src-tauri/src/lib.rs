@@ -20,13 +20,14 @@ use db::favorites::{FavoriteEditionRef, NonEmptyTagMapIds};
 use db::ids::compute_available_ids;
 use db::io::export::{
     export_annotations as export_annotations_impl, export_bookmarks as export_bookmarks_impl,
-    export_favorites as export_favorites_impl,
+    export_favorites as export_favorites_impl, export_highlights as export_highlights_impl,
 };
 use db::io::header::ExportHeaderCtx;
 use db::io::import::{
     apply_import_annotations, apply_import_bookmarks, apply_import_favorites,
-    dry_run_import_annotations, dry_run_import_bookmarks, dry_run_import_favorites,
-    parse_annotations_file, parse_bookmarks_file, parse_favorites_file,
+    apply_import_highlights, dry_run_import_annotations, dry_run_import_bookmarks,
+    dry_run_import_favorites, dry_run_import_highlights, parse_annotations_file,
+    parse_bookmarks_file, parse_favorites_file, parse_highlights_file,
 };
 use db::notes::BrowseRow;
 use db::record_edit::{RecordEditFields, RecordEditPayload, RecordIdentity};
@@ -1856,6 +1857,142 @@ fn import_annotations_apply(
     Ok(db::edit::diff_snapshots(&before, &after))
 }
 
+/// Exports Highlights to `path` (whole category when `ids` is `None`, D8-10
+/// selection-optional) as a `.txt` file — same shape as [`export_bookmarks`],
+/// selection typed over `BlockRangeId` (`db::color::NonEmptyBlockRangeIds`,
+/// the same wrapper Highlights recolor/delete already share).
+#[tauri::command]
+fn export_highlights(
+    path: String,
+    ids: Option<NonEmptyBlockRangeIds>,
+    state: tauri::State<SessionState>,
+) -> Result<usize, ErrorDto> {
+    let guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("export_highlights", None))?;
+    let session = guard.as_ref().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("export_highlights", None)
+    })?;
+
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("export_highlights", Some(session.target_path.as_path()))
+    })?;
+
+    let archive_name = session
+        .target_path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "NEW ARCHIVE".to_string());
+    let header = ExportHeaderCtx {
+        category_tag: "{HIGHLIGHTS}",
+        archive_name,
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        timestamp: time::now_export_header_timestamp(),
+    };
+
+    let out_path = PathBuf::from(&path);
+    export_highlights_impl(&conn, ids.as_ref(), &header, &out_path)
+        .map_err(|err| err.to_dto("export_highlights", Some(out_path.as_path())))
+}
+
+/// Previews a Highlights `.txt` import (IO-02/IO-03) — same shape as
+/// [`import_bookmarks_dry_run`], threading a wall-clock [`guid_seed_now`]
+/// through to [`dry_run_import_highlights`] for the fresh `UserMark`s'
+/// GUIDs (`db::io::usermark::synthesize_usermark`).
+#[tauri::command]
+fn import_highlights_dry_run(
+    path: String,
+    state: tauri::State<SessionState>,
+) -> Result<DryRunReport, ErrorDto> {
+    let guard = state.lock().map_err(|_| {
+        error::ArchiveError::StatePoisoned.to_dto("import_highlights_dry_run", None)
+    })?;
+    let session = guard.as_ref().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("import_highlights_dry_run", None)
+    })?;
+
+    let in_path = PathBuf::from(&path);
+    let text = std::fs::read_to_string(&in_path).map_err(|err| {
+        error::ArchiveError::from(err).to_dto("import_highlights_dry_run", Some(in_path.as_path()))
+    })?;
+    let records = parse_highlights_file(&text)
+        .map_err(|err| err.to_dto("import_highlights_dry_run", Some(in_path.as_path())))?;
+
+    let mut conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("import_highlights_dry_run", Some(session.target_path.as_path()))
+    })?;
+
+    dry_run_import_highlights(&mut conn, &records, guid_seed_now()).map_err(|err| {
+        err.to_dto("import_highlights_dry_run", Some(session.target_path.as_path()))
+    })
+}
+
+/// Applies a Highlights `.txt` import (IO-02/IO-03) — same shape as
+/// [`import_bookmarks_apply`], over [`db::edit::HIGHLIGHT_SNAPSHOT_TABLES`].
+#[tauri::command]
+fn import_highlights_apply(
+    path: String,
+    state: tauri::State<SessionState>,
+) -> Result<DryRunReport, ErrorDto> {
+    let mut guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("import_highlights_apply", None))?;
+    let session = guard.as_mut().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("import_highlights_apply", None)
+    })?;
+
+    let in_path = PathBuf::from(&path);
+    let text = std::fs::read_to_string(&in_path).map_err(|err| {
+        error::ArchiveError::from(err).to_dto("import_highlights_apply", Some(in_path.as_path()))
+    })?;
+    let records = parse_highlights_file(&text)
+        .map_err(|err| err.to_dto("import_highlights_apply", Some(in_path.as_path())))?;
+
+    let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("import_highlights_apply", Some(session.target_path.as_path()))
+    })?;
+
+    let guard_pragma = db::pragma_guard::PragmaGuard::new(&conn).map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("import_highlights_apply", Some(session.target_path.as_path()))
+    })?;
+    conn.execute_batch("PRAGMA foreign_keys = 'OFF';")
+        .map_err(|err| {
+            error::ArchiveError::from(err)
+                .to_dto("import_highlights_apply", Some(session.target_path.as_path()))
+        })?;
+
+    let tx = conn.unchecked_transaction().map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("import_highlights_apply", Some(session.target_path.as_path()))
+    })?;
+
+    let mut available = compute_available_ids(&tx)
+        .map_err(|err| err.to_dto("import_highlights_apply", Some(session.target_path.as_path())))?;
+    let before = db::edit::snapshot_tables(&tx, db::edit::HIGHLIGHT_SNAPSHOT_TABLES).map_err(
+        |err| err.to_dto("import_highlights_apply", Some(session.target_path.as_path())),
+    )?;
+    apply_import_highlights(&tx, &records, &mut available, guid_seed_now()).map_err(|err| {
+        err.to_dto("import_highlights_apply", Some(session.target_path.as_path()))
+    })?;
+    let after = db::edit::snapshot_tables(&tx, db::edit::HIGHLIGHT_SNAPSHOT_TABLES).map_err(
+        |err| err.to_dto("import_highlights_apply", Some(session.target_path.as_path())),
+    )?;
+
+    tx.commit().map_err(|err| {
+        error::ArchiveError::from(err)
+            .to_dto("import_highlights_apply", Some(session.target_path.as_path()))
+    })?;
+    drop(guard_pragma);
+
+    session.dirty = true;
+
+    Ok(db::edit::diff_snapshots(&before, &after))
+}
+
 /// Tauri builder wiring for the Walking Skeleton.
 ///
 /// `open_archive` (01-07) and `check_jwlcore` (01-03) are registered here.
@@ -1918,7 +2055,10 @@ pub fn run() {
             import_bookmarks_apply,
             export_annotations,
             import_annotations_dry_run,
-            import_annotations_apply
+            import_annotations_apply,
+            export_highlights,
+            import_highlights_dry_run,
+            import_highlights_apply
         ])
         .run(tauri::generate_context!())
     {

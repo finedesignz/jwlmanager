@@ -94,6 +94,20 @@ pub(crate) fn plan_merge(
 ///
 /// Runs inside the caller's transaction (never commits/rolls back itself),
 /// exactly like every other Phase 7 `apply_*` primitive.
+///
+/// `recycled_id`, added in 08-03-PLAN.md Task 2 (D8-08/IO-03) for the
+/// Highlights/Notes import call sites this primitive gained this phase: when
+/// `Some(id)`, the merged row is INSERTed with that explicit `BlockRangeId`
+/// (a gap the caller already popped via `db::ids::take_id`); when `None`
+/// (every Phase 7 recolor/delete call site — recolor never calls this
+/// function at all, per the module doc's D7-03 note, and no other Phase 7
+/// caller exists), the row falls back to plain autoincrement exactly as
+/// before. This is purely an INSERT-target change — the geometry in
+/// [`plan_merge`] above is untouched, so this remains the single merge
+/// implementation the prohibitions in `07-02-PLAN.md`/`08-03-PLAN.md`
+/// require it to be.
+#[allow(clippy::too_many_arguments)] // each param is a distinct typed value; a struct would add
+                                      // ceremony for a single-call-site internal primitive
 pub fn merge_block_ranges(
     tx: &Transaction,
     identifier: i64,
@@ -102,6 +116,7 @@ pub fn merge_block_ranges(
     ne: i64,
     block_type: i64,
     user_mark_id: i64,
+    recycled_id: Option<i64>,
 ) -> Result<i64, ArchiveError> {
     let existing: Vec<(i64, i64, i64)> = {
         let mut stmt = tx
@@ -132,12 +147,22 @@ pub fn merge_block_ranges(
             .map_err(|e| map_sqlite_err(e, "merge_block_ranges: delete absorbed"))?;
     }
 
+    if let Some(id) = recycled_id {
+        tx.execute(
+            "INSERT INTO BlockRange (BlockRangeId, BlockType, Identifier, StartToken, EndToken, UserMarkId) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![id, block_type, identifier, union_ns, union_ne, user_mark_id],
+        )
+        .map_err(|e| map_sqlite_err(e, "merge_block_ranges: insert merged range (recycled id)"))?;
+        return Ok(id);
+    }
+
     tx.execute(
         "INSERT INTO BlockRange (BlockType, Identifier, StartToken, EndToken, UserMarkId) \
          VALUES (?1, ?2, ?3, ?4, ?5)",
         rusqlite::params![block_type, identifier, union_ns, union_ne, user_mark_id],
     )
-    .map_err(|e| map_sqlite_err(e, "merge_block_ranges: insert merged range"))?;
+    .map_err(|e| map_sqlite_err(e, "merge_block_ranges: insert merged range (autoincrement)"))?;
 
     Ok(tx.last_insert_rowid())
 }

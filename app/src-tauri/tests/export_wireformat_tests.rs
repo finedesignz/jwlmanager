@@ -8,9 +8,12 @@
 
 mod common;
 
+use jwlmanager_lib::db::color::NonEmptyBlockRangeIds;
 use jwlmanager_lib::db::delete::{NonEmptyBookmarkIds, NonEmptyLocationIds};
 use jwlmanager_lib::db::favorites::NonEmptyTagMapIds;
-use jwlmanager_lib::db::io::export::{export_annotations, export_bookmarks, export_favorites};
+use jwlmanager_lib::db::io::export::{
+    export_annotations, export_bookmarks, export_favorites, export_highlights,
+};
 use jwlmanager_lib::db::io::header::ExportHeaderCtx;
 use rusqlite::Connection;
 use tempfile::TempDir;
@@ -402,4 +405,165 @@ fn annotations_selection_scoped_export_contains_only_the_selected_location() {
     let text = std::fs::read_to_string(&out_path).expect("read exported file");
     assert!(text.contains("heading001"));
     assert!(!text.contains("note002"));
+}
+
+// ---------------------------------------------------------------------------
+// Highlights (08-03-PLAN.md Task 1, IO-01): 13 flat pipe fields, no `¦`
+// escaping, no `{END}` sentinel — the range-merge category.
+// ---------------------------------------------------------------------------
+
+fn pinned_highlights_header() -> ExportHeaderCtx<'static> {
+    ExportHeaderCtx {
+        category_tag: "{HIGHLIGHTS}",
+        archive_name: "MyArchive.jwlibrary".to_string(),
+        app_version: "0.1.0".to_string(),
+        timestamp: "2026-01-01 @ 00:00:00".to_string(),
+    }
+}
+
+/// Seeds the exact two-highlight fixture `highlights_golden.txt` was
+/// hand-authored against: a scripture highlight (Location Type=0,
+/// Book/Chapter present, `DocumentId NULL` -> `None`) and a publication
+/// highlight (Location Type=0, `DocumentId` present, Book/Chapter both
+/// `NULL` -> `None`).
+fn seed_highlights_golden_fixture_rows(db_path: &std::path::Path) -> (i64, i64) {
+    let conn = Connection::open(db_path).expect("open fixture db");
+    conn.execute_batch("PRAGMA foreign_keys = OFF").expect("fk off");
+
+    conn.execute(
+        "INSERT INTO Location (BookNumber, ChapterNumber, DocumentId, Track, IssueTagNumber, KeySymbol, MepsLanguage, Type) \
+         VALUES (1, 1, NULL, NULL, 0, 'nwt', 0, 0)",
+        [],
+    )
+    .expect("insert scripture Location");
+    let scripture_loc = conn.last_insert_rowid();
+
+    conn.execute(
+        "INSERT INTO UserMark (ColorIndex, LocationId, StyleIndex, UserMarkGuid, Version) \
+         VALUES (1, ?1, 0, 'fixture-highlight-scripture', 1)",
+        rusqlite::params![scripture_loc],
+    )
+    .expect("insert scripture UserMark");
+    let scripture_um = conn.last_insert_rowid();
+
+    conn.execute(
+        "INSERT INTO BlockRange (BlockType, Identifier, StartToken, EndToken, UserMarkId) \
+         VALUES (1, 1, 0, 5, ?1)",
+        rusqlite::params![scripture_um],
+    )
+    .expect("insert scripture BlockRange");
+    let range1 = conn.last_insert_rowid();
+
+    conn.execute(
+        "INSERT INTO Location (BookNumber, ChapterNumber, DocumentId, Track, IssueTagNumber, KeySymbol, MepsLanguage, Type) \
+         VALUES (NULL, NULL, 1001, NULL, 0, 'pub-x', 0, 0)",
+        [],
+    )
+    .expect("insert publication Location");
+    let pub_loc = conn.last_insert_rowid();
+
+    conn.execute(
+        "INSERT INTO UserMark (ColorIndex, LocationId, StyleIndex, UserMarkGuid, Version) \
+         VALUES (3, ?1, 0, 'fixture-highlight-publication', 1)",
+        rusqlite::params![pub_loc],
+    )
+    .expect("insert publication UserMark");
+    let pub_um = conn.last_insert_rowid();
+
+    conn.execute(
+        "INSERT INTO BlockRange (BlockType, Identifier, StartToken, EndToken, UserMarkId) \
+         VALUES (2, 2, 10, 20, ?1)",
+        rusqlite::params![pub_um],
+    )
+    .expect("insert publication BlockRange");
+    let range2 = conn.last_insert_rowid();
+
+    (range1, range2)
+}
+
+#[test]
+fn exported_highlights_match_golden_fixture_exactly() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_highlights_golden_fixture_rows(&db_path);
+    let conn = Connection::open(&db_path).expect("open db");
+
+    let out_dir = TempDir::new().expect("tempdir");
+    let out_path = out_dir.path().join("highlights_out.txt");
+    let count =
+        export_highlights(&conn, None, &pinned_highlights_header(), &out_path).expect("export");
+    assert_eq!(count, 2);
+
+    let actual = common::read_file_bytes(&out_path);
+    let golden_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/wire/highlights_golden.txt");
+    let golden = common::read_file_bytes(&golden_path);
+    assert_eq!(actual, golden, "exported Highlights bytes must byte-match the golden fixture");
+}
+
+#[test]
+fn exported_highlights_never_contain_end_sentinel() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_highlights_golden_fixture_rows(&db_path);
+    let conn = Connection::open(&db_path).expect("open db");
+
+    let out_dir = TempDir::new().expect("tempdir");
+    let out_path = out_dir.path().join("highlights_out.txt");
+    export_highlights(&conn, None, &pinned_highlights_header(), &out_path).expect("export");
+
+    let text = std::fs::read_to_string(&out_path).expect("read exported file");
+    assert!(!text.contains("==={END}==="), "Highlights export must never write an {{END}} sentinel");
+}
+
+#[test]
+fn highlights_data_lines_have_exactly_thirteen_fields() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_highlights_golden_fixture_rows(&db_path);
+    let conn = Connection::open(&db_path).expect("open db");
+
+    let out_dir = TempDir::new().expect("tempdir");
+    let out_path = out_dir.path().join("highlights_out.txt");
+    export_highlights(&conn, None, &pinned_highlights_header(), &out_path).expect("export");
+
+    let text = std::fs::read_to_string(&out_path).expect("read exported file");
+    for line in text.lines().skip(5) {
+        // Skips the 5-line header (tag, blank, "Exported from", "by...on...",
+        // stars) — every remaining line is a data row.
+        assert_eq!(
+            line.split('|').count(),
+            13,
+            "every Highlights data line must have exactly 13 fields: {line:?}"
+        );
+    }
+}
+
+#[test]
+fn highlights_null_document_id_renders_as_literal_none() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    seed_highlights_golden_fixture_rows(&db_path);
+    let conn = Connection::open(&db_path).expect("open db");
+
+    let out_dir = TempDir::new().expect("tempdir");
+    let out_path = out_dir.path().join("highlights_out.txt");
+    export_highlights(&conn, None, &pinned_highlights_header(), &out_path).expect("export");
+
+    let text = std::fs::read_to_string(&out_path).expect("read exported file");
+    assert!(text.contains("|None|0|nwt|"), "a NULL DocumentId must render as the literal string None");
+}
+
+#[test]
+fn highlights_selection_scoped_export_contains_only_the_selected_row() {
+    let (_dir, db_path) = common::fresh_v16_db();
+    let (range1, _range2) = seed_highlights_golden_fixture_rows(&db_path);
+    let conn = Connection::open(&db_path).expect("open db");
+
+    let ids = NonEmptyBlockRangeIds::try_from(vec![range1]).expect("non-empty selection");
+    let out_dir = TempDir::new().expect("tempdir");
+    let out_path = out_dir.path().join("highlights_selected.txt");
+    let count = export_highlights(&conn, Some(&ids), &pinned_highlights_header(), &out_path)
+        .expect("export");
+    assert_eq!(count, 1);
+
+    let text = std::fs::read_to_string(&out_path).expect("read exported file");
+    assert!(text.contains("nwt"));
+    assert!(!text.contains("pub-x"));
 }

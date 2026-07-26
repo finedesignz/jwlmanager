@@ -186,23 +186,25 @@ describe("App — DATA-07 end-to-end (mocked IPC)", () => {
     wireHappyPathInvoke();
     await openArchive();
 
-    // Notes + a selection: the live Delete op is present and enabled.
+    // Notes + a selection: the live Delete op is present and enabled, while
+    // Notes:export (Notes' own export/import lands in a later 08-xx plan,
+    // not this one) stays a deferred affordance — proving the op-bar still
+    // renders the deferred branch for whatever ISN'T live.
     fireEvent.click(screen.getAllByTestId("category-list-row-checkbox")[0]);
     const deleteButton = screen.getByTestId("category-list-delete-button");
     expect(deleteButton).toBeEnabled();
     expect(deleteButton).toHaveTextContent("Delete (1)");
 
+    const deferredExport = screen.getByTestId("category-list-op-export");
+    expect(deferredExport).toHaveAttribute("data-deferred", "true");
+    expect(deferredExport).toBeDisabled();
+
     // Switch to Highlights: delete is ALSO live here (07-02-PLAN.md D7-10),
-    // routed through the same shared delete-button dispatch — but `export`
-    // (never made live this phase) stays a deferred affordance, proving the
-    // op-bar still renders the deferred branch for whatever ISN'T live.
+    // routed through the same shared delete-button dispatch.
     fireEvent.click(screen.getByTestId("category-switcher-option-Highlights"));
     await screen.findByText(/Highlighted Passage Alpha/);
 
     expect(screen.getByTestId("category-list-delete-button")).toBeInTheDocument();
-    const deferredExport = screen.getByTestId("category-list-op-export");
-    expect(deferredExport).toHaveAttribute("data-deferred", "true");
-    expect(deferredExport).toBeDisabled();
   });
 
   it("Notes delete still works end-to-end through the shell (dry-run → confirm → row removed)", async () => {

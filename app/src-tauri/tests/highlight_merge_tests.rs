@@ -82,7 +82,7 @@ fn merge_block_ranges_absorbs_overlapping_ranges_regardless_of_color() {
     // New incoming range [8, 20] overlaps BOTH BlockRange 901 (0-10) and 911
     // (15-25) at Identifier 5, LocationId 900 — despite their differing
     // ColorIndex — but NOT the disjoint 921 (100-110).
-    let new_id = merge_block_ranges(&tx, 5, 900, 8, 20, 1, 900)
+    let new_id = merge_block_ranges(&tx, 5, 900, 8, 20, 1, 900, None)
         .expect("merge_block_ranges must succeed");
 
     let remaining_at_identifier_5: i64 = tx
@@ -147,7 +147,7 @@ fn merge_block_ranges_with_no_overlap_inserts_a_new_row_and_absorbs_nothing() {
         .query_row("SELECT COUNT(*) FROM BlockRange", [], |r| r.get(0))
         .unwrap();
 
-    let new_id = merge_block_ranges(&tx, 5, 900, 200, 210, 1, 900)
+    let new_id = merge_block_ranges(&tx, 5, 900, 200, 210, 1, 900, None)
         .expect("merge_block_ranges must succeed");
 
     let after: i64 = tx

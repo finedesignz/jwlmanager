@@ -89,7 +89,8 @@ fn highlights_merge_coalesces_overlapping_ranges_leaves_others_untouched() {
         let tx = conn.unchecked_transaction().unwrap();
         // BlockRange 633 is (Identifier 1, Start 0, End 5) on UserMark 650.
         // A new range [3, 8] at Identifier 1 overlaps it and must absorb it.
-        merge_block_ranges(&tx, 1, 500, 3, 8, 1, 650).expect("merge_block_ranges must succeed");
+        merge_block_ranges(&tx, 1, 500, 3, 8, 1, 650, None)
+            .expect("merge_block_ranges must succeed");
         tx.commit().unwrap();
     }
 
