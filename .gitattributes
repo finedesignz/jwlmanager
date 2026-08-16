@@ -1,0 +1,9 @@
+# Disable Git's line-ending conversion repo-wide. This project preserves
+# byte-exact wire formats (JWL Library's own on-disk conventions - see
+# CLAUDE.md "format warts are load-bearing") and ships cross-platform test
+# fixtures (app/src-tauri/tests/fixtures/wire/*_golden.txt) that assert
+# exported bytes match a golden file exactly. Without this, Windows
+# runners with core.autocrlf=true silently convert LF -> CRLF on checkout,
+# desyncing golden fixtures from the LF bytes the exporter actually
+# produces and failing cargo test on windows-latest/windows-11-arm.
+* -text
