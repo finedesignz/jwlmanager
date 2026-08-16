@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 1
-current_phase_name: Foundation Slice
-status: verifying
-stopped_at: Completed 10-01-PLAN.md (fold tracer)
-last_updated: "2026-07-26T21:35:36.984Z"
+current_phase: 11
+current_phase_name: Platform Polish (Signing, Localization, Theme)
+status: planned
+stopped_at: Phase 11 cross-AI plan review resolved (11-01-PLAN.md, 11-02-PLAN.md); ready to execute
+last_updated: "2026-08-16T00:00:00.000Z"
 progress:
-  total_phases: 10
-  completed_phases: 6
+  total_phases: 11
+  completed_phases: 10
   total_plans: 45
   completed_plans: 39
 ---
@@ -19,21 +19,21 @@ progress:
 ## Project Reference
 
 **Core value:** Never lose or corrupt a user's archive.
-**Current focus:** Phase 2 — Safe Delete
+**Current focus:** Phase 11 — Platform Polish (Signing, Localization, Theme)
 
 ## Current Position
 
-Phase: 2 (Safe Delete) — COMPLETE
-Plan: 3 of 3 complete (delete preview/confirm UI)
-**Phase:** 1 of 11 — Open, View, Save (Foundation Slice)
-**Plan:** 7 of 7
-**Status:** Phase complete — ready for verification
-**Progress:** [█████████░] 87%
+Phase: 11 (Platform Polish) — PLANNED, not yet executed
+Plans: 11-01-PLAN.md (settings/theme tracer) and 11-02-PLAN.md (Windows signing wiring) drafted and cross-AI reviewed; execution not started.
+**Phase:** 11 of 11 — Platform Polish (Signing, Localization, Theme)
+**Plan:** 0 of TBD executed (2 plans drafted; more expected for i18n, per ROADMAP)
+**Status:** Planning complete for 11-01/11-02 — ready for execution
+**Progress:** [█████████░] Phases 1-10 complete (10/11)
 
 ## Performance Metrics
 
-- Phases complete: 0/11
-- Requirements delivered: 0/47
+- Phases complete: 10/11
+- Requirements delivered: 44/47 (PLAT-02, PLAT-03, PLAT-04 remain, all in Phase 11)
 
 **Per-Plan Metrics:**
 
@@ -97,9 +97,10 @@ Plan: 3 of 3 complete (delete preview/confirm UI)
 
 ### Todos
 
-- Manual gate: `npm run tauri dev` visual boot + interaction check (01-06) — exercise all four command-bar actions, double-click Open, cancel a dialog, confirm jwlCore notice on arm64.
-- Manual gate: Linux WebKitGTK 9,000-row scroll smoothness check (01-04).
-- Manual gate: ARCH-02 Python differential oracle with PySide6 installed + real JW Library open (01-05).
+- Execute 11-01-PLAN.md (settings/theme tracer: `load_settings`/`save_settings`/`app_version` commands, SettingsProvider, ThemeContext, light theme, SettingsDialog).
+- Execute 11-02-PLAN.md (Windows Authenticode signing wiring via Azure Trusted Signing — inert/fail-closed until credentials are provisioned).
+- Provision Azure Trusted Signing service-principal credentials (three secrets + one enable variable) for this repo as an operational step before the signed-release path can go live (blocks 11-02's signed/published path only, not the plan's execution or CI greenness).
+- Plan and execute remaining Phase 11 plans for PLAT-03 (i18n/localization — English complete, other locales deferred per 11-CONTEXT.md).
 
 ### Blockers
 
@@ -109,6 +110,6 @@ Plan: 3 of 3 complete (delete preview/confirm UI)
 
 **Resume file:** None
 
-**Last session:** 2026-07-26T21:35:36.958Z
-**Stopped at:** Completed 10-01-PLAN.md (fold tracer)
-**Next action:** Execute 03-03-PLAN.md (Python differential test against real v14 owner archives), then Phase 3 verification.
+**Last session:** 2026-08-16T00:00:00.000Z
+**Stopped at:** Phase 11 plans (11-01, 11-02) revised to resolve cross-AI review findings in `11-REVIEWS.md`; `.planning/STATE.md` staleness repaired.
+**Next action:** Execute 11-01-PLAN.md, then 11-02-PLAN.md (both wave 1, independent), then proceed to remaining Phase 11 i18n plans.
