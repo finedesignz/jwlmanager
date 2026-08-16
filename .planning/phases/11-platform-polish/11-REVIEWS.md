@@ -179,3 +179,52 @@ walk; (2) inventory and catalog the native dialog filter/default-title strings i
 `CommandBar.tsx`, `CategoryList.tsx`, `MediaAddDialog.tsx` or explicitly scope them out
 with rationale; (3) add `SettingsProvider.tsx` and the specific test file locations to
 `artifacts_this_plan_produces`.
+
+---
+
+## Re-review — 11-04
+
+Re-review of `.planning/phases/11-platform-polish/11-04-PLAN.md` after commit
+`776ccd6e` ("docs(11): fix 11-04-PLAN blockers from codex review"), which claimed
+to resolve the BLOCKER and two MAJOR findings from the `## Review — 11-03 / 11-04`
+section above.
+
+### Reviewer lanes attempted
+
+| Reviewer | Status | Notes |
+|---|---|---|
+| codex | RAN | `codex exec --ephemeral --dangerously-bypass-hook-trust --skip-git-repo-check`, same lane as prior rounds. Non-empty output, source-grounded -- read the current `11-04-PLAN.md`, `app/src/bindings/ErrorDto.ts`, `app/src-tauri/src/error.rs`, `app/src-tauri/src/settings.rs`, `CommandBar.tsx`, `CategoryList.tsx`, `MediaAddDialog.tsx` before concluding. |
+
+No reviewer output in this section was simulated or paraphrased from memory --
+verbatim codex findings below.
+
+### codex — findings (verbatim)
+
+1. **BLOCKER: PARTIALLY RESOLVED**
+   The main task text is fixed: the plan now says to derive codes at test time from Rust `to_dto` tuples, using Node `fs`, not a TS union or hand list (`11-04-PLAN.md:48`, `:54`, `:301-307`, `:327-331`, `:353-361`). That matches the real binding: `app/src/bindings/ErrorDto.ts:7` is still `code: string`.
+
+   The Rust source is regex-extractable if the regex allows whitespace/newlines and an optional trailing comma. Current arms include inline tuples (`app/src-tauri/src/error.rs:135-136`), multiline trailing-comma tuples (`:137-140`, `:146-157`, `:256-259`), and block-wrapped tuples (`:166-168`, `:252-254`); settings has the same pattern (`app/src-tauri/src/settings.rs:79-91`). A dependency-free regex can cover all current arms.
+
+   Still broken: the threat model still says task 3 "iterates the real `ErrorDto["code"]` union type" (`11-04-PLAN.md:410`), which directly contradicts the fixed approach and the actual generated binding.
+
+2. **MAJOR #1: PARTIALLY RESOLVED**
+   The plan now explicitly scopes the native dialog `filters[].name` / `title` strings for retrofit: CategoryList in task 1 (`11-04-PLAN.md:160-164`, `:189-194`), CommandBar and MediaAddDialog in task 2 (`:245-250`, `:261-264`), and the completeness test behavior (`:318-323`, `:348-350`).
+
+   Current source confirms the referenced dialog strings still exist where the plan says: CommandBar filter constant at `app/src/components/CommandBar.tsx:65`; CategoryList filters/title at `app/src/components/CategoryList.tsx:409`, `:413`, `:450-451`, `:457`, `:491`, `:496`; MediaAddDialog filter at `app/src/components/MediaAddDialog.tsx:99`.
+
+   Remaining gap: the original CommandBar line refs `:152`, `:186`, `:212` are `defaultPath` strings (`"New Archive.jwlibrary"`, `"Archive.jwlibrary"`, `"Archive (v14).jwlibrary"`), and the rewritten plan's retrofit/completeness language only names `filters[].name` and `title`, not `defaultPath` (`11-04-PLAN.md:47`, `:261-263`, `:318-323`, `:348-350`). If those default filenames are considered user-facing native dialog strings, the original gap is not fully closed.
+
+3. **MAJOR #2: RESOLVED**
+   `SettingsProvider.tsx` now appears in both frontmatter and artifacts (`11-04-PLAN.md:22`, `:436`). The plan no longer references a nonexistent `JwlCoreNotice.test.tsx`; it points JwlCoreNotice coverage to `ErrorBanner.test.tsx` (`11-04-PLAN.md:12`, `:438`). The repo matches that: `app/src/components/JwlCoreNotice.test.tsx` does not exist, while `app/src/components/ErrorBanner.test.tsx:100` contains the `JwlCoreNotice` test block.
+
+**NEW findings:** none beyond the unresolved contradictions/gaps above.
+
+**Verdict: BLOCKED** — remaining unfixed: `11-04-PLAN.md:410` still requires iterating a nonexistent `ErrorDto["code"]` union, and native dialog `defaultPath` strings at `CommandBar.tsx:152`, `:186`, `:212` remain outside the plan's explicit retrofit/completeness scope.
+
+### Assessment
+
+Both remaining items are substantive, not stylistic:
+- The threat-model line (`:410`) is a genuine internal contradiction against the plan's own fixed task text and the real `ErrorDto.code: string` binding -- exactly the class of defect the original BLOCKER flagged, just relocated to an unfixed cross-reference.
+- The `defaultPath` strings are real user-facing text (default save-dialog filenames) that a strict reading of PLAT-03 ("all user-facing strings are localized") would require in scope; whether they're in-scope is a plan-completeness question, not a style nit -- they're currently omitted from both the retrofit instructions and the completeness test's regex, so they'd ship untranslated and ungated.
+
+No stylistic/preference findings were raised in this pass.
