@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 11
 current_phase_name: Signing, Localization, Theme
-status: verifying
+status: complete
 stopped_at: Completed 11-04-PLAN.md
 last_updated: "2026-08-16T17:43:44.062Z"
 progress:
   total_phases: 11
-  completed_phases: 7
+  completed_phases: 11
   total_plans: 49
-  completed_plans: 45
+  completed_plans: 49
 ---
 
 # Project State — JWL Manager (Tauri)
@@ -23,17 +23,17 @@ progress:
 
 ## Current Position
 
-Phase: 11 (Platform Polish) — IN PROGRESS
-Plans: 11-01-PLAN.md (settings/theme tracer) EXECUTED — PLAT-04 satisfied. 11-02-PLAN.md (Windows signing wiring) EXECUTED — PLAT-02 wired, fail-closed, and gated (real signature verification remains a documented manual step, blocked on Azure credentials this environment cannot provision). 11-03-PLAN.md (i18n architecture: dependency-free catalog + I18nContext, App.tsx + SettingsDialog.tsx retrofit) EXECUTED — PLAT-03's architecture half satisfied. 11-04-PLAN.md (i18n retrofit of the remaining 13 components + lib/errors.ts) drafted, still in review/blocked per its own re-review note as of this update.
+Phase: 11 (Platform Polish) — COMPLETE
+Plans: 11-01-PLAN.md (settings/theme tracer) EXECUTED — PLAT-04 satisfied. 11-02-PLAN.md (Windows signing wiring) EXECUTED — PLAT-02 wired, fail-closed, and gated (real signature verification remains a documented manual step, blocked on Azure credentials this environment cannot provision). 11-03-PLAN.md (i18n architecture: dependency-free catalog + I18nContext, App.tsx + SettingsDialog.tsx retrofit) EXECUTED — PLAT-03 architecture satisfied. 11-04-PLAN.md (i18n retrofit of the remaining 13 components + lib/errors.ts) EXECUTED — all Phase 11 technical criteria met, 9/9 must-haves verified via automated tests.
 **Phase:** 11 of 11 — Platform Polish (Signing, Localization, Theme)
-**Plan:** 4 of 4 drafted plans executed (11-01, 11-02, 11-03 done; 11-04 drafted, in review)
-**Status:** Phase in progress — 11-04 remaining
-**Progress:** [█████████░] 92%
+**Plan:** 4 of 4 plans executed (11-01, 11-02, 11-03, 11-04 all complete)
+**Status:** Phase complete
+**Progress:** [██████████] 100%
 
 ## Performance Metrics
 
-- Phases complete: 10/11
-- Requirements delivered: 46/47 (PLAT-03 delivered this plan; Phase 11 verification pending overall phase close)
+- Phases complete: 11/11
+- Requirements delivered: 47/47 (ARCH-04, MERGE-04 verified satisfied in their respective VERIFICATION.md files)
 
 **Per-Plan Metrics:**
 
@@ -105,11 +105,12 @@ Plans: 11-01-PLAN.md (settings/theme tracer) EXECUTED — PLAT-04 satisfied. 11-
 
 ### Todos
 
-- [DONE] Execute 11-01-PLAN.md (settings/theme tracer: `load_settings`/`save_settings`/`app_version` commands, SettingsProvider, ThemeContext, light theme, SettingsDialog). See 11-01-SUMMARY.md.
-- Manually verify the live Tauri app (open settings, flip to light, confirm instant repaint with no reload; restart, confirm persistence; corrupt the settings file, confirm silent degradation) — not exercised in this headless execution environment; automated tests cover the same behaviors at the Rust/React layers.
-- [DONE] Execute 11-02-PLAN.md (Windows Authenticode signing wiring via Azure Trusted Signing — inert/fail-closed until credentials are provisioned). See 11-02-SUMMARY.md.
-- Provision Azure Trusted Signing service-principal credentials (three secrets + one enable variable) for this repo as an operational step before the signed-release path can go live (blocks the signed/published path only, not CI greenness, which already stays green today with the gate off). Then run the deliberate fail-closed check in docs/signing.md once before trusting any signed build.
-- Plan and execute a Phase 11 plan for PLAT-03 (i18n/localization — English complete, other locales deferred per 11-CONTEXT.md). No 11-03-PLAN.md exists yet; this is the one remaining Phase 11 requirement with no plan file.
+- [DONE] Execute 11-01-PLAN.md — 40min, all tasks complete, PLAT-04 satisfied. See 11-01-SUMMARY.md.
+- [DONE] Execute 11-02-PLAN.md — 50min, Windows Authenticode signing wiring complete (fail-closed, gated on credentials). See 11-02-SUMMARY.md.
+- [DONE] Execute 11-03-PLAN.md — 25min, i18n architecture complete (dependency-free catalog + I18nContext + App/SettingsDialog retrofit). See 11-03-SUMMARY.md.
+- [DONE] Execute 11-04-PLAN.md — 90min, i18n retrofit of 13 remaining components + error message catalog complete. See 11-04-SUMMARY.md.
+- Manual live-app verification (open settings, flip theme, restart, corrupt settings) — deferred to operational follow-up; automated tests cover these behaviors at Rust/React layers (VERIFICATION.md documents why).
+- Provision Azure Trusted Signing credentials for signed releases — operational follow-up, documented in docs/signing.md.
 
 ### Blockers
 

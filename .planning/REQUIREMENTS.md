@@ -15,7 +15,7 @@
 - [x] **ARCH-01**: App can open a `.jwlibrary` archive and list its contents (zip envelope: `manifest.json` + `userData.db` + loose media)
 - [x] **ARCH-02**: App can save an archive that JW Library and the existing Python app both open without error
 - [x] **ARCH-03**: App writes `manifest.json` byte-compatibly (compact `separators=(',',':')`, `hash` = sha256 of final DB bytes, `schemaVersion` read from `PRAGMA user_version`, `creationDate` refreshed on save)
-- [ ] **ARCH-04**: App runs `trim_db` on save (orphan sweep, tag position re-densify via ROW_NUMBER, `Location.Title=""` where NULL, VACUUM)
+- [x] **ARCH-04**: App runs `trim_db` on save (orphan sweep, tag position re-densify via ROW_NUMBER, `Location.Title=""` where NULL, VACUUM)
 - [x] **ARCH-05**: App rejects archive paths that escape the extraction root (zip-slip protection)
 - [x] **ARCH-06**: App can create a new empty archive
 - [x] **ARCH-07**: App can save-as to a user-chosen path without mutating the working copy
@@ -33,7 +33,7 @@
 - [x] **MERGE-01**: App loads the `jwlCore` native library, selecting the correct binary for the host OS **and CPU architecture**
 - [x] **MERGE-02**: User can merge two archives via `jwlCore` and the result matches what the Python app produces for the same inputs
 - [x] **MERGE-03**: User can merge N archives in one operation (ordered fold)
-- [ ] **MERGE-04**: App surfaces a clear, actionable error when the native library is missing or fails to load
+- [x] **MERGE-04**: App surfaces a clear, actionable error when the native library is missing or fails to load
 
 ### Data Views (DATA)
 

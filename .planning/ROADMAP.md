@@ -22,7 +22,7 @@
 - [x] **Phase 8: Import / Export Parity** - User can export/import any category in the Python app's exact wire format, with ID-gap recycling.
 - [x] **Phase 9: Incremental Export** - User can export only what changed since a chosen point, using content-hash identity.
 - [x] **Phase 10: N-Way Merge Fold** - User can merge more than two archives in a single ordered operation.
-- [ ] **Phase 11: Platform Polish (Signing, Localization, Theme)** - Windows binaries are signed; user can switch language and theme.
+- [x] **Phase 11: Platform Polish (Signing, Localization, Theme)** - Windows binaries are signed; user can switch language and theme.
 
 ## Phase Details
 
@@ -226,8 +226,8 @@ Plans:
 **Plans**: 1/3 plans executed
 
 - [x] 10-01-PLAN.md — Fold chain: generalized copy source, shared dry-run/commit loop, single atomic promote, two Tauri commands, criterion 1+3 tests (Wave 1)
-- [ ] 10-02-PLAN.md — Failure envelope (step-k pristine, cleanup, immediate abort), intermediate-step media, D10-06 playlist-graph attempt (Wave 2)
-- [ ] 10-03-PLAN.md — FoldMergeDialog reorderable source list + CommandBar multi-pick, aggregate preview, single busy state (Wave 2)
+- [x] 10-02-PLAN.md — Failure envelope (step-k pristine, cleanup, immediate abort), intermediate-step media, D10-06 playlist-graph attempt (Wave 2)
+- [x] 10-03-PLAN.md — FoldMergeDialog reorderable source list + CommandBar multi-pick, aggregate preview, single busy state (Wave 2)
 
 ### Phase 11: Platform Polish (Signing, Localization, Theme)
 
