@@ -5,13 +5,13 @@ milestone_name: milestone
 current_phase: 11
 current_phase_name: Platform Polish (Signing, Localization, Theme)
 status: planned
-stopped_at: Phase 11 cross-AI plan review resolved (11-01-PLAN.md, 11-02-PLAN.md); ready to execute
-last_updated: "2026-08-16T00:00:00.000Z"
+stopped_at: Completed 11-01-PLAN.md (settings/theme tracer) -- PLAT-04 satisfied; 11-02-PLAN.md (Windows signing) still to execute
+last_updated: "2026-08-16T16:11:08.091Z"
 progress:
   total_phases: 11
-  completed_phases: 10
-  total_plans: 45
-  completed_plans: 39
+  completed_phases: 6
+  total_plans: 47
+  completed_plans: 42
 ---
 
 # Project State — JWL Manager (Tauri)
@@ -23,12 +23,12 @@ progress:
 
 ## Current Position
 
-Phase: 11 (Platform Polish) — PLANNED, not yet executed
-Plans: 11-01-PLAN.md (settings/theme tracer) and 11-02-PLAN.md (Windows signing wiring) drafted and cross-AI reviewed; execution not started.
+Phase: 11 (Platform Polish) — IN PROGRESS
+Plans: 11-01-PLAN.md (settings/theme tracer) EXECUTED — PLAT-04 satisfied. 11-02-PLAN.md (Windows signing wiring) drafted and cross-AI reviewed, execution not started.
 **Phase:** 11 of 11 — Platform Polish (Signing, Localization, Theme)
-**Plan:** 0 of TBD executed (2 plans drafted; more expected for i18n, per ROADMAP)
-**Status:** Planning complete for 11-01/11-02 — ready for execution
-**Progress:** [█████████░] Phases 1-10 complete (10/11)
+**Plan:** 1 of TBD executed (11-01 done; 11-02 + i18n plans remaining, per ROADMAP)
+**Status:** 11-01 executed and verified; 11-02 ready for execution
+**Progress:** [█████████░] 89%
 
 ## Performance Metrics
 
@@ -50,6 +50,7 @@ Plans: 11-01-PLAN.md (settings/theme tracer) and 11-02-PLAN.md (Windows signing 
 | Phase 08 P01 | 1 session | 3 tasks | 30 files |
 | Phase 08 P03 | 1 session | 2 tasks | 18 files |
 | Phase 10 P01 | 55min | 3 tasks | 4 files |
+| Phase 11 P01 | 40min | 3 tasks | 18 files |
 
 ## Accumulated Context
 
@@ -94,10 +95,12 @@ Plans: 11-01-PLAN.md (settings/theme tracer) and 11-02-PLAN.md (Windows signing 
 - [Phase ?]: record_edit.rs reuses db::color::apply_color's Notes branch verbatim for UserMark synthesis; RecordEditor added record_fetch + BrowseRow.text_tag beyond the plan's named surface since BrowseRow never carried editable Note/Annotation content or per-TextTag identity
 - [Phase ?]: Fold order is real (D10-01): fold(A,B,C) != fold(A,C,B) by design, proven with a contested-identity fixture
 - [Phase ?]: run_fold_chain shared by dry-run and commit; single atomic promote after last step, media folded back every step (D10-04)
+- [Phase ?]: 11-01: SettingsProvider lifted above App in main.tsx (own ErrorBanner for save failures); updateSettings fires save_settings from inside the setState functional updater to prove concurrent theme+language writes never drop a field; settings.rs errors get their own SettingsError->ErrorDto mapping, never reusing ArchiveError
 
 ### Todos
 
-- Execute 11-01-PLAN.md (settings/theme tracer: `load_settings`/`save_settings`/`app_version` commands, SettingsProvider, ThemeContext, light theme, SettingsDialog).
+- [DONE] Execute 11-01-PLAN.md (settings/theme tracer: `load_settings`/`save_settings`/`app_version` commands, SettingsProvider, ThemeContext, light theme, SettingsDialog). See 11-01-SUMMARY.md.
+- Manually verify the live Tauri app (open settings, flip to light, confirm instant repaint with no reload; restart, confirm persistence; corrupt the settings file, confirm silent degradation) — not exercised in this headless execution environment; automated tests cover the same behaviors at the Rust/React layers.
 - Execute 11-02-PLAN.md (Windows Authenticode signing wiring via Azure Trusted Signing — inert/fail-closed until credentials are provisioned).
 - Provision Azure Trusted Signing service-principal credentials (three secrets + one enable variable) for this repo as an operational step before the signed-release path can go live (blocks 11-02's signed/published path only, not the plan's execution or CI greenness).
 - Plan and execute remaining Phase 11 plans for PLAT-03 (i18n/localization — English complete, other locales deferred per 11-CONTEXT.md).
@@ -110,6 +113,6 @@ Plans: 11-01-PLAN.md (settings/theme tracer) and 11-02-PLAN.md (Windows signing 
 
 **Resume file:** None
 
-**Last session:** 2026-08-16T00:00:00.000Z
-**Stopped at:** Phase 11 plans (11-01, 11-02) revised to resolve cross-AI review findings in `11-REVIEWS.md`; `.planning/STATE.md` staleness repaired.
+**Last session:** 2026-08-16T16:11:08.064Z
+**Stopped at:** Completed 11-01-PLAN.md (settings/theme tracer) -- PLAT-04 satisfied; 11-02-PLAN.md (Windows signing) still to execute
 **Next action:** Execute 11-01-PLAN.md, then 11-02-PLAN.md (both wave 1, independent), then proceed to remaining Phase 11 i18n plans.
