@@ -12,7 +12,7 @@ The signing wiring has a proven, copy-adaptable reference: `remo-code/supervisor
 
 D11-02's i18n layer, D11-03's theme mechanism, and D11-04's settings persistence are all confirmed buildable with zero new dependencies against the actual current codebase: `app/package.json` has 5 runtime deps (react/react-dom/tanstack-virtual/tauri-api/plugin-dialog only), `app/src-tauri/Cargo.toml` already has `serde`+`serde_json`, and `app/src/styles.css` defines exactly 8 color tokens consumed uniformly by every component with zero hardcoded color literals found in a repo-wide check.
 
-**Primary recommendation:** Copy the `remo-code` signing pattern nearly verbatim (script + metadata + gated CI injection step), scoped to the single existing `AZURE_TRUSTED_SIGNING account`; build i18n as a plain `Record<string,string>` catalog + React context; add a `[data-theme="light"]` CSS override block reusing the same 9 custom-property names; add a `settings.rs` Tauri command pair backed by `app_handle.path().app_data_dir()` + `std::fs` + existing `serde_json`.
+**Primary recommendation:** Copy the `remo-code` signing pattern nearly verbatim (script + metadata + gated CI injection step), scoped to the single existing `AZURE_TRUSTED_SIGNING account`; build i18n as a plain `Record<string,string>` catalog + React context; add a `[data-theme="light"]` CSS override block reusing the same 8 color custom-property names; add a `settings.rs` Tauri command pair backed by `app_handle.path().app_data_dir()` + `std::fs` + existing `serde_json`.
 
 ## Architectural Responsibility Map
 
@@ -22,7 +22,7 @@ D11-02's i18n layer, D11-03's theme mechanism, and D11-04's settings persistence
 | UI string translation (i18n) | Frontend (React) | — | Pure presentation concern; no backend involvement, no persisted-data implication beyond the locale *choice* |
 | Theme switching | Frontend (CSS + tiny React state) | — | CSS custom-property cascade only; zero backend involvement beyond persisting the *choice* |
 | Settings persistence (language + theme) | Backend (Rust/Tauri command) | Frontend (context calling `invoke`) | Must live in Rust because `app_data_dir()` is only reliably resolved via `tauri::Manager` in the Rust process; frontend is a thin client of `load_settings`/`save_settings` |
-| About surface (version display) | Frontend (React) | Backend (already-exposed `app_version` via existing commands) | Version is already surfaced through existing typed commands (`env!("CARGO_PKG_VERSION")`, 10+ call sites in `lib.rs`); About is a presentation-only consumer, no new backend needed for version itself |
+| About surface (version display) | Frontend (React) | Backend (new `app_version` Tauri command, registered per the plan) | `env!("CARGO_PKG_VERSION")` is already used internally at 10+ call sites in `lib.rs`, but none of them is a callable, registered Tauri command the frontend can `invoke`; 11-01-PLAN.md adds and registers `app_version` for `SettingsDialog` to call — see 11-01-PLAN.md:167-173 |
 
 ## Standard Stack
 
@@ -212,7 +212,7 @@ function t(key: StringKey): string {
 [ASSUMED: pattern is standard TypeScript, not sourced from a specific library doc since none applies]
 
 ### Pattern 4: CSS-only theme override, zero re-render
-**What:** A second block using the identical 9 custom-property names, scoped under `[data-theme="light"]`, plus dynamic `color-scheme`.
+**What:** A second block using the identical 8 color custom-property names, scoped under `[data-theme="light"]`, plus dynamic `color-scheme`.
 **When to use:** Exactly D11-03.
 **Example:**
 ```css
@@ -253,6 +253,10 @@ function applyTheme(theme: "light" | "dark") {
 ### Pattern 5: Rust settings command pair, isolated from ArchiveSession
 **What:** A new `settings.rs` module exposing two `#[tauri::command]` functions that never touch `ArchiveSession` state or any archive path.
 **Example:**
+Note: the plan (11-01-PLAN.md:162-165) requires explicit `export_to` paths on every
+`#[ts(export, ...)]` attribute, not the bare `#[ts(export)]` shown below for brevity --
+follow the plan's explicit-path form when implementing.
+
 ```rust
 // app/src-tauri/src/settings.rs (new module)
 use serde::{Deserialize, Serialize};
@@ -260,14 +264,14 @@ use tauri::{AppHandle, Manager};
 use ts_rs::TS;
 
 #[derive(Debug, Serialize, Deserialize, TS, Clone)]
-#[ts(export)]
+#[ts(export, export_to = "../../src/bindings/AppSettings.ts")]
 pub struct AppSettings {
     pub language: String,
     pub theme: Theme,
 }
 
 #[derive(Debug, Serialize, Deserialize, TS, Clone, Copy, PartialEq, Eq)]
-#[ts(export)]
+#[ts(export, export_to = "../../src/bindings/Theme.ts")]
 #[serde(rename_all = "lowercase")]
 pub enum Theme {
     Light,
@@ -438,7 +442,7 @@ See Architecture Patterns section above (Patterns 1-5) — each includes a sourc
 |--------|----------|-----------|-------------------|-------------|
 | PLAT-02 (signing wiring correctness) | `tauri.conf.json` committed state has NO `signCommand`; a scratch/CI-simulated injection produces valid JSON; `sign.ps1` fails loudly with `TRUSTED_SIGNING_DLIB` unset | unit/integration (script logic) + manual (actual signed-artifact verification is blocked on credentials, see below) | A Rust or shell test asserting `tauri.conf.json`'s `bundle.windows` key is absent/has no `signCommand` in the committed file; a manual local run of `sign.ps1` with `TRUSTED_SIGNING_DLIB` unset, asserting non-zero exit | ❌ Wave 0 |
 | PLAT-03 (i18n coverage) | Every `StringKey` has an English value; missing-key fallback works; language switch re-renders visible text | unit (TS) | `npx vitest run app/src/i18n/*.test.ts` -- assert `Object.keys(en).length === Object.keys(strings/StringKey union).length` and that a `t()` call for a key absent from a non-English catalog returns the English value | ❌ Wave 0 |
-| PLAT-04a (theme token completeness) | Both `:root` and `:root[data-theme="light"]` define the SAME 9 custom-property names, none missing | unit/lint (CSS parse) or a small Node/TS script test | A vitest test (or a small `ctx_execute` script during planning-verification) parsing `styles.css`, extracting property names under each selector block, asserting set equality | ❌ Wave 0 |
+| PLAT-04a (theme token completeness) | Both `:root` and `:root[data-theme="light"]` define the SAME 8 color custom-property names, none missing | unit/lint (CSS parse) or a small Node/TS script test | A vitest test (or a small `ctx_execute` script during planning-verification) parsing `styles.css`, extracting property names under each selector block, asserting set equality | ❌ Wave 0 |
 | PLAT-04b (theme switch applies instantly) | Toggling theme updates `document.documentElement.dataset.theme` and a subsequent computed-style check reflects new token values | integration (React Testing Library, matches existing `*.test.tsx` convention) | `npx vitest run app/src/theme/ThemeContext.test.tsx` | ❌ Wave 0 |
 | D11-04 (settings round-trip + corrupt-file degradation) | `save_settings` then `load_settings` returns the same values; a corrupt/missing settings.json degrades to `AppSettings::default()` without panicking | unit (Rust, `tempfile`-overridden path per Established Patterns) | `cargo test --jobs 2 settings::` | ❌ Wave 0 |
 | D11-04 (settings never touches archive state) | `save_settings`/`load_settings` compile and run with zero references to `ArchiveSession`/`archive::save` | code-review / grep-based check, not a runtime test | `grep -n "ArchiveSession\|archive::save" app/src-tauri/src/settings.rs` should return nothing | N/A (structural check) |
