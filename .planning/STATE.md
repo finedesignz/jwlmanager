@@ -10,8 +10,8 @@ last_updated: "2026-08-16T17:43:44.062Z"
 progress:
   total_phases: 11
   completed_phases: 11
-  total_plans: 49
-  completed_plans: 49
+  total_plans: 45
+  completed_plans: 45
 ---
 
 # Project State — JWL Manager (Tauri)
