@@ -69,7 +69,7 @@ GitHub tag push (v*.*.* or release-tagged)
    [app-ci.yml or new release-app.yml]
         |
    vars.ENABLE_MSI_SIGNING == 'true' ?
-        |--- NO  --> tauri build (no signCommand injected) --> unsigned MSI/NSIS --> release asset
+        |--- NO  --> tauri build (no signCommand injected) --> unsigned MSI/NSIS --> workflow-run artifact (NOT a public Release)
         |--- YES --> install Trusted Signing dlib (NuGet)
                      --> patch tauri.conf.json: bundle.windows.signCommand = "powershell ... sign.ps1 %1"
                      --> tauri build
@@ -111,7 +111,7 @@ invoke("load_settings")  ------------------------->  Rust: settings::load_settin
 SettingsProvider state = { locale, theme } (defaults until resolved, then real values)
    |
    +--> ThemeContext consumer: sets document.documentElement.dataset.theme = theme
-   |          --> CSS [data-theme="light"] block overrides the 9 tokens --> instant re-paint, zero JS re-render
+   |          --> CSS [data-theme="light"] block overrides the 8 tokens --> instant re-paint, zero JS re-render
    |
    +--> I18nContext consumer: t(key) looks up catalogs[locale][key] ?? catalogs["en"][key]
    |
@@ -164,7 +164,7 @@ app/src/
 # Source: remo-code/.github/workflows/release-supervisor.yml:100-128 (adapt path for jwlmanager: app/src-tauri/tauri.conf.json)
 $confPath = 'app/src-tauri/tauri.conf.json'
 $conf = Get-Content -Raw -LiteralPath $confPath | ConvertFrom-Json
-$signCmd = 'powershell -ExecutionPolicy Bypass -File ../signing/sign.ps1 %1'
+$signCmd = 'powershell -ExecutionPolicy Bypass -File signing/sign.ps1 %1'
 if (-not $conf.bundle.windows) {
     $conf.bundle | Add-Member -NotePropertyName windows -NotePropertyValue (@{}) -Force
 }
