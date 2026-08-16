@@ -100,8 +100,10 @@ describe("SettingsProvider — write-through (D11-04)", () => {
 
     fireEvent.click(screen.getByTestId("set-light"));
 
-    expect(invokeMock).toHaveBeenCalledWith("save_settings", {
-      settings: { language: "en", theme: "light" },
+    await vi.waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("save_settings", {
+        settings: { language: "en", theme: "light" },
+      });
     });
     const saveCalls = invokeMock.mock.calls.filter(([cmd]) => cmd === "save_settings");
     expect(saveCalls.length).toBe(1);
@@ -145,9 +147,116 @@ describe("SettingsProvider — concurrent write-through (D11-04)", () => {
 
     fireEvent.click(screen.getByTestId("set-both"));
 
+    await vi.waitFor(() => {
+      const calls = invokeMock.mock.calls.filter(([cmd]) => cmd === "save_settings");
+      expect(calls.length).toBe(2);
+    });
     const saveCalls = invokeMock.mock.calls.filter(([cmd]) => cmd === "save_settings");
-    expect(saveCalls.length).toBe(2);
     const lastCall = saveCalls[saveCalls.length - 1];
     expect(lastCall[1]).toEqual({ settings: { language: "de", theme: "light" } });
+  });
+
+  it("[F1] persists BOTH changes even when the FIRST save_settings IPC call resolves AFTER the second (out-of-order completion)", async () => {
+    // `diskState` models the actual file on disk: it is overwritten
+    // whenever an IPC call's promise SETTLES, not when it is issued --
+    // exactly like the real `save_settings` Rust command running on a
+    // blocking thread pool with no ordering guarantee. `resolvers` collects
+    // one settle-function per `save_settings` invoke call, in the order
+    // those calls are ISSUED (which may differ from settle order below).
+    let diskState: Record<string, unknown> | undefined;
+    const resolvers: Array<() => void> = [];
+
+    invokeMock.mockImplementation((cmd: string, args?: { settings: AppSettings }) => {
+      if (cmd === "load_settings") return Promise.resolve({ language: "en", theme: "dark" });
+      if (cmd === "save_settings") {
+        const settings = args!.settings as unknown as Record<string, unknown>;
+        return new Promise<void>((resolve) => {
+          resolvers.push(() => {
+            diskState = settings;
+            resolve();
+          });
+        });
+      }
+      return Promise.reject(new Error(`unexpected invoke: ${cmd}`));
+    });
+
+    renderWithConsumer();
+    await screen.findByTestId("current-theme");
+    invokeMock.mockClear();
+    diskState = undefined;
+    resolvers.length = 0;
+
+    // Fire the theme change, then the language change back-to-back.
+    fireEvent.click(screen.getByTestId("set-light"));
+    fireEvent.click(screen.getByTestId("set-de"));
+
+    // A single-flight (fixed) implementation issues the first save
+    // asynchronously (chained off a resolved promise), so wait for at
+    // least one `save_settings` call to actually be issued before deciding
+    // which race scenario (serialized vs. fire-and-forget) applies.
+    await vi.waitFor(() => {
+      expect(resolvers.length).toBeGreaterThanOrEqual(1);
+    });
+
+    if (resolvers.length === 1) {
+      // Serialized (fixed) implementation: the second save is only issued
+      // after the first settles. Settle the first, let the chain issue the
+      // second, then settle that.
+      resolvers[0]();
+      await vi.waitFor(() => {
+        expect(resolvers.length).toBe(2);
+      });
+      resolvers[1]();
+    } else {
+      // Fire-and-forget (buggy) implementation: both saves are already
+      // in flight. Settle OUT OF ORDER -- the newer (second/language) call
+      // lands on disk first, then the older (first/theme) call lands LAST,
+      // reproducing the write-ordering race.
+      expect(resolvers.length).toBe(2);
+      resolvers[1]();
+      await Promise.resolve();
+      resolvers[0]();
+    }
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Whatever landed on disk LAST must reflect BOTH changes -- theme AND
+    // language. A correct (single-flight, order-preserving) save path never
+    // lets a stale, older write land after a newer one.
+    expect(diskState).toEqual({ language: "de", theme: "light" });
+  });
+});
+
+describe("SettingsProvider — stale error banner (F4)", () => {
+  it("clears the save-error banner after a subsequent successful save", async () => {
+    let shouldFail = true;
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "load_settings") return Promise.resolve({ language: "en", theme: "dark" });
+      if (cmd === "save_settings") {
+        if (shouldFail) {
+          return Promise.reject({
+            code: "settings_write_failed",
+            operation: "save_settings",
+            safe_file_name: null,
+            message_key: "error.settings.write_failed",
+          });
+        }
+        return Promise.resolve(undefined);
+      }
+      return Promise.reject(new Error(`unexpected invoke: ${cmd}`));
+    });
+
+    renderWithConsumer();
+    await screen.findByTestId("current-theme");
+
+    fireEvent.click(screen.getByTestId("set-light"));
+    await screen.findByTestId("error-banner");
+
+    shouldFail = false;
+    fireEvent.click(screen.getByTestId("set-de"));
+
+    await vi.waitFor(() => {
+      expect(screen.queryByTestId("error-banner")).not.toBeInTheDocument();
+    });
   });
 });

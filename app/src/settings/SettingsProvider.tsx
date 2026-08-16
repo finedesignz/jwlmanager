@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -69,6 +70,13 @@ const SettingsContext = createContext<SettingsContextValue | null>(null);
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [saveError, setSaveError] = useState<ErrorDto | null>(null);
+  // Single-flight promise chain: only one `save_settings` IPC call is ever
+  // in flight at a time, and each save is issued strictly after the
+  // previous one SETTLES (not merely dispatched). This guarantees writes
+  // land on disk in commit order, so the last logical state always wins --
+  // fixing the write-ordering race where an older in-flight save could
+  // otherwise land after a newer one and regress settings.json (F1).
+  const saveChainRef = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
     let cancelled = false;
@@ -93,9 +101,21 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const updateSettings = useCallback((patch: Partial<AppSettings>) => {
     setSettings((prev) => {
       const next: AppSettings = { ...prev, ...patch };
-      void invoke("save_settings", { settings: next }).catch((err) => {
-        setSaveError(err as ErrorDto);
-      });
+      // Chain this save off the previous save's SETTLED promise (success or
+      // failure) rather than firing it immediately -- this is what makes
+      // the IPC calls single-flight, so they land on disk in the same order
+      // they were committed here.
+      saveChainRef.current = saveChainRef.current.then(
+        () => invoke("save_settings", { settings: next }),
+        () => invoke("save_settings", { settings: next }),
+      ).then(
+        () => {
+          setSaveError(null);
+        },
+        (err) => {
+          setSaveError(err as ErrorDto);
+        },
+      );
       return next;
     });
   }, []);

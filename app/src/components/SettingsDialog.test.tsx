@@ -40,8 +40,10 @@ describe("SettingsDialog (D11-03/D11-04, 11-01-PLAN.md Task 1)", () => {
 
     fireEvent.click(screen.getByTestId("settings-dialog-theme-light"));
 
-    expect(invokeMock).toHaveBeenCalledWith("save_settings", {
-      settings: { language: "en", theme: "light" },
+    await vi.waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("save_settings", {
+        settings: { language: "en", theme: "light" },
+      });
     });
     expect(screen.getByTestId("settings-dialog-theme-light")).toHaveAttribute(
       "aria-pressed",
@@ -68,8 +70,10 @@ describe("SettingsDialog (D11-03/D11-04, 11-01-PLAN.md Task 1)", () => {
       target: { value: "de" },
     });
 
-    expect(invokeMock).toHaveBeenCalledWith("save_settings", {
-      settings: { language: "de", theme: "dark" },
+    await vi.waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("save_settings", {
+        settings: { language: "de", theme: "dark" },
+      });
     });
     expect(screen.getByTestId("settings-dialog-language-select")).toHaveValue("de");
     // "de" is an empty scaffolded catalog -- the Theme label still renders
