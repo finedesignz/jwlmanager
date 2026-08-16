@@ -8,6 +8,10 @@ A cross-platform desktop app for managing `.jwlibrary` backup archives from JW L
 
 **Never lose or corrupt a user's archive.** These are years of irreplaceable personal study notes. If everything else fails, the data must survive intact.
 
+## Current State (as of v1.0, shipped 2026-08-16)
+
+The Tauri rewrite reached full v1 scope: 11 phases, 45 plans, 47/47 requirements, independently audited (`.planning/milestones/v1.0-MILESTONE-AUDIT.md` — 47/47 requirements, 11/11 phases, 6/6 integration checks, 6/6 flows, PASSED). The app opens/views/edits/deletes/imports/exports across all 6 categories, upgrades/downgrades schema v12-16↔v14, merges 2..N archives via the real `jwlCore` binary, and ships localized (9 locales) with light/dark theming. Windows Authenticode signing is wired fail-closed into the release pipeline, pending only Azure credential provisioning (an operational, not a code, gap). Zero new runtime dependencies were added across all 11 phases — jwlCore binding, wire-format serialization, and the i18n catalog are all hand-rolled against existing primitives. ~50.6k LOC (Rust + TS/TSX), 528 files touched, over 2 million lines diffed across the milestone (110,505 insertions in a squashed diffstat).
+
 ## Requirements
 
 ### Validated
@@ -22,27 +26,28 @@ A cross-platform desktop app for managing `.jwlibrary` backup archives from JW L
 - ✓ Tagging, coloring, cleaning, masking, reordering — existing
 - ✓ Localization via gettext — existing
 
+**Rewritten and re-earned in the Tauri app — v1.0:**
+
+- ✓ Read/write the `.jwlibrary` archive envelope faithfully (zip + `manifest.json` + `userData.db`) — v1.0 (Phase 1)
+- ✓ Bind `jwlCore` from Rust via `libloading` for merge — v1.0 (Phase 5), never reimplemented
+- ✓ Reproduce the 7-table LocationId remap closure with explicit, tested ordering semantics — v1.0 (Phase 4)
+- ✓ Reproduce `trim_db` on save (orphan sweep, tag re-densify, VACUUM) — v1.0 (Phase 2)
+- ✓ Schema upgrade/downgrade with the v16↔v14 delta — v1.0 (Phases 3-4)
+- ✓ All 6 categories: view, edit, delete, import, export — v1.0 (Phases 6-8)
+- ✓ Localization — v1.0 (Phase 11), dependency-free catalog + React context, 9 locales
+- ✓ Dry-run diff/preview before every destructive operation — v1.0 (Phase 2), reused by downgrade/merge/fold
+- ✓ Incremental export (content-hash identity, not timestamps) — v1.0 (Phase 9)
+- ✓ Signed binaries wiring (Azure Trusted Signing, fail-closed) — v1.0 (Phase 11); real signature verification pending credential provisioning (operational, not code)
+- ✓ Automated test suite (fixture archives, round-trip assertions), built per-phase — v1.0 (all phases)
+- ✓ Stable category enums replacing translated-string control-flow keys — v1.0 (Phase 1)
+- ✓ N-way merge fold — v1.0 (Phase 10), including the closed D10-06 playlist-graph gap
+- ✓ Arch-aware native lib loading (fixes the arm64 selection bug) — v1.0 (Phase 1)
+
 ### Active
 
-<!-- Current scope. Building toward these. -->
+<!-- Nothing carried over from v1.0 — all Active requirements shipped. Populate for the next milestone via /gsd-new-milestone. -->
 
-**Parity (the rewrite must re-earn these):**
-- [ ] Read/write the `.jwlibrary` archive envelope faithfully (zip + `manifest.json` + `userData.db`)
-- [ ] Bind `jwlCore` from Rust via `libloading` for merge (do not reimplement merge)
-- [ ] Reproduce the 7-table LocationId remap closure with explicit, tested ordering semantics
-- [ ] Reproduce `trim_db` on save (orphan sweep, tag re-densify, VACUUM)
-- [ ] Schema upgrade/downgrade with the v16↔v14 delta
-- [ ] All 6 categories: view, edit, delete, import, export
-- [ ] Localization
-
-**New value (why the rewrite is worth doing):**
-- [ ] Dry-run diff/preview before destructive operations ("will add 412, overwrite 6, delete 0" + cancel)
-- [ ] Incremental export (export only what changed since last export)
-- [ ] Signed binaries (Azure Trusted Signing — Titanium Labs LLC)
-- [ ] Automated test suite (fixture archives, round-trip assertions) — built per-phase, not retrofitted
-- [ ] Stable category enums (replacing translated-string control-flow keys)
-- [ ] N-way merge fold (absorbed from jwlFusion's approach, not its code)
-- [ ] Arch-aware native lib loading (fixes the arm64 selection bug)
+(none — start the next milestone's requirements fresh via `/gsd-new-milestone`)
 
 ### Out of Scope
 
@@ -75,13 +80,23 @@ A cross-platform desktop app for managing `.jwlibrary` backup archives from JW L
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Tauri rewrite over incremental Python fixes | Owner's call, made against a RESHAPE verdict with full knowledge of the risk. Long-term maintainability + signed/small binaries + a clean core outweigh the parity slog for this owner. | — Pending |
-| Bind `jwlCore` via `libloading`; never reimplement merge | The hardest logic is a prebuilt binary both apps already share (hash-verified). Removes the single largest rewrite risk. | — Pending |
-| Test as we go, per-phase, in the new app | Owner declined a retrofitted characterization harness over the Python app. Tests are written alongside each Tauri slice instead. | — Pending |
-| Vertical MVP slices | Every phase ships an end-to-end working capability — avoids the "months of no value" failure mode the council flagged. | — Pending |
-| Dry-run diff prioritized early | Highest-conviction user ask; directly serves Core Value (data safety) and de-risks every destructive operation that follows. | — Pending |
-| Absorb jwlFusion capability, not code | License conflict (Infiniti Noncommercial vs MIT) blocks code reuse; the MIT `jwlcore` path reaches the identical engine. | — Pending |
-| Stable enums replace translated category strings | Existing app uses `if category == _('Notes')` — a latent i18n bug. Rewrite fixes it at the root. | — Pending |
+| Tauri rewrite over incremental Python fixes | Owner's call, made against a RESHAPE verdict with full knowledge of the risk. Long-term maintainability + signed/small binaries + a clean core outweigh the parity slog for this owner. | ✓ Good — v1.0 shipped full parity + new value in 11 phases |
+| Bind `jwlCore` via `libloading`; never reimplement merge | The hardest logic is a prebuilt binary both apps already share (hash-verified). Removes the single largest rewrite risk. | ✓ Good — merge/fold both bind the real DLL, zero reimplementation |
+| Test as we go, per-phase, in the new app | Owner declined a retrofitted characterization harness over the Python app. Tests are written alongside each Tauri slice instead. | ✓ Good — every mutating op has a round-trip test; no retrofit needed |
+| Vertical MVP slices | Every phase ships an end-to-end working capability — avoids the "months of no value" failure mode the council flagged. | ✓ Good — 11/11 phases each shipped working value |
+| Dry-run diff prioritized early | Highest-conviction user ask; directly serves Core Value (data safety) and de-risks every destructive operation that follows. | ✓ Good — Phase 2's DryRunReport reused by downgrade, merge, and fold |
+| Absorb jwlFusion capability, not code | License conflict (Infiniti Noncommercial vs MIT) blocks code reuse; the MIT `jwlcore` path reaches the identical engine. | ✓ Good — no license exposure, N-way fold delivered independently |
+| Stable enums replace translated category strings | Existing app uses `if category == _('Notes')` — a latent i18n bug. Rewrite fixes it at the root. | ✓ Good — Category enum + ts-rs bindings hold across all 11 phases |
+| Zero new runtime dependencies for the whole milestone | Hand-roll jwlCore binding, wire-format serialization, and i18n catalog against existing primitives rather than pull in libloading alternatives, serde helpers, or i18next/react-intl. | ✓ Good — held for all 11 phases; smaller supply-chain surface |
+| Windows signing wired fail-closed, verification deferred | Azure Trusted Signing credentials could not be provisioned in this environment; wiring must not silently ship unsigned. | ✓ Good — signCommand + gated release-app.yml verified via live fail-closed demonstration; credential provisioning is the one remaining operational step |
+
+## Next Milestone Goals
+
+<!-- Candidate scope for the next milestone. Populate/refine via /gsd-new-milestone. -->
+
+- **Provision Azure Trusted Signing credentials** and run the deliberate real-signature verification (`docs/signing.md`) so Windows releases actually ship signed, not just wired to sign.
+- **Manual live-app UX verification** of Phase 11 flows (settings, theme flip, restart, corrupt-settings recovery) — deferred from v1.0 since automated tests cover the same behaviors at the Rust/React layers but a human hasn't clicked through them yet.
+- v2 candidates already scoped in the pre-v1.0 REQUIREMENTS.md deferred list (full-text search, round-trip markdown editing, standalone Rust CLI, Tauri mobile, auto-update) — re-validate demand before committing any to the next milestone's Active requirements.
 
 ## Evolution
 
@@ -101,4 +116,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-07-16 after initialization*
+*Last updated: 2026-08-16 after v1.0 milestone*
