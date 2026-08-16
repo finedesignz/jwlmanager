@@ -67,6 +67,11 @@ jobs:
           restore-keys: |
             ${{ matrix.os }}-cargo-
 
+      - name: Verify sign.ps1 fails closed (no credentials required)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: pwsh -NoProfile -File app/src-tauri/signing/verify-fail-closed.ps1
+
       - name: cargo fmt --check
         working-directory: app/src-tauri
         run: cargo fmt --check
