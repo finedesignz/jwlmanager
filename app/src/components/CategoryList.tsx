@@ -10,6 +10,9 @@ import type { IncrementalExportSummary } from "../bindings/IncrementalExportSumm
 import type { NotesImportPreview } from "../bindings/NotesImportPreview";
 import type { PlaylistDeleteReport } from "../bindings/PlaylistDeleteReport";
 import type { PlaylistImportPreview } from "../bindings/PlaylistImportPreview";
+import type { StringKey } from "../i18n/strings";
+import { useI18n } from "../i18n/I18nContext";
+import { categoryLabel } from "./CategorySwitcher";
 import ColorMenu from "./ColorMenu";
 import EditPreviewDialog from "./EditPreviewDialog";
 import FavoriteAddDialog from "./FavoriteAddDialog";
@@ -36,21 +39,23 @@ const NO_WRAP_STYLE: React.CSSProperties = {
   textOverflow: "ellipsis",
 };
 
-/** Human-facing op labels for the operation bar (deferred affordances). */
-const OP_LABEL: Record<Op, string> = {
-  delete: "Delete",
+/** Human-facing op label catalog keys for the operation bar (deferred
+ * affordances) — 11-04-PLAN.md retrofit; `common.color`/`common.add` reuse
+ * the SAME word rendered verbatim elsewhere in the app. */
+const OP_LABEL_KEYS: Record<Op, StringKey> = {
+  delete: "categoryList.op.delete",
   // Ellipsis signals "opens a file picker" (08-UI-SPEC.md), matching the
   // app's existing convention ("Save v14-compatible copy…", "Merge Archive…").
-  export: "Export…",
+  export: "categoryList.op.export",
   // "Edit" (EDIT-07, 07-05-PLAN.md) — the `view` op's real name once the
   // field-constrained record editor lands. Safe to rename globally: both
   // `view`-carrying categories (Notes, Annotations) go LIVE simultaneously
   // this phase.
-  view: "Edit",
-  color: "Color",
-  tag: "Tag",
-  add: "Add",
-  import: "Import…",
+  view: "categoryList.op.view",
+  color: "common.color",
+  tag: "categoryList.op.tag",
+  add: "common.add",
+  import: "categoryList.op.import",
 };
 
 /**
@@ -166,16 +171,16 @@ function resolveLabel(row: BrowseRow, category: Category): string {
  * ambiguous alone — 07-UI-SPEC.md). Playlists' `add` (still deferred, media
  * add is Phase 8) keeps the generic "Add" label unchanged.
  */
-function resolveOpLabel(op: Op, category: Category): string {
+function resolveOpLabel(op: Op, category: Category, t: ReturnType<typeof useI18n>["t"]): string {
   if (op === "add" && category === "Favorites") {
-    return "Add Favorite";
+    return t("categoryList.op.addFavorite");
   }
   // "Add Media…" (Playlists, IO-02, 08-06-PLAN.md) — the ellipsis signals
   // "opens a native multi-file picker, not an instant action" (08-UI-SPEC.md).
   if (op === "add" && category === "Playlists") {
-    return "Add Media…";
+    return t("categoryList.op.addMedia");
   }
-  return OP_LABEL[op];
+  return t(OP_LABEL_KEYS[op]);
 }
 
 interface CategoryListProps {
@@ -217,6 +222,7 @@ export default function CategoryList({
   onRowsChanged,
   onError,
 }: CategoryListProps) {
+  const { t } = useI18n();
   const parentRef = useRef<HTMLDivElement>(null);
   const [selected, setSelected] = useState<Set<bigint>>(new Set());
   const [report, setReport] = useState<DryRunReport | null>(null);
@@ -406,11 +412,11 @@ export default function CategoryList({
     const target =
       category === "Playlists"
         ? await save({
-            filters: [{ name: "JW Library playlists", extensions: ["jwlplaylist"] }],
+            filters: [{ name: t("categoryList.filterPlaylists"), extensions: ["jwlplaylist"] }],
             defaultPath: `${category}.jwlplaylist`,
           })
         : await save({
-            filters: [{ name: "Text files", extensions: ["txt"] }],
+            filters: [{ name: t("categoryList.filterTextFiles"), extensions: ["txt"] }],
             defaultPath: `${category}.txt`,
           });
     if (typeof target !== "string") {
@@ -430,7 +436,7 @@ export default function CategoryList({
     } finally {
       setExportPending(false);
     }
-  }, [exportPending, exportCommand, category, selected, onError]);
+  }, [exportPending, exportCommand, category, selected, onError, t]);
 
   const incrementalExportCommand = INCREMENTAL_EXPORT_COMMANDS[category];
 
@@ -447,14 +453,14 @@ export default function CategoryList({
     const priorFile = await open({
       multiple: false,
       directory: false,
-      filters: [{ name: "Text files", extensions: ["txt"] }],
-      title: `Select a prior ${category} export…`,
+      filters: [{ name: t("categoryList.filterTextFiles"), extensions: ["txt"] }],
+      title: t("categoryList.priorExportTitle", { category: categoryLabel(category, t) }),
     });
     if (typeof priorFile !== "string") {
       return; // cancelled — no backend call
     }
     const target = await save({
-      filters: [{ name: "Text files", extensions: ["txt"] }],
+      filters: [{ name: t("categoryList.filterTextFiles"), extensions: ["txt"] }],
       defaultPath: `${category}-changed.txt`,
     });
     if (typeof target !== "string") {
@@ -472,7 +478,7 @@ export default function CategoryList({
     } finally {
       setIncrementalExportPending(false);
     }
-  }, [incrementalExportPending, incrementalExportCommand, category, onError]);
+  }, [incrementalExportPending, incrementalExportCommand, category, onError, t]);
 
   const importCommands = IMPORT_COMMANDS[category];
 
@@ -488,12 +494,12 @@ export default function CategoryList({
         ? await open({
             multiple: false,
             directory: false,
-            filters: [{ name: "JW Library playlists", extensions: ["jwlplaylist"] }],
+            filters: [{ name: t("categoryList.filterPlaylists"), extensions: ["jwlplaylist"] }],
           })
         : await open({
             multiple: false,
             directory: false,
-            filters: [{ name: "Text files", extensions: ["txt"] }],
+            filters: [{ name: t("categoryList.filterTextFiles"), extensions: ["txt"] }],
           });
     if (typeof selectedFile !== "string") {
       return; // cancelled — no backend call
@@ -531,7 +537,7 @@ export default function CategoryList({
     } finally {
       setImportPending(false);
     }
-  }, [importPending, importCommands, category, onError]);
+  }, [importPending, importCommands, category, onError, t]);
 
   const handleImportConfirm = useCallback(async () => {
     if (!importCommands || !importPreview) {
@@ -603,7 +609,7 @@ export default function CategoryList({
                 disabled={!state.enabled || dryRunPending}
                 data-testid="category-list-delete-button"
               >
-                {dryRunPending ? "Preparing…" : `Delete (${selected.size})`}
+                {dryRunPending ? t("common.preparing") : t("categoryList.deleteButton", { count: selected.size })}
               </button>
             );
           }
@@ -624,7 +630,7 @@ export default function CategoryList({
                 disabled={!state.enabled}
                 data-testid="category-list-add-button"
               >
-                {resolveOpLabel(state.op, category)}
+                {resolveOpLabel(state.op, category, t)}
               </button>
             );
           }
@@ -641,10 +647,18 @@ export default function CategoryList({
                   className="toolbar-button category-list-export-button"
                   onClick={handleExportClick}
                   disabled={!state.enabled || exportPending}
-                  title={selected.size === 0 ? `No rows selected — exports all ${category}.` : undefined}
+                  title={
+                    selected.size === 0
+                      ? t("categoryList.export.tooltipNoSelection", { category: categoryLabel(category, t) })
+                      : undefined
+                  }
                   data-testid="category-list-export-button"
                 >
-                  {exportPending ? "Exporting…" : exportFlash ? "Exported" : resolveOpLabel(state.op, category)}
+                  {exportPending
+                    ? t("categoryList.export.pending")
+                    : exportFlash
+                      ? t("categoryList.export.done")
+                      : resolveOpLabel(state.op, category, t)}
                 </button>
                 {/* "Export changed…" (IO-04, 09-01-PLAN.md) — sits next to
                     plain "Export…", present only for a category in
@@ -659,7 +673,7 @@ export default function CategoryList({
                     disabled={incrementalExportPending}
                     data-testid="category-list-export-incremental-button"
                   >
-                    {incrementalExportPending ? "Exporting…" : "Export changed…"}
+                    {incrementalExportPending ? t("categoryList.export.pending") : t("categoryList.export.changedButton")}
                   </button>
                 )}
               </span>
@@ -677,7 +691,7 @@ export default function CategoryList({
                 disabled={!state.enabled || importPending}
                 data-testid="category-list-import-button"
               >
-                {importPending ? "Importing…" : resolveOpLabel(state.op, category)}
+                {importPending ? t("categoryList.import.pending") : resolveOpLabel(state.op, category, t)}
               </button>
             );
           }
@@ -696,7 +710,7 @@ export default function CategoryList({
                   disabled={!state.enabled}
                   data-testid="category-list-color-button"
                 >
-                  {resolveOpLabel(state.op, category)}
+                  {resolveOpLabel(state.op, category, t)}
                 </button>
                 {showColorMenu && (
                   <ColorMenu
@@ -729,7 +743,7 @@ export default function CategoryList({
                 disabled={!state.enabled}
                 data-testid="category-list-tag-button"
               >
-                {resolveOpLabel(state.op, category)}
+                {resolveOpLabel(state.op, category, t)}
               </button>
             );
           }
@@ -749,10 +763,10 @@ export default function CategoryList({
                 className="toolbar-button category-list-edit-button"
                 onClick={() => setShowRecordEditor(true)}
                 disabled={!state.enabled || selected.size !== 1}
-                title={tooManySelected ? "Select exactly one row to edit" : undefined}
+                title={tooManySelected ? t("categoryList.edit.tooManySelected") : undefined}
                 data-testid="category-list-edit-button"
               >
-                {resolveOpLabel(state.op, category)}
+                {resolveOpLabel(state.op, category, t)}
               </button>
             );
           }
@@ -765,16 +779,16 @@ export default function CategoryList({
               disabled
               data-deferred="true"
               data-testid={`category-list-op-${state.op}`}
-              title="Coming soon"
+              title={t("categoryList.op.comingSoonTitle")}
             >
-              {resolveOpLabel(state.op, category)} (soon)
+              {t("categoryList.op.deferredLabel", { label: resolveOpLabel(state.op, category, t) })}
             </button>
           );
         })}
       </div>
       {rows.length === 0 ? (
         <p className="notes-list-empty" data-testid="category-list-empty">
-          No {category} in this archive.
+          {t("categoryList.emptyState", { category: categoryLabel(category, t) })}
         </p>
       ) : (
       <div
@@ -809,7 +823,7 @@ export default function CategoryList({
                   type="checkbox"
                   className="notes-list-row-checkbox"
                   data-testid="category-list-row-checkbox"
-                  aria-label={`Select ${label}`}
+                  aria-label={t("categoryList.selectionCheckboxAriaLabel", { label })}
                   checked={selected.has(row.id)}
                   onChange={() => toggleSelected(row.id)}
                 />
@@ -857,21 +871,29 @@ export default function CategoryList({
           report={playlistDeleteReport.report}
           onConfirm={handleConfirm}
           onCancel={handleCancel}
-          title={`Delete ${selected.size} playlist item${selected.size === 1 ? "" : "s"}?`}
-          ariaLabel="Confirm delete"
+          title={t("categoryList.playlistDelete.title", {
+            count: selected.size,
+            plural: selected.size === 1 ? "" : "s",
+          })}
+          ariaLabel={t("common.confirmDelete")}
           summary={
             <>
-              This deletes {selected.size} playlist item{selected.size === 1 ? "" : "s"}.{" "}
-              {playlistDeleteReport.media_removed} media file
-              {playlistDeleteReport.media_removed === 1 ? "" : "s"} used only by these items will also
-              be removed.
+              {t("categoryList.playlistDelete.summaryDeletes", {
+                count: selected.size,
+                plural: selected.size === 1 ? "" : "s",
+              })}{" "}
+              {t("categoryList.playlistDelete.summaryMediaRemoved", {
+                count: playlistDeleteReport.media_removed,
+                plural: playlistDeleteReport.media_removed === 1 ? "" : "s",
+              })}
               {playlistDeleteReport.media_kept > 0 && (
                 <>
                   {" "}
-                  {playlistDeleteReport.media_kept} media file
-                  {playlistDeleteReport.media_kept === 1 ? "" : "s"} will be kept because{" "}
-                  {playlistDeleteReport.media_kept === 1 ? "it's" : "they're"} still used by other
-                  playlist items.
+                  {t("categoryList.playlistDelete.summaryMediaKept", {
+                    count: playlistDeleteReport.media_kept,
+                    plural: playlistDeleteReport.media_kept === 1 ? "" : "s",
+                    pronoun: playlistDeleteReport.media_kept === 1 ? "it's" : "they're",
+                  })}
                 </>
               )}
             </>
@@ -883,10 +905,22 @@ export default function CategoryList({
           report={importPreview.report}
           onConfirm={handleImportConfirm}
           onCancel={handleImportCancel}
-          title={category === "Playlists" ? "Import Playlist?" : `Import ${category}?`}
-          ariaLabel={category === "Playlists" ? "Import Playlist" : `Import ${category}`}
-          confirmLabel={category === "Playlists" ? "Import Playlist" : `Import ${category}`}
-          confirmPendingLabel="Importing…"
+          title={
+            category === "Playlists"
+              ? t("categoryList.import.titlePlaylist")
+              : t("categoryList.import.title", { category: categoryLabel(category, t) })
+          }
+          ariaLabel={
+            category === "Playlists"
+              ? t("categoryList.import.labelPlaylist")
+              : t("categoryList.import.label", { category: categoryLabel(category, t) })
+          }
+          confirmLabel={
+            category === "Playlists"
+              ? t("categoryList.import.labelPlaylist")
+              : t("categoryList.import.label", { category: categoryLabel(category, t) })
+          }
+          confirmPendingLabel={t("categoryList.import.pending")}
           summary={
             <>
               {/* Playlists-only leading clause (UI-SPEC): names the playlist
@@ -894,9 +928,11 @@ export default function CategoryList({
                   added/updated/skipped lines. */}
               {importPreview.playlist !== null && (
                 <>
-                  This adds the playlist "{importPreview.playlist.name}" and its{" "}
-                  {importPreview.playlist.mediaCount} media file
-                  {importPreview.playlist.mediaCount === 1 ? "" : "s"}.
+                  {t("categoryList.import.playlistLeadingClause", {
+                    name: importPreview.playlist.name,
+                    count: importPreview.playlist.mediaCount,
+                    plural: importPreview.playlist.mediaCount === 1 ? "" : "s",
+                  })}
                   <br />
                 </>
               )}
@@ -915,36 +951,43 @@ export default function CategoryList({
                     checked={bucketDeleteOptIn}
                     onChange={(e) => setBucketDeleteOptIn(e.target.checked)}
                   />{" "}
-                  Importing will first delete the {sumCounts(importPreview.report.deleted)} existing
-                  Note{sumCounts(importPreview.report.deleted) === 1 ? "" : "s"} under "
-                  {importPreview.bucket}" before adding the file's records.
+                  {t("categoryList.import.bucketDeleteOptIn", {
+                    count: sumCounts(importPreview.report.deleted),
+                    plural: sumCounts(importPreview.report.deleted) === 1 ? "" : "s",
+                    bucket: importPreview.bucket,
+                  })}
                 </label>
               )}
               {sumCounts(importPreview.report.added) === 0 &&
               sumCounts(importPreview.report.overwritten) === 0 &&
               sumCounts(importPreview.report.skipped) === 0 ? (
-                <>Nothing in this file is new — every record already matches what's in this archive.</>
+                <>{t("categoryList.import.nothingNew")}</>
               ) : (
                 <>
                   {sumCounts(importPreview.report.added) > 0 && (
                   <>
-                    {sumCounts(importPreview.report.added)} new record
-                    {sumCounts(importPreview.report.added) === 1 ? "" : "s"} will be added.
+                    {t("categoryList.import.added", {
+                      count: sumCounts(importPreview.report.added),
+                      plural: sumCounts(importPreview.report.added) === 1 ? "" : "s",
+                    })}
                     <br />
                   </>
                 )}
                 {sumCounts(importPreview.report.overwritten) > 0 && (
                   <>
-                    {sumCounts(importPreview.report.overwritten)} existing record
-                    {sumCounts(importPreview.report.overwritten) === 1 ? "" : "s"} will be updated.
+                    {t("categoryList.import.updated", {
+                      count: sumCounts(importPreview.report.overwritten),
+                      plural: sumCounts(importPreview.report.overwritten) === 1 ? "" : "s",
+                    })}
                     <br />
                   </>
                 )}
                   {sumCounts(importPreview.report.skipped) > 0 && (
                     <>
-                      {sumCounts(importPreview.report.skipped)} record
-                      {sumCounts(importPreview.report.skipped) === 1 ? "" : "s"} in this file will be
-                      skipped (already present).
+                      {t("categoryList.import.skipped", {
+                        count: sumCounts(importPreview.report.skipped),
+                        plural: sumCounts(importPreview.report.skipped) === 1 ? "" : "s",
+                      })}
                     </>
                   )}
                 </>
@@ -967,23 +1010,27 @@ export default function CategoryList({
             className="edit-preview-dialog"
             role="dialog"
             aria-modal="true"
-            aria-label={`Export changed ${category}`}
+            aria-label={t("categoryList.incrementalExport.label", { category: categoryLabel(category, t) })}
             data-testid="incremental-export-summary"
           >
-            <h2 className="edit-preview-title">Export changed {category}</h2>
+            <h2 className="edit-preview-title">
+              {t("categoryList.incrementalExport.label", { category: categoryLabel(category, t) })}
+            </h2>
             <p className="edit-preview-summary" data-testid="incremental-export-summary-counts">
-              {incrementalExportSummary.added} new record
-              {incrementalExportSummary.added === 1 ? "" : "s"} and{" "}
-              {incrementalExportSummary.modified} changed record
-              {incrementalExportSummary.modified === 1 ? "" : "s"} were written to the file.
+              {t("categoryList.incrementalExport.summary", {
+                added: incrementalExportSummary.added,
+                addedPlural: incrementalExportSummary.added === 1 ? "" : "s",
+                modified: incrementalExportSummary.modified,
+                modifiedPlural: incrementalExportSummary.modified === 1 ? "" : "s",
+              })}
               {incrementalExportSummary.deleted_candidates > 0 && (
                 <>
                   {" "}
-                  {incrementalExportSummary.deleted_candidates} record
-                  {incrementalExportSummary.deleted_candidates === 1 ? "" : "s"} in the prior
-                  export {incrementalExportSummary.deleted_candidates === 1 ? "is" : "are"} no
-                  longer present in this archive — removals since the prior export cannot be
-                  represented in this file format and are NOT written to it.
+                  {t("categoryList.incrementalExport.deletedCandidates", {
+                    count: incrementalExportSummary.deleted_candidates,
+                    plural: incrementalExportSummary.deleted_candidates === 1 ? "" : "s",
+                    isAre: incrementalExportSummary.deleted_candidates === 1 ? "is" : "are",
+                  })}
                 </>
               )}
             </p>
@@ -994,7 +1041,7 @@ export default function CategoryList({
                 onClick={() => setIncrementalExportSummary(null)}
                 data-testid="incremental-export-summary-dismiss"
               >
-                OK
+                {t("common.ok")}
               </button>
             </div>
           </div>

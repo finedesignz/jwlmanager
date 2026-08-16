@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { JwlCoreStatus } from "../bindings/JwlCoreStatus";
+import { useI18n } from "../i18n/I18nContext";
 
 /**
  * Informational jwlCore capability notice (D-13a). Calls `check_jwlcore`
@@ -12,6 +13,7 @@ import type { JwlCoreStatus } from "../bindings/JwlCoreStatus";
  * scope to surface — merge itself is a Phase 5 feature).
  */
 export default function JwlCoreNotice() {
+  const { t } = useI18n();
   const [status, setStatus] = useState<JwlCoreStatus | null>(null);
   const [dismissed, setDismissed] = useState(false);
 
@@ -36,18 +38,16 @@ export default function JwlCoreNotice() {
     return null;
   }
 
+  const reason = status.reason ? ` (${status.reason})` : "";
+
   return (
     <div className="jwlcore-notice" role="status" data-testid="jwlcore-notice">
-      <span>
-        Merge isn&rsquo;t available on this device
-        {status.reason ? ` (${status.reason})` : ""}. Everything else —
-        opening, viewing, and saving archives — works normally.
-      </span>
+      <span>{t("jwlCoreNotice.message", { reason })}</span>
       <button
         type="button"
         className="jwlcore-notice-dismiss"
         onClick={() => setDismissed(true)}
-        aria-label="Dismiss jwlCore capability notice"
+        aria-label={t("jwlCoreNotice.dismissAriaLabel")}
       >
         ×
       </button>

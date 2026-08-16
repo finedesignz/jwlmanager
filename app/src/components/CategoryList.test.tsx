@@ -1,8 +1,18 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render as rtlRender, screen } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ReactElement } from "react";
 import CategoryList from "./CategoryList";
+import { I18nProvider } from "../i18n/I18nContext";
 import type { BrowseRow } from "../bindings/BrowseRow";
 import type { Category } from "../bindings/Category";
+
+function render(ui: ReactElement) {
+  return rtlRender(
+    <I18nProvider locale="en" setLocale={() => {}}>
+      {ui}
+    </I18nProvider>,
+  );
+}
 
 const invokeMock = vi.fn();
 const openMock = vi.fn();
@@ -110,7 +120,11 @@ describe("CategoryList — virtualization + row contract (D6-07)", () => {
     const { rerender } = render(<CategoryList rows={[]} category="Notes" />);
     expect(screen.getByText(/no Notes in this archive/i)).toBeInTheDocument();
 
-    rerender(<CategoryList rows={[]} category="Bookmarks" />);
+    rerender(
+      <I18nProvider locale="en" setLocale={() => {}}>
+        <CategoryList rows={[]} category="Bookmarks" />
+      </I18nProvider>,
+    );
     expect(screen.getByText(/no Bookmarks in this archive/i)).toBeInTheDocument();
   });
 });
@@ -158,10 +172,18 @@ describe("CategoryList — selection model (D6-05)", () => {
     expect(screen.getByTestId("category-list-selection-count")).toHaveTextContent("1");
 
     // Switch away to another category, then back to Notes.
-    rerender(<CategoryList rows={rows} category="Highlights" />);
+    rerender(
+      <I18nProvider locale="en" setLocale={() => {}}>
+        <CategoryList rows={rows} category="Highlights" />
+      </I18nProvider>,
+    );
     expect(screen.getByTestId("category-list-selection-count")).toHaveTextContent("0");
 
-    rerender(<CategoryList rows={rows} category="Notes" />);
+    rerender(
+      <I18nProvider locale="en" setLocale={() => {}}>
+        <CategoryList rows={rows} category="Notes" />
+      </I18nProvider>,
+    );
     expect(screen.getByTestId("category-list-delete-button")).toBeDisabled();
     expect(screen.getByTestId("category-list-selection-count")).toHaveTextContent("0");
   });

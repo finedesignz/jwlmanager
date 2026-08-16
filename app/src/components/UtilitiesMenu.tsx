@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { DryRunReport } from "../bindings/DryRunReport";
 import type { ErrorDto } from "../bindings/ErrorDto";
+import { useI18n } from "../i18n/I18nContext";
 import EditPreviewDialog from "./EditPreviewDialog";
 
 interface UtilitiesMenuProps {
@@ -15,12 +16,7 @@ interface UtilitiesMenuProps {
   onSorted: () => void;
 }
 
-const TAG_ASSIGNMENT_NOOP_SUMMARY = "No tag assignments need renumbering.";
-
 type PreviewKind = "clean" | "mask" | "sort";
-
-const MASK_IRREVERSIBILITY_WARNING =
-  "This permanently replaces all text in this archive with randomized characters — note titles and content, annotation values, bookmark titles and snippets, and location titles. This cannot be undone.";
 
 /**
  * "Utilities ▾" (new `CommandBar` entry, 07-03-PLAN.md Task 3) — the app's
@@ -43,6 +39,7 @@ const MASK_IRREVERSIBILITY_WARNING =
  * `operations.ts` — there is no selection to gate any of them on.
  */
 export default function UtilitiesMenu({ onCancel, onError, onSorted }: UtilitiesMenuProps) {
+  const { t } = useI18n();
   const [dryRunPending, setDryRunPending] = useState(false);
   const [preview, setPreview] = useState<DryRunReport | null>(null);
   const [previewKind, setPreviewKind] = useState<PreviewKind | null>(null);
@@ -168,19 +165,14 @@ export default function UtilitiesMenu({ onCancel, onError, onSorted }: Utilities
         report={preview}
         onConfirm={handlePreviewConfirm}
         onCancel={handlePreviewCancel}
-        title="Sort tags?"
-        ariaLabel="Confirm sort tags"
-        confirmLabel="Sort Tags"
-        confirmPendingLabel="Sorting…"
+        title={t("utilitiesMenu.sortTitle")}
+        ariaLabel={t("utilitiesMenu.sortAriaLabel")}
+        confirmLabel={t("utilitiesMenu.sortConfirmLabel")}
+        confirmPendingLabel={t("utilitiesMenu.sortConfirmPending")}
         summary={
-          changed === 0 ? (
-            <>{TAG_ASSIGNMENT_NOOP_SUMMARY}</>
-          ) : (
-            <>
-              This renumbers tag order for every tagged note, sorted by note. {changed} tag
-              assignment{changed === 1 ? "" : "s"} will be renumbered.
-            </>
-          )
+          changed === 0
+            ? t("utilitiesMenu.sortNoopSummary")
+            : t("utilitiesMenu.sortSummary", { count: changed, plural: changed === 1 ? "" : "s" })
         }
       />
     );
@@ -193,18 +185,14 @@ export default function UtilitiesMenu({ onCancel, onError, onSorted }: Utilities
         report={preview}
         onConfirm={handlePreviewConfirm}
         onCancel={handlePreviewCancel}
-        title="Clean this archive?"
-        ariaLabel="Confirm clean archive"
-        confirmLabel="Clean Archive"
-        confirmPendingLabel="Cleaning…"
+        title={t("utilitiesMenu.cleanTitle")}
+        ariaLabel={t("utilitiesMenu.cleanAriaLabel")}
+        confirmLabel={t("utilitiesMenu.cleanConfirmLabel")}
+        confirmPendingLabel={t("utilitiesMenu.cleanConfirmPending")}
         summary={
-          rowCount === 0 ? undefined : (
-            <>
-              This normalizes hidden separator characters (like non-breaking spaces) in note
-              titles, note content, and annotations. {rowCount} row{rowCount === 1 ? "" : "s"}{" "}
-              will be updated.
-            </>
-          )
+          rowCount === 0
+            ? undefined
+            : t("utilitiesMenu.cleanSummary", { count: rowCount, plural: rowCount === 1 ? "" : "s" })
         }
       />
     );
@@ -218,19 +206,19 @@ export default function UtilitiesMenu({ onCancel, onError, onSorted }: Utilities
         report={preview}
         onConfirm={handlePreviewConfirm}
         onCancel={handlePreviewCancel}
-        title="Mask this archive?"
-        ariaLabel="Confirm mask archive"
-        confirmLabel="Mask Archive"
-        confirmPendingLabel="Masking…"
+        title={t("utilitiesMenu.maskTitle")}
+        ariaLabel={t("utilitiesMenu.maskAriaLabel")}
+        confirmLabel={t("utilitiesMenu.maskConfirmLabel")}
+        confirmPendingLabel={t("utilitiesMenu.maskConfirmPending")}
         requireTypedConfirm="MASK"
         summary={
           <>
-            {MASK_IRREVERSIBILITY_WARNING}
+            {t("utilitiesMenu.maskWarning")}
             {rowCount > 0 && (
               <>
                 <br />
                 <br />
-                {rowCount} record{rowCount === 1 ? "" : "s"} across {tableList} will be masked.
+                {t("utilitiesMenu.maskExtraSummary", { count: rowCount, plural: rowCount === 1 ? "" : "s", tables: tableList })}
               </>
             )}
           </>
@@ -244,7 +232,7 @@ export default function UtilitiesMenu({ onCancel, onError, onSorted }: Utilities
       ref={menuRef}
       className="utilities-menu"
       role="menu"
-      aria-label="Utilities"
+      aria-label={t("utilitiesMenu.ariaLabel")}
       data-testid="utilities-menu"
     >
       <button
@@ -256,7 +244,7 @@ export default function UtilitiesMenu({ onCancel, onError, onSorted }: Utilities
         disabled={dryRunPending}
         data-testid="utilities-menu-clean"
       >
-        {dryRunPending ? "Preparing…" : "Clean Archive…"}
+        {dryRunPending ? t("common.preparing") : t("utilitiesMenu.clean")}
       </button>
       <button
         type="button"
@@ -266,7 +254,7 @@ export default function UtilitiesMenu({ onCancel, onError, onSorted }: Utilities
         disabled={dryRunPending}
         data-testid="utilities-menu-mask"
       >
-        {dryRunPending ? "Preparing…" : "Mask Archive…"}
+        {dryRunPending ? t("common.preparing") : t("utilitiesMenu.mask")}
       </button>
       <button
         type="button"
@@ -276,7 +264,7 @@ export default function UtilitiesMenu({ onCancel, onError, onSorted }: Utilities
         disabled={dryRunPending}
         data-testid="utilities-menu-sort"
       >
-        {dryRunPending ? "Preparing…" : "Sort Tags…"}
+        {dryRunPending ? t("common.preparing") : t("utilitiesMenu.sort")}
       </button>
     </div>
   );

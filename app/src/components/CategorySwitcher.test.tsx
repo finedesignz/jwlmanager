@@ -1,7 +1,17 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render as rtlRender, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import type { ReactElement } from "react";
 import CategorySwitcher from "./CategorySwitcher";
+import { I18nProvider } from "../i18n/I18nContext";
 import type { Category } from "../bindings/Category";
+
+function render(ui: ReactElement) {
+  return rtlRender(
+    <I18nProvider locale="en" setLocale={() => {}}>
+      {ui}
+    </I18nProvider>,
+  );
+}
 
 const ALL: Category[] = [
   "Notes",

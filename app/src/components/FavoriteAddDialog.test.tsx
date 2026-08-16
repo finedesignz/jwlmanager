@@ -1,10 +1,32 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render as rtlRender, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ReactElement } from "react";
 import FavoriteAddDialog from "./FavoriteAddDialog";
 import { describeError } from "../lib/errors";
+import { I18nProvider } from "../i18n/I18nContext";
+import { en } from "../i18n/en";
 import type { DryRunReport } from "../bindings/DryRunReport";
 import type { ErrorDto } from "../bindings/ErrorDto";
 import type { FavoriteEdition } from "../bindings/FavoriteEdition";
+import type { StringKey } from "../i18n/strings";
+
+function render(ui: ReactElement) {
+  return rtlRender(
+    <I18nProvider locale="en" setLocale={() => {}}>
+      {ui}
+    </I18nProvider>,
+  );
+}
+
+/** A real `t` built from the actual `en` catalog (11-04-PLAN.md Task 3) --
+ * NOT a mock that trivially echoes the key. */
+function realT(key: StringKey, params?: Record<string, string | number>): string {
+  const template = en[key];
+  if (!params) return template;
+  return template.replace(/\{(\w+)\}/g, (match, token: string) =>
+    params[token] === undefined ? match : String(params[token]),
+  );
+}
 
 const invokeMock = vi.fn();
 
@@ -255,8 +277,8 @@ describe("FavoriteAddDialog — error routing", () => {
     // favorite_failed copy — same describeError copy-map the app's
     // ErrorBanner renders from (07-UI-SPEC.md: "routes through the
     // existing ErrorBanner + describeError copy-map pattern").
-    const duplicateSentence = describeError(duplicateError);
-    const genericSentence = describeError({ ...duplicateError, code: "favorite_failed" });
+    const duplicateSentence = describeError(duplicateError, realT);
+    const genericSentence = describeError({ ...duplicateError, code: "favorite_failed" }, realT);
     expect(duplicateSentence).toBe(
       "This edition is already marked as a favorite. Choose a different edition, or check your existing Favorites.",
     );

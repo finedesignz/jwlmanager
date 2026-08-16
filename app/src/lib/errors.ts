@@ -1,4 +1,11 @@
 import type { ErrorDto } from "../bindings/ErrorDto";
+import type { useI18n } from "../i18n/I18nContext";
+
+/** The exact `t` shape `useI18n()` returns, borrowed via `ReturnType` rather
+ * than duplicating the signature -- `describeError` is a plain lib function
+ * (not a component), so it cannot call `useI18n()` itself; every call site
+ * passes its own `t` explicitly (11-04-PLAN.md). */
+type TFunction = ReturnType<typeof useI18n>["t"];
 
 /**
  * Maps every sanitized `ErrorDto` (code/operation/safe_file_name/message_key —
@@ -11,85 +18,95 @@ import type { ErrorDto } from "../bindings/ErrorDto";
  * string. Every known code has a specific sentence; an unrecognized code
  * still gets a generic-but-actionable sentence (never blank, never the bare
  * code/message_key alone).
+ *
+ * Every branch resolves through the `errors.*` catalog (11-04-PLAN.md) —
+ * never a literal string. `describeError full coverage`
+ * (app/src/lib/errors.test.ts) derives the real code list from
+ * `src-tauri/src/error.rs`/`settings.rs`'s `to_dto` match arms at test time
+ * and asserts every one of them resolves here.
  */
-export function describeError(err: ErrorDto): string {
+export function describeError(err: ErrorDto, t: TFunction): string {
   switch (err.code) {
     case "not_a_zip":
-      return "Couldn't open this archive — the file isn't a valid .jwlibrary backup. Choose a different file or check that it hasn't been moved.";
+      return t("errors.notAZip");
     case "missing_manifest":
-      return "Couldn't open this archive — it's missing the manifest.json file every .jwlibrary backup must contain. Choose a different file or check that it hasn't been moved.";
+      return t("errors.missingManifest");
     case "missing_user_data_backup":
-      return "Couldn't open this archive — it's missing the user_data backup every .jwlibrary backup must contain. Choose a different file or check that it hasn't been moved.";
+      return t("errors.missingUserDataBackup");
     case "schema_too_old":
-      return "Couldn't open this archive — it was created with a schema version too old for this app to open (the oldest supported version is 12). Choose a different file or use an older version of the app.";
+      return t("errors.schemaTooOld");
     case "schema_too_new":
-      return "Couldn't open this archive — it was created by a newer version of JW Library than this app supports. Update this app to the latest version, or choose a different file.";
+      return t("errors.schemaTooNew");
     case "schema_upgrade_failed":
-      return "Couldn't open this archive — upgrading its internal database format failed. The original file is unchanged. Choose a different file or try again.";
+      return t("errors.schemaUpgradeFailed");
     case "schema_downgrade_failed":
-      return "Couldn't downgrade this archive to the older format — some archives can't be converted without losing or conflicting data. Your original session is unchanged. Choose a different file or keep the current format.";
+      return t("errors.schemaDowngradeFailed");
+    case "trim_failed":
+      return t("errors.trimFailed");
     case "zip_slip_rejected":
-      return "This archive can't be opened — it contains files that try to write outside the extraction folder, which isn't safe. This file may be corrupted or tampered with.";
+      return t("errors.zipSlipRejected");
     case "state_poisoned":
-      return "Something went wrong with this app's internal session state. Close and reopen the archive, then try again.";
+      return t("errors.statePoisoned");
     case "missing_resources_language":
-      return "Couldn't open this archive — the language data needed to label its notes is missing from this app's bundled resources. Reinstall the app and try again.";
+      return t("errors.missingResourcesLanguage");
     case "missing_resources_db":
-      return "Couldn't open this archive — this app's bundled resources database is missing. Reinstall the app and try again.";
+      return t("errors.missingResourcesDb");
     case "io_error":
-      return "Couldn't complete this operation — a file system error occurred. Check that the file still exists, isn't open in another program, and that you have permission to access it, then try again.";
+      return t("errors.ioError");
     case "sqlite_error":
-      return "Couldn't read this archive's data — its internal database appears to be corrupted. Choose a different file or restore from an earlier backup.";
+      return t("errors.sqliteError");
     case "zip_error":
-      return "Couldn't read this archive's zip container — it may be corrupted. Choose a different file or restore from an earlier backup.";
+      return t("errors.zipError");
     case "json_error":
-      return "Couldn't read this archive's manifest — it isn't valid JSON. Choose a different file or restore from an earlier backup.";
+      return t("errors.jsonError");
     case "delete_failed":
-      return "Couldn't delete the selected items — the archive is unchanged. Try again, or close and reopen the archive if the problem continues.";
+      return t("errors.deleteFailed");
     case "favorite_failed":
-      return "Couldn't add this favorite — the archive is unchanged. Try a different edition or try again.";
+      return t("errors.favoriteFailed");
     case "favorite_duplicate":
-      return "This edition is already marked as a favorite. Choose a different edition, or check your existing Favorites.";
+      return t("errors.favoriteDuplicate");
     case "color_failed":
-      return "Couldn't change the color of the selected items — the archive is unchanged. Try again, or close and reopen the archive if the problem continues.";
+      return t("errors.colorFailed");
     case "tag_failed":
-      return "Couldn't update tags for the selected items — the archive is unchanged. Try again, or close and reopen the archive if the problem continues.";
+      return t("errors.tagFailed");
     case "reorder_failed":
-      return "Couldn't sort tags — the archive is unchanged. Try again, or close and reopen the archive if the problem continues.";
+      return t("errors.reorderFailed");
     case "clean_failed":
-      return "Couldn't clean this archive — the archive is unchanged. Try again, or close and reopen the archive if the problem continues.";
+      return t("errors.cleanFailed");
     case "mask_failed":
-      return "Couldn't mask this archive — the archive is unchanged. Try again, or close and reopen the archive if the problem continues.";
+      return t("errors.maskFailed");
+    case "record_edit_failed":
+      return t("errors.recordEditFailed");
     case "merge_unavailable":
-      return "Couldn't merge — the merge engine isn't available on this device (for example on Windows on Arm, which has no merge build yet). Your open archive is unchanged.";
+      return t("errors.mergeUnavailable");
     case "merge_failed":
-      return "Couldn't merge these archives — the merge could not be completed and your open archive is unchanged. Choose a different source archive or try again.";
+      return t("errors.mergeFailed");
     case "export_failed":
-      return "Couldn't export this file — the archive is unchanged. Check that the destination folder is writable, then try again.";
+      return t("errors.exportFailed");
     case "import_malformed":
-      return "Couldn't read this file — it doesn't look like a file exported from JW Library or JWL Manager. Choose a different file.";
+      return t("errors.importMalformed");
     case "import_failed":
-      return "Couldn't import this file — the archive is unchanged. Try again, or close and reopen the archive if the problem continues.";
+      return t("errors.importFailed");
     case "playlist_export_failed":
-      return "Couldn't export this playlist — the archive is unchanged. Check that the destination folder is writable, then try again.";
+      return t("errors.playlistExportFailed");
     case "playlist_import_failed":
-      return "Couldn't import this playlist — the archive is unchanged. Try again, or close and reopen the archive if the problem continues.";
+      return t("errors.playlistImportFailed");
     case "media_add_failed":
-      return "Couldn't add media — no files were added and the archive is unchanged. Try again, or choose different files.";
+      return t("errors.mediaAddFailed");
     case "media_unsupported_format":
-      return "This file isn't a supported image format and wasn't added.";
+      return t("errors.mediaUnsupportedFormat");
     case "media_delete_failed":
-      return "Couldn't delete the selected playlist items — the archive is unchanged. Try again, or close and reopen the archive if the problem continues.";
+      return t("errors.mediaDeleteFailed");
     case "settings_app_data_dir_unavailable":
-      return "Couldn't save your settings — this app's settings folder isn't reachable. Your choice is applied for this session but won't be remembered on restart.";
+      return t("errors.settingsAppDataDirUnavailable");
     case "settings_write_failed":
-      return "Couldn't save your settings — your choice won't be remembered on restart. Check that this app has permission to write to its settings folder, then try again.";
+      return t("errors.settingsWriteFailed");
     case "settings_read_failed":
-      return "Couldn't read this app's saved settings — using the defaults for this session.";
+      return t("errors.settingsReadFailed");
     case "settings_parse_failed":
-      return "This app's saved settings file looks corrupted — using the defaults for this session.";
+      return t("errors.settingsParseFailed");
     default:
-      return `Couldn't complete this operation (${err.operation}). Choose a different file or try again.`;
+      return t("errors.default", { operation: err.operation });
   }
 }
 

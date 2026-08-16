@@ -5,6 +5,8 @@ import type { Category } from "../bindings/Category";
 import type { ColorSelection } from "../bindings/ColorSelection";
 import type { DryRunReport } from "../bindings/DryRunReport";
 import type { ErrorDto } from "../bindings/ErrorDto";
+import type { StringKey } from "../i18n/strings";
+import { useI18n } from "../i18n/I18nContext";
 import EditPreviewDialog from "./EditPreviewDialog";
 
 /** Ported verbatim from `JWLManager.py:3220-3226` (`select_color`) — the
@@ -21,6 +23,25 @@ export const PALETTE: readonly { name: string; hex: string }[] = [
   { name: "Orange", hex: "#FF862E" },
   { name: "Purple", hex: "#7B57A7" },
 ];
+
+const COLOR_LABEL_KEYS: Record<string, StringKey> = {
+  Grey: "color.Grey",
+  Yellow: "color.Yellow",
+  Green: "color.Green",
+  Blue: "color.Blue",
+  Red: "color.Red",
+  Orange: "color.Orange",
+  Purple: "color.Purple",
+};
+
+/** Translated DISPLAY name for a `PALETTE` entry's `name` (presentation
+ * only — `colorIndex`, never this name, crosses IPC). Exported so
+ * `RecordEditor.tsx` (which also renders the palette) reuses the SAME
+ * mapping rather than duplicating it. */
+export function colorLabel(name: string, t: ReturnType<typeof useI18n>["t"]): string {
+  const key = COLOR_LABEL_KEYS[name];
+  return key ? t(key) : name;
+}
 
 interface ColorMenuProps {
   /** Only `"Highlights"` or `"Notes"` are ever passed here — those are the
@@ -67,6 +88,7 @@ export default function ColorMenu({
   onCancel,
   onError,
 }: ColorMenuProps) {
+  const { t } = useI18n();
   const [preview, setPreview] = useState<ColorPreview | null>(null);
   const [dryRunPending, setDryRunPending] = useState(false);
   const busyRef = useRef(false);
@@ -168,6 +190,7 @@ export default function ColorMenu({
 
   if (preview) {
     const { report, colorName } = preview;
+    const translatedColorName = colorLabel(colorName, t);
     const synthesized = report.added["UserMark"] ?? 0;
     const recolored = report.overwritten["UserMark"] ?? 0;
     return (
@@ -175,23 +198,24 @@ export default function ColorMenu({
         report={report}
         onConfirm={handlePreviewConfirm}
         onCancel={handlePreviewCancel}
-        title={`Change color to ${colorName}?`}
-        ariaLabel="Confirm color change"
-        confirmLabel="Change Color"
-        confirmPendingLabel="Changing…"
+        title={t("colorMenu.confirmTitle", { color: translatedColorName })}
+        ariaLabel={t("colorMenu.confirmAriaLabel")}
+        confirmLabel={t("colorMenu.confirmLabel")}
+        confirmPendingLabel={t("colorMenu.confirmPending")}
         summary={
-          synthesized > 0 ? (
-            <>
-              {recolored} highlight{recolored === 1 ? "" : "s"} will be recolored to{" "}
-              {colorName}. {synthesized} note{synthesized === 1 ? "" : "s"} will become
-              highlighted in {colorName} for the first time.
-            </>
-          ) : (
-            <>
-              {recolored} highlight{recolored === 1 ? "" : "s"} will be recolored to{" "}
-              {colorName}.
-            </>
-          )
+          synthesized > 0
+            ? t("colorMenu.summaryWithNew", {
+                recolored,
+                recoloredPlural: recolored === 1 ? "" : "s",
+                synthesized,
+                synthesizedPlural: synthesized === 1 ? "" : "s",
+                color: translatedColorName,
+              })
+            : t("colorMenu.summaryRecoloredOnly", {
+                recolored,
+                recoloredPlural: recolored === 1 ? "" : "s",
+                color: translatedColorName,
+              })
         }
       />
     );
@@ -200,9 +224,16 @@ export default function ColorMenu({
   const firstEnabledIndex = category === "Highlights" ? 1 : 0;
 
   return (
-    <div ref={menuRef} className="color-menu" role="menu" aria-label="Color" data-testid="color-menu">
+    <div
+      ref={menuRef}
+      className="color-menu"
+      role="menu"
+      aria-label={t("common.color")}
+      data-testid="color-menu"
+    >
       {PALETTE.map((color, index) => {
         const disabled = category === "Highlights" && index === 0;
+        const translatedName = colorLabel(color.name, t);
         return (
           <button
             key={color.name}
@@ -211,7 +242,7 @@ export default function ColorMenu({
             role="menuitem"
             className="color-menu-item"
             disabled={disabled}
-            title={disabled ? "Grey has no effect on existing highlights" : color.name}
+            title={disabled ? t("colorMenu.greyDisabledTitle") : translatedName}
             onClick={() => handlePickColor(index, color.name)}
             data-testid={`color-menu-swatch-${index}`}
           >
@@ -220,7 +251,7 @@ export default function ColorMenu({
               style={{ backgroundColor: color.hex }}
               aria-hidden="true"
             />
-            <span className="color-menu-item-label">{color.name}</span>
+            <span className="color-menu-item-label">{translatedName}</span>
           </button>
         );
       })}

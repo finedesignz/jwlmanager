@@ -1,4 +1,6 @@
 import type { Category } from "../bindings/Category";
+import type { StringKey } from "../i18n/strings";
+import { useI18n } from "../i18n/I18nContext";
 
 /**
  * The six browse categories, single-sourced as a typed `Category[]` so the
@@ -14,6 +16,27 @@ const CATEGORIES: Category[] = [
   "Annotations",
   "Playlists",
 ];
+
+/** Maps every `Category` enum value to its `category.*` catalog key
+ * (11-04-PLAN.md). Exported so `CategoryList.tsx` reuses the SAME mapping
+ * for its own category-name-bearing sentences ("No {category} in this
+ * archive.", the import/export dialog titles) rather than duplicating it. */
+const CATEGORY_LABEL_KEYS: Record<Category, StringKey> = {
+  Notes: "category.Notes",
+  Bookmarks: "category.Bookmarks",
+  Favorites: "category.Favorites",
+  Highlights: "category.Highlights",
+  Annotations: "category.Annotations",
+  Playlists: "category.Playlists",
+};
+
+/** Translated DISPLAY label for a `Category` enum value (D6-06/DATA-08) —
+ * presentation only. Every caller MUST keep using the raw `category` value
+ * itself for control flow, `onSelect` payloads, IPC arguments, and
+ * `data-testid`s — never this return value. */
+export function categoryLabel(category: Category, t: ReturnType<typeof useI18n>["t"]): string {
+  return t(CATEGORY_LABEL_KEYS[category]);
+}
 
 interface CategorySwitcherProps {
   /** The currently-shown category (marked as pressed/current). */
@@ -31,17 +54,22 @@ interface CategorySwitcherProps {
  * testid, marks the active variant via `aria-pressed`, and emits the enum
  * value (not a label) through `onSelect`. Clicking the already-active option
  * is a no-op.
+ *
+ * The RENDERED label is the only thing 11-04-PLAN.md's retrofit touches —
+ * `category`, `data-testid`, and `onSelect`'s payload are byte-identical to
+ * before (D6-06/DATA-08's structural isolation guard).
  */
 export default function CategorySwitcher({
   active,
   onSelect,
   disabled = false,
 }: CategorySwitcherProps) {
+  const { t } = useI18n();
   return (
     <div
       className="category-switcher"
       role="group"
-      aria-label="Category"
+      aria-label={t("category.groupAriaLabel")}
       data-testid="category-switcher"
     >
       {CATEGORIES.map((category) => {
@@ -60,7 +88,7 @@ export default function CategorySwitcher({
               }
             }}
           >
-            {category}
+            {categoryLabel(category, t)}
           </button>
         );
       })}

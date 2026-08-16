@@ -1,16 +1,41 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render as rtlRender, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import type { ReactElement } from "react";
 import ErrorBanner from "./ErrorBanner";
 import JwlCoreNotice from "./JwlCoreNotice";
 import { describeError, isZipSlipRejection } from "../lib/errors";
+import { I18nProvider } from "../i18n/I18nContext";
+import { en } from "../i18n/en";
 import type { ErrorDto } from "../bindings/ErrorDto";
 import type { JwlCoreStatus } from "../bindings/JwlCoreStatus";
+import type { StringKey } from "../i18n/strings";
 
 const invokeMock = vi.fn();
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invokeMock(...args),
 }));
+
+/** Every retrofitted component/test in this plan renders inside
+ * `I18nProvider` -- these components call `useI18n()` directly now. */
+function render(ui: ReactElement) {
+  return rtlRender(
+    <I18nProvider locale="en" setLocale={() => {}}>
+      {ui}
+    </I18nProvider>,
+  );
+}
+
+/** A real `t` built from the actual `en` catalog (11-04-PLAN.md Task 3) --
+ * NOT a mock that trivially echoes the key -- for the pure-function
+ * `describeError(err, t)` call sites below that render nothing. */
+function realT(key: StringKey, params?: Record<string, string | number>): string {
+  const template = en[key];
+  if (!params) return template;
+  return template.replace(/\{(\w+)\}/g, (match, token: string) =>
+    params[token] === undefined ? match : String(params[token]),
+  );
+}
 
 beforeEach(() => {
   invokeMock.mockReset();
@@ -45,7 +70,7 @@ describe("ErrorBanner / lib/errors mapping", () => {
   it("maps every known ErrorDto code to a specific, non-blank sentence", () => {
     const seen = new Set<string>();
     for (const code of ALL_KNOWN_CODES) {
-      const sentence = describeError(makeError({ code }));
+      const sentence = describeError(makeError({ code }), realT);
       expect(sentence.length).toBeGreaterThan(20);
       expect(seen.has(sentence)).toBe(false); // every code maps to a DISTINCT sentence
       seen.add(sentence);
@@ -55,7 +80,7 @@ describe("ErrorBanner / lib/errors mapping", () => {
   it("never renders a bare code or the message_key alone", () => {
     for (const code of ALL_KNOWN_CODES) {
       const err = makeError({ code, message_key: `error.archive.${code}` });
-      const sentence = describeError(err);
+      const sentence = describeError(err, realT);
       expect(sentence).not.toBe(err.code);
       expect(sentence).not.toBe(err.message_key);
     }
@@ -75,8 +100,8 @@ describe("ErrorBanner / lib/errors mapping", () => {
 
     expect(isZipSlipRejection(zipSlipErr)).toBe(true);
     expect(isZipSlipRejection(genericErr)).toBe(false);
-    expect(describeError(zipSlipErr)).not.toBe(describeError(genericErr));
-    expect(describeError(zipSlipErr)).toMatch(/write outside the extraction folder/i);
+    expect(describeError(zipSlipErr, realT)).not.toBe(describeError(genericErr, realT));
+    expect(describeError(zipSlipErr, realT)).toMatch(/write outside the extraction folder/i);
 
     render(<ErrorBanner error={zipSlipErr} />);
     const banner = screen.getByTestId("error-banner");

@@ -1,7 +1,17 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render as rtlRender, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ReactElement } from "react";
 import UtilitiesMenu from "./UtilitiesMenu";
+import { I18nProvider } from "../i18n/I18nContext";
 import type { DryRunReport } from "../bindings/DryRunReport";
+
+function render(ui: ReactElement) {
+  return rtlRender(
+    <I18nProvider locale="en" setLocale={() => {}}>
+      {ui}
+    </I18nProvider>,
+  );
+}
 
 const invokeMock = vi.fn();
 
