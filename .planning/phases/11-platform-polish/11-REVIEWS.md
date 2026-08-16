@@ -125,3 +125,57 @@ All four items that were genuinely load-bearing for execution — the two mechan
 The remaining BLOCKED verdict rests entirely on `11-RESEARCH.md` staleness/self-contradiction (items 4-6): a leftover "9 tokens" reference at line 114, an unreconciled "unsigned → release asset" claim at line 72 that contradicts the plan's own signing gate, and a genuine internal contradiction on the `sign.ps1` relative path (`../signing/sign.ps1` at line 167 vs `signing/sign.ps1` at line 356 — this one is substantive, not cosmetic, since a wrong relative path would make `signCommand` silently fail to find the script). These are all confined to the research doc, not the executable `11-01-PLAN.md`/`11-02-PLAN.md` task text itself, but `11-RESEARCH.md` is a stated read-context for both plans, and the sign.ps1 path contradiction is exactly the kind of guidance an implementer could copy verbatim into the wrong place.
 
 **Verdict: CLEAR TO EXECUTE the plans as written**, with a required follow-up fix to `11-RESEARCH.md` (lines 72, 114, 167 vs 356) before or during Wave 0 of 11-02, so an implementer consulting research for the signing step doesn't copy the wrong relative path. No plan-text blocker remains.
+
+---
+
+## Review — 11-03 / 11-04
+
+Reviewed: `11-03-PLAN.md` (i18n architecture), `11-04-PLAN.md` (component retrofit),
+against `11-CONTEXT.md` (D11-02), `11-RESEARCH.md`, `11-01-SUMMARY.md`, `11-02-SUMMARY.md`,
+and this file's prior review rounds (conventions already resolved there were checked for
+reintroduction, not re-derived).
+
+### Reviewer lanes attempted
+
+| Reviewer | Status | Notes |
+|---|---|---|
+| codex | RAN | `codex exec --ephemeral --dangerously-bypass-hook-trust --skip-git-repo-check`, same lane as prior rounds. Non-empty output, no fabrication -- read actual repo source (`app/src/bindings/ErrorDto.ts`, `CommandBar.tsx`, `CategoryList.tsx`, `MediaAddDialog.tsx`, `SettingsProvider.tsx`) before concluding. |
+
+No reviewer output in this section was simulated or paraphrased from memory -- verbatim
+codex findings below.
+
+### codex — findings (verbatim)
+
+**BLOCKER**
+
+1. `11-04` requires an impossible error-code coverage test. The plan says to iterate every `ErrorDto["code"]` union member and forbids hand-typing a duplicate list: `.planning/phases/11-platform-polish/11-04-PLAN.md:308-312`, `:329-331`. But the actual generated binding is `code: string`, not a finite union: `app/src/bindings/ErrorDto.ts:7`. The same plan also forbids changing `ErrorDto`/Rust command shapes: `11-04-PLAN.md:54`. As written, that acceptance criterion cannot be implemented.
+
+**MAJOR**
+
+1. `11-04`'s string-inventory/completeness strategy misses user-facing native file-dialog strings. The plan's scans focus on JSX text plus `aria-label`/`title`/`placeholder`: `11-04-PLAN.md:228-230`, and the completeness test repeats that narrow scope at `:282-289`. But current source has user-visible dialog filter/default-title strings outside JSX/attributes, for example `CommandBar.tsx:65`, `:152`, `:186`, `:212`; `CategoryList.tsx:409-414`, `:450-458`, `:491-496`; and `MediaAddDialog.tsx:96-99`. That leaves PLAT-03 incomplete unless these dialog option strings are cataloged or explicitly justified as non-localized.
+
+2. `11-04` artifact metadata is inconsistent. `SettingsProvider.tsx` is listed in `files_modified` and task files: `11-04-PLAN.md:23`, `:140`, but it is absent from `artifacts_this_plan_produces`: `11-04-PLAN.md:381-386`. The same frontmatter lists `JwlCoreNotice.test.tsx` at `:14`, while the artifact table only generically says "existing `*.test.tsx` files" at `:386`; current JwlCoreNotice tests actually live inside `ErrorBanner.test.tsx:100-139`.
+
+**MINOR**
+
+None for `11-03`.
+
+**Checks Passed**
+
+`11-03` matches D11-02: dependency-free catalog/context, English key union from `en`, empty/sparse non-English catalogs, no machine translation, and `setLocale` passes through the existing `setLanguage`/`updateSettings` path (`11-03-PLAN.md:31-35`, `:174-205`). Current `SettingsProvider` preserves the functional updater save pattern (`app/src/settings/SettingsProvider.tsx:83-90`).
+
+Both plans use zero new npm/Cargo dependencies in task text, and every cargo command shown includes `--jobs 2` (`11-03-PLAN.md:343`, `11-04-PLAN.md:366`). No `&amp;&amp;` HTML-entity corruption found in either new plan.
+
+### Verdict
+
+**11-03: CLEAR TO EXECUTE**
+
+**11-04: BLOCKED** -- impossible `ErrorDto["code"]` union test (BLOCKER), incomplete
+native-dialog string coverage (MAJOR), and artifact metadata inconsistencies (MAJOR).
+Must be fixed before execution: (1) either widen `ErrorDto.code` to a real finite union
+type at the Rust/ts-rs boundary, or change the completeness test to iterate a
+hand-maintained-but-drift-guarded list instead of the (currently impossible) real union
+walk; (2) inventory and catalog the native dialog filter/default-title strings in
+`CommandBar.tsx`, `CategoryList.tsx`, `MediaAddDialog.tsx` or explicitly scope them out
+with rationale; (3) add `SettingsProvider.tsx` and the specific test file locations to
+`artifacts_this_plan_produces`.
