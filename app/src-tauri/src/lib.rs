@@ -10,6 +10,7 @@ pub mod error;
 pub mod guid;
 pub mod jwlcore;
 pub mod session;
+pub mod settings;
 pub mod time;
 
 use category::Category;
@@ -2893,6 +2894,17 @@ fn playlist_delete_apply(
     })
 }
 
+/// Returns the crate's runtime version (`env!("CARGO_PKG_VERSION")`), the
+/// same pattern already used inline at 10+ `ErrorDto` call sites throughout
+/// this file. The FIRST callable, registered command exposing it -- prior
+/// call sites are inline literals, not an invokable command -- so
+/// `SettingsDialog`'s About region never hardcodes a version string
+/// (11-01-PLAN.md Task 1).
+#[tauri::command]
+fn app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
 /// Tauri builder wiring for the Walking Skeleton.
 ///
 /// `open_archive` (01-07) and `check_jwlcore` (01-03) are registered here.
@@ -2975,7 +2987,10 @@ pub fn run() {
             media_add_precheck,
             media_add_apply,
             playlist_delete_dry_run,
-            playlist_delete_apply
+            playlist_delete_apply,
+            settings::load_settings,
+            settings::save_settings,
+            app_version
         ])
         .run(tauri::generate_context!())
     {

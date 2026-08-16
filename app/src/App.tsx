@@ -4,6 +4,7 @@ import CategorySwitcher from "./components/CategorySwitcher";
 import CommandBar from "./components/CommandBar";
 import ErrorBanner from "./components/ErrorBanner";
 import JwlCoreNotice from "./components/JwlCoreNotice";
+import SettingsDialog from "./components/SettingsDialog";
 import { invoke } from "@tauri-apps/api/core";
 import type { BrowseRow } from "./bindings/BrowseRow";
 import type { Category } from "./bindings/Category";
@@ -25,6 +26,7 @@ export default function App() {
   const [rows, setRows] = useState<BrowseRow[] | null>(null);
   const [category, setCategory] = useState<Category>("Notes");
   const [error, setError] = useState<ErrorDto | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
 
   const archiveOpen = rows !== null;
 
@@ -73,16 +75,28 @@ export default function App() {
 
   return (
     <div className="app-shell">
-      <CommandBar
-        archiveOpen={archiveOpen}
-        onOpened={handleOpened}
-        onNewArchive={handleNewArchive}
-        onSaved={handleSaved}
-        onError={handleError}
-        onCancelled={handleCancelled}
-        currentCategory={category}
-        onCategoryRowsChanged={handleRowsChanged}
-      />
+      <div className="app-header">
+        <CommandBar
+          archiveOpen={archiveOpen}
+          onOpened={handleOpened}
+          onNewArchive={handleNewArchive}
+          onSaved={handleSaved}
+          onError={handleError}
+          onCancelled={handleCancelled}
+          currentCategory={category}
+          onCategoryRowsChanged={handleRowsChanged}
+        />
+        <button
+          type="button"
+          className="toolbar-button toolbar-button-secondary settings-open-button"
+          onClick={() => setShowSettings(true)}
+          data-testid="open-settings-button"
+        >
+          Settings…
+        </button>
+      </div>
+
+      {showSettings && <SettingsDialog onClose={() => setShowSettings(false)} />}
 
       <JwlCoreNotice />
 

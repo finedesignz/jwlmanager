@@ -80,6 +80,14 @@ export function describeError(err: ErrorDto): string {
       return "This file isn't a supported image format and wasn't added.";
     case "media_delete_failed":
       return "Couldn't delete the selected playlist items — the archive is unchanged. Try again, or close and reopen the archive if the problem continues.";
+    case "settings_app_data_dir_unavailable":
+      return "Couldn't save your settings — this app's settings folder isn't reachable. Your choice is applied for this session but won't be remembered on restart.";
+    case "settings_write_failed":
+      return "Couldn't save your settings — your choice won't be remembered on restart. Check that this app has permission to write to its settings folder, then try again.";
+    case "settings_read_failed":
+      return "Couldn't read this app's saved settings — using the defaults for this session.";
+    case "settings_parse_failed":
+      return "This app's saved settings file looks corrupted — using the defaults for this session.";
     default:
       return `Couldn't complete this operation (${err.operation}). Choose a different file or try again.`;
   }

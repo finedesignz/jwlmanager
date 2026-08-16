@@ -17,6 +17,31 @@
   color-scheme: dark;
 }
 
+/* Light theme (D11-03): redefines the SAME eight colour custom properties
+   above, nothing else -- no component may reference a token that exists in
+   only one theme (styles_tokens.test.ts proves this). Values are sourced
+   from res/light.qss (Qt stylesheet palette reference, not a literal port)
+   so the light theme reads as a continuation of the project's existing
+   visual identity rather than an invented palette. Selected on
+   document.documentElement's `data-theme` attribute by ThemeContext
+   (app/src/theme/ThemeContext.tsx) -- pure CSS cascade, zero JS-computed
+   colour value, zero re-render cost. Deliberately no
+   `@media (prefers-color-scheme)` query -- an OS-following default is not a
+   success criterion and would add a third source of truth for the active
+   theme (11-CONTEXT.md D11-03). */
+:root[data-theme="light"] {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f5f5f5;
+  --bg-tertiary: #e0e0e0;
+  --brand-primary: #4a90e2;
+  --destructive: #c80b0b;
+  --text-primary: #000000;
+  --text-muted: #4f4f4f;
+  --border-hairline: #cccccc;
+
+  color-scheme: light;
+}
+
 * {
   box-sizing: border-box;
 }
@@ -45,6 +70,20 @@ body {
   display: flex;
   flex-direction: column;
   height: 100%;
+}
+
+/* Wraps .toolbar (CommandBar, untouched) plus the new Settings affordance
+   (11-01-PLAN.md Task 1) in a single row, without altering .toolbar's own
+   flex-wrap layout. */
+.app-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-sm);
+}
+
+.app-header .settings-open-button {
+  margin: var(--space-md) var(--space-lg) 0 0;
 }
 
 .toolbar {
@@ -1011,6 +1050,84 @@ body {
 }
 
 .fold-merge-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-sm);
+}
+
+/* Settings / About Dialog (D11-03/D11-04, 11-01-PLAN.md Task 1). Reuses
+   .edit-preview-overlay for its backdrop; the card matches
+   .edit-preview-dialog's/.tag-dialog's radius/surface/padding scale -- no
+   new radius, spacing, or colour value beyond what's already established. */
+.settings-dialog {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-hairline);
+  border-radius: 12px;
+  padding: var(--space-lg);
+  max-width: 32em;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-md);
+}
+
+.settings-dialog-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.settings-dialog-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.settings-dialog-field label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.settings-dialog-theme-control {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+.settings-dialog-theme-option[aria-pressed="true"] {
+  border-color: var(--brand-primary);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+/* Labelled, non-functional language slot (plan 11-03 fills it) -- muted so
+   it visibly reads as "not yet interactive", never as a broken control. */
+.settings-dialog-coming-soon {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.settings-dialog-about {
+  border-top: 1px solid var(--border-hairline);
+  padding-top: var(--space-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-xs);
+}
+
+.settings-dialog-about-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.settings-dialog-about-line {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.settings-dialog-actions {
   display: flex;
   justify-content: flex-end;
   gap: var(--space-sm);
