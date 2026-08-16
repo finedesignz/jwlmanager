@@ -2,14 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
+current_phase: 11
+current_phase_name: Signing, Localization, Theme
 status: verifying
-last_updated: "2026-08-16T17:06:22.844Z"
+stopped_at: Completed 11-04-PLAN.md
+last_updated: "2026-08-16T17:43:44.062Z"
 progress:
   total_phases: 11
-  completed_phases: 6
+  completed_phases: 7
   total_plans: 49
-  completed_plans: 44
-  percent: 55
+  completed_plans: 45
 ---
 
 # Project State — JWL Manager (Tauri)
@@ -24,9 +26,9 @@ progress:
 Phase: 11 (Platform Polish) — IN PROGRESS
 Plans: 11-01-PLAN.md (settings/theme tracer) EXECUTED — PLAT-04 satisfied. 11-02-PLAN.md (Windows signing wiring) EXECUTED — PLAT-02 wired, fail-closed, and gated (real signature verification remains a documented manual step, blocked on Azure credentials this environment cannot provision). 11-03-PLAN.md (i18n architecture: dependency-free catalog + I18nContext, App.tsx + SettingsDialog.tsx retrofit) EXECUTED — PLAT-03's architecture half satisfied. 11-04-PLAN.md (i18n retrofit of the remaining 13 components + lib/errors.ts) drafted, still in review/blocked per its own re-review note as of this update.
 **Phase:** 11 of 11 — Platform Polish (Signing, Localization, Theme)
-**Plan:** 3 of 4 drafted plans executed (11-01, 11-02, 11-03 done; 11-04 drafted, in review)
+**Plan:** 4 of 4 drafted plans executed (11-01, 11-02, 11-03 done; 11-04 drafted, in review)
 **Status:** Phase in progress — 11-04 remaining
-**Progress:** [██████████] 98%
+**Progress:** [█████████░] 92%
 
 ## Performance Metrics
 
@@ -51,6 +53,7 @@ Plans: 11-01-PLAN.md (settings/theme tracer) EXECUTED — PLAT-04 satisfied. 11-
 | Phase 11 P01 | 40min | 3 tasks | 18 files |
 | Phase 11 P02 | 50min | 3 tasks | 7 files |
 | Phase 11 P03 | ~25min | 2 tasks | 18 files |
+| Phase 11 P04 | 90min | 3 tasks | 28 files |
 
 ## Accumulated Context
 
@@ -98,6 +101,7 @@ Plans: 11-01-PLAN.md (settings/theme tracer) EXECUTED — PLAT-04 satisfied. 11-
 - [Phase ?]: 11-01: SettingsProvider lifted above App in main.tsx (own ErrorBanner for save failures); updateSettings fires save_settings from inside the setState functional updater to prove concurrent theme+language writes never drop a field; settings.rs errors get their own SettingsError->ErrorDto mapping, never reusing ArchiveError
 - [Phase ?]: 11-02: Windows signing wired via bundle.windows.signCommand, gated on ENABLE_MSI_SIGNING == 'true' in a new release-app.yml (app-v*.*.* tag prefix, distinct from the Python app's bare v*); public GitHub Release publish gated on the identical condition so an unsigned build can never be published; sign.ps1 fails closed (proven by verify-fail-closed.ps1); guard test signing_wiring.rs proven red/green against a live demonstration; actual signature verification remains manual, blocked on Azure credentials not provisioned in this repo
 - [Phase ?]: PLAT-03: dependency-free TypeScript catalog + React context (I18nProvider/useI18n), catalogs[locale]?.[key] ?? en[key] fallback; I18nProvider nests inside ThemeProvider, controlled by SettingsProvider's existing language/setLanguage
+- [Phase ?]: PLAT-03 completed: all 13 remaining components + describeError's 39-code catalog now render exclusively through t(); category/color enum values stay control-flow-pure via categoryLabel()/colorLabel() helpers
 
 ### Todos
 
@@ -115,6 +119,6 @@ Plans: 11-01-PLAN.md (settings/theme tracer) EXECUTED — PLAT-04 satisfied. 11-
 
 **Resume file:** None
 
-**Last session:** 2026-08-16T17:06:22.834Z
-**Stopped at:** Completed 11-03-PLAN.md
+**Last session:** 2026-08-16T17:43:44.038Z
+**Stopped at:** Completed 11-04-PLAN.md
 **Next action:** Draft and execute a Phase 11 plan for PLAT-03 (i18n/localization); separately, provision Azure Trusted Signing credentials and run the deliberate fail-closed check per docs/signing.md when ready to publish signed releases.

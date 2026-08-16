@@ -241,12 +241,12 @@ Plans:
   2. User can switch UI language and all user-facing strings render translated
   3. User can switch theme (light/dark) and the change applies immediately across the app
 
-**Plans**: 2/4 plans executed
+**Plans**: 4/4 plans executed
 
 - [x] 11-01-PLAN.md
 - [x] 11-02-PLAN.md
 - [x] 11-03-PLAN.md — dependency-free i18n catalog + context, functional language switcher, App shell + Settings dialog retrofit
-- [ ] 11-04-PLAN.md — retrofit remaining 13 components + error-message catalog onto the i18n layer, completeness test
+- [x] 11-04-PLAN.md — retrofit remaining 13 components + error-message catalog onto the i18n layer, completeness test
 
 **UI hint**: yes
 
@@ -264,7 +264,7 @@ Plans:
 | 8. Import / Export Parity | 6/6 | In Progress|  |
 | 9. Incremental Export | 1/4 | In Progress|  |
 | 10. N-Way Merge Fold | 1/3 | In Progress|  |
-| 11. Platform Polish | 3/4 | In Progress|  |
+| 11. Platform Polish | 4/4 | In Progress|  |
 
 ## Coverage
 
