@@ -11,6 +11,7 @@ import type { AppSettings } from "../bindings/AppSettings";
 import type { ErrorDto } from "../bindings/ErrorDto";
 import type { Theme } from "../bindings/Theme";
 import { ThemeProvider } from "../theme/ThemeContext";
+import { I18nProvider } from "../i18n/I18nContext";
 import ErrorBanner from "../components/ErrorBanner";
 
 /** Built-in defaults (English + Dark) -- rendered until `load_settings`
@@ -37,6 +38,15 @@ const SettingsContext = createContext<SettingsContextValue | null>(null);
  * wraps `children` in `ThemeProvider` so the DOM `data-theme` attribute
  * effect stays a separate, focused concern (`../theme/ThemeContext`) --
  * no component below this needs to know persistence exists at all.
+ *
+ * `I18nProvider` (11-03-PLAN.md Task 1) nests INSIDE `ThemeProvider`,
+ * receiving `locale={settings.language}`/`setLocale={setLanguage}` as the
+ * same kind of controlled-component props -- `setLocale` is a thin
+ * call-through to the already-wired `setLanguage`, adding no new
+ * persistence logic. This provider's own `saveError` `ErrorBanner`
+ * instance lives INSIDE `I18nProvider` (alongside `{children}`) so every
+ * `ErrorBanner` in the tree, including this one, renders through a t()-aware
+ * `describeError` retrofit (plan 11-04).
  *
  * `updateSettings` is the ONLY write path -- every setter below calls
  * through it. It uses React's functional `setState(prev => ...)` form and
@@ -105,9 +115,11 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         setTheme,
       }}
     >
-      {saveError && <ErrorBanner error={saveError} />}
       <ThemeProvider theme={settings.theme} setTheme={setTheme}>
-        {children}
+        <I18nProvider locale={settings.language} setLocale={setLanguage}>
+          {saveError && <ErrorBanner error={saveError} />}
+          {children}
+        </I18nProvider>
       </ThemeProvider>
     </SettingsContext.Provider>
   );

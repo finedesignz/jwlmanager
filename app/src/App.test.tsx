@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
+import { SettingsProvider } from "./settings/SettingsProvider";
 import type { BrowseRow } from "./bindings/BrowseRow";
 
 /**
@@ -98,6 +99,8 @@ beforeEach(() => {
 function wireHappyPathInvoke() {
   invokeMock.mockImplementation((cmd: string, args?: { category?: string }) => {
     if (cmd === "check_jwlcore") return Promise.resolve(CORE_STATUS);
+    if (cmd === "load_settings") return Promise.resolve({ language: "en", theme: "dark" });
+    if (cmd === "save_settings") return Promise.resolve(undefined);
     if (cmd === "open_archive") return Promise.resolve(NOTES_ROWS);
     if (cmd === "list_category") {
       if (args?.category === "Highlights") return Promise.resolve(HIGHLIGHT_ROWS);
@@ -113,15 +116,27 @@ function wireHappyPathInvoke() {
 /** Render App and drive the real CommandBar open path to reach the Notes view. */
 async function openArchive() {
   openMock.mockResolvedValue("C:/archives/study.jwlibrary");
-  render(<App />);
+  render(
+    <SettingsProvider>
+      <App />
+    </SettingsProvider>,
+  );
   fireEvent.click(screen.getByRole("button", { name: /open archive/i }));
   await screen.findByText(/Watchtower Note One/);
 }
 
 describe("App — empty-state shell", () => {
   it("renders the empty-state shell with no archive open", () => {
-    invokeMock.mockResolvedValue(CORE_STATUS);
-    render(<App />);
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "check_jwlcore") return Promise.resolve(CORE_STATUS);
+      if (cmd === "load_settings") return Promise.resolve({ language: "en", theme: "dark" });
+      return Promise.reject(new Error(`unexpected invoke: ${cmd}`));
+    });
+    render(
+      <SettingsProvider>
+        <App />
+      </SettingsProvider>,
+    );
     expect(
       screen.getByRole("heading", { name: /no archive open/i }),
     ).toBeInTheDocument();

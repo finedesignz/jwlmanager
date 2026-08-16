@@ -6,6 +6,7 @@ import ErrorBanner from "./components/ErrorBanner";
 import JwlCoreNotice from "./components/JwlCoreNotice";
 import SettingsDialog from "./components/SettingsDialog";
 import { invoke } from "@tauri-apps/api/core";
+import { useI18n } from "./i18n/I18nContext";
 import type { BrowseRow } from "./bindings/BrowseRow";
 import type { Category } from "./bindings/Category";
 import type { ErrorDto } from "./bindings/ErrorDto";
@@ -23,6 +24,7 @@ import type { ErrorDto } from "./bindings/ErrorDto";
  * informational arm64 capability gap (D-13a) — never a red error.
  */
 export default function App() {
+  const { t } = useI18n();
   const [rows, setRows] = useState<BrowseRow[] | null>(null);
   const [category, setCategory] = useState<Category>("Notes");
   const [error, setError] = useState<ErrorDto | null>(null);
@@ -92,7 +94,7 @@ export default function App() {
           onClick={() => setShowSettings(true)}
           data-testid="open-settings-button"
         >
-          Settings…
+          {t("app.settingsButton")}
         </button>
       </div>
 
@@ -114,10 +116,9 @@ export default function App() {
         </main>
       ) : (
         <main className="empty-state">
-          <h1>No archive open</h1>
+          <h1>{t("app.emptyState.title")}</h1>
           <p>
-            Open a <code>.jwlibrary</code> file to view your Notes, or create
-            a new archive.
+            {t("app.emptyState.bodyBefore")}<code>.jwlibrary</code>{t("app.emptyState.bodyAfter")}
           </p>
         </main>
       )}

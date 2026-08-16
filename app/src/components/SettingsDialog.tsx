@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useSettings } from "../settings/SettingsProvider";
+import { useI18n } from "../i18n/I18nContext";
+import { SUPPORTED_LOCALES } from "../i18n/locales";
 
 interface SettingsDialogProps {
   /** Closes the dialog -- no mutation of its own beyond what the theme
@@ -11,18 +13,19 @@ interface SettingsDialogProps {
 const APP_NAME = "JWL Manager";
 
 /**
- * Settings / About dialog (D11-03/D11-04, 11-01-PLAN.md Task 1) -- hosts the
- * theme switcher and a minimal About region. Follows the established
+ * Settings / About dialog (D11-03/D11-04, 11-01-PLAN.md Task 1; language
+ * select D11-02, 11-03-PLAN.md Task 1) -- hosts the theme switcher, the
+ * language switcher, and a minimal About region. Follows the established
  * `TagDialog`/`FavoriteAddDialog` overlay + card conventions (reuses
  * `.edit-preview-overlay` for its backdrop).
  *
- * The Language field is a labelled, non-functional SLOT -- plan 11-03 fills
- * it with a real `<select>` wired to `I18nContext`. It deliberately does
- * NOT render a dropdown here: a dropdown with no working options would
- * appear live but do nothing, which is worse than an honest placeholder.
+ * Every string in this component renders through `t()` -- the product name
+ * ("JWL Manager") is the only literal, since proper nouns are not catalog
+ * entries.
  */
 export default function SettingsDialog({ onClose }: SettingsDialogProps) {
   const { theme, setTheme, language } = useSettings();
+  const { t, setLocale } = useI18n();
   const [version, setVersion] = useState<string | null>(null);
 
   useEffect(() => {
@@ -62,13 +65,13 @@ export default function SettingsDialog({ onClose }: SettingsDialogProps) {
         className="settings-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="Settings"
+        aria-label={t("settings.title")}
         data-testid="settings-dialog"
       >
-        <h2 className="settings-dialog-title">Settings</h2>
+        <h2 className="settings-dialog-title">{t("settings.title")}</h2>
 
         <div className="settings-dialog-field">
-          <label id="settings-dialog-theme-label">Theme</label>
+          <label id="settings-dialog-theme-label">{t("settings.themeLabel")}</label>
           <div
             className="settings-dialog-theme-control"
             role="group"
@@ -81,7 +84,7 @@ export default function SettingsDialog({ onClose }: SettingsDialogProps) {
               onClick={() => setTheme("light")}
               data-testid="settings-dialog-theme-light"
             >
-              Light
+              {t("settings.themeLight")}
             </button>
             <button
               type="button"
@@ -90,23 +93,35 @@ export default function SettingsDialog({ onClose }: SettingsDialogProps) {
               onClick={() => setTheme("dark")}
               data-testid="settings-dialog-theme-dark"
             >
-              Dark
+              {t("settings.themeDark")}
             </button>
           </div>
         </div>
 
         <div className="settings-dialog-field" data-testid="settings-dialog-language-slot">
-          <label id="settings-dialog-language-label">Language</label>
-          <p className="settings-dialog-coming-soon" aria-labelledby="settings-dialog-language-label">
-            Currently: {language === "en" ? "English" : language}. More languages coming soon.
-          </p>
+          <label id="settings-dialog-language-label" htmlFor="settings-dialog-language-select">
+            {t("settings.languageLabel")}
+          </label>
+          <select
+            id="settings-dialog-language-select"
+            className="settings-dialog-language-select"
+            value={language}
+            onChange={(event) => setLocale(event.target.value)}
+            data-testid="settings-dialog-language-select"
+          >
+            {SUPPORTED_LOCALES.map(({ code, nativeName }) => (
+              <option key={code} value={code}>
+                {nativeName}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="settings-dialog-about" data-testid="settings-dialog-about">
-          <h3 className="settings-dialog-about-title">About</h3>
+          <h3 className="settings-dialog-about-title">{t("settings.aboutTitle")}</h3>
           <p className="settings-dialog-about-line">{APP_NAME}</p>
           <p className="settings-dialog-about-line" data-testid="settings-dialog-version">
-            Version {version ?? "..."}
+            {t("settings.versionLine", { version: version ?? "…" })}
           </p>
         </div>
 
@@ -117,7 +132,7 @@ export default function SettingsDialog({ onClose }: SettingsDialogProps) {
             onClick={onClose}
             data-testid="settings-dialog-close"
           >
-            Close
+            {t("settings.closeButton")}
           </button>
         </div>
       </div>
