@@ -391,3 +391,100 @@ fn merge_media_verification() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// 6. PAIRWISE (2-archive) playlist-graph merge preserves the playlist graph
+//    (v1.0 audit tech-debt closure). Phase 10's `fold_merge_tests.rs::
+//    fold_playlist_graph_merge` proved the >=3-source N-way fold path
+//    correctly carries a full playlist graph (PlaylistItem +
+//    IndependentMedia + PlaylistItemLocationMap, with jwlCore remapping
+//    PlaylistItemId) through the SAME underlying jwlCore call
+//    (`run_merge_with_lib_path`). This is the pairwise path's OWN assertion
+//    of that property, at N=2 via `merge_commit_with_lib_path` — the
+//    documented coverage gap since Phase 5 (05-01-SUMMARY.md only tried a
+//    MINIMAL synthetic PlaylistItem and observed jwlCore abort with
+//    "key not found: 0"; Phase 10 closed that for N>=3 using the fuller,
+//    Phase-8-proven row set reused here via `common::
+//    generate_fold_playlist_graph_source`, which is source-count-agnostic —
+//    it just produces one ordinary fold-source archive).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn merge_pairwise_playlist_graph() {
+    let Some(lib) = host_lib_or_skip("merge_pairwise_playlist_graph") else {
+        return;
+    };
+    let _lock = JWLCORE_TEST_LOCK.lock().unwrap();
+
+    let (_dest_fx, dest_archive) = common::generate_merge_dest_archive();
+    let (_src_fx, source_archive) = common::generate_fold_playlist_graph_source();
+
+    let (mut session, _n) = open_session(&dest_archive);
+    merge_commit_with_lib_path(&lib, &mut session, &source_archive)
+        .expect("pairwise merge of a full playlist graph must succeed (D10-06 closed this for N>=3; this proves N=2 too)");
+
+    assert!(integrity_ok(&session.db_path), "post-commit integrity");
+    assert!(session.dirty, "commit must mark the session dirty");
+
+    // Same empirical finding as the fold test: jwlCore does NOT preserve the
+    // source's PlaylistItemId verbatim (no Guid identity column on
+    // PlaylistItem, unlike Note/UserMark) — it remaps to a fresh id. Resolve
+    // the migrated row by its (source-unique) Label instead.
+    let conn = Connection::open(&session.db_path).unwrap();
+    let new_pi_id: i64 = conn
+        .query_row(
+            "SELECT PlaylistItemId FROM PlaylistItem WHERE Label = 'Fold Playlist Item'",
+            [],
+            |r| r.get(0),
+        )
+        .expect(
+            "pairwise merge reported success but no PlaylistItem row with the fixture's Label \
+             survived — the playlist graph was dropped, not merely remapped",
+        );
+
+    let media_present: bool = conn
+        .query_row(
+            "SELECT 1 FROM IndependentMedia WHERE OriginalFilename = 'thumb-original.jpg'",
+            [],
+            |_| Ok(()),
+        )
+        .is_ok();
+    assert!(
+        media_present,
+        "IndependentMedia row missing after a pairwise merge that reported success"
+    );
+
+    let map_present: bool = conn
+        .query_row(
+            "SELECT 1 FROM PlaylistItemLocationMap WHERE PlaylistItemId = ?1",
+            rusqlite::params![new_pi_id],
+            |_| Ok(()),
+        )
+        .is_ok();
+    assert!(
+        map_present,
+        "PlaylistItemLocationMap row missing (or not remapped to the new PlaylistItemId \
+         {new_pi_id}) after a pairwise merge that reported success"
+    );
+
+    let location_present: bool = conn
+        .query_row(
+            "SELECT 1 FROM Location WHERE Title = 'Genesis 1:1'",
+            [],
+            |_| Ok(()),
+        )
+        .is_ok();
+    assert!(
+        location_present,
+        "backing Location row missing after a pairwise merge that reported success"
+    );
+
+    eprintln!(
+        "pairwise playlist-graph merge CLOSED (v1.0 audit item): the full playlist graph \
+         fixture (Phase 8's proven row set) survives the 2-archive merge path via \
+         merge_commit_with_lib_path, with PlaylistItem/IndependentMedia/Location/\
+         PlaylistItemLocationMap all provably present in the final result. jwlCore remapped \
+         source PlaylistItemId {} to {new_pi_id}, same as observed on the >=3-source fold path.",
+        common::FOLD_PLAYLIST_ITEM_ID
+    );
+}
