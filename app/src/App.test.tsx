@@ -2,6 +2,11 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { SettingsProvider } from "./settings/SettingsProvider";
+import { en } from "./i18n/en";
+// Vite's built-in `*?raw` import (vite/client.d.ts) reads this file's OWN
+// source at test time for the structural completeness scan below
+// (11-03-PLAN.md Task 2) -- no new ambient declaration needed.
+import appSource from "./App.tsx?raw";
 import type { BrowseRow } from "./bindings/BrowseRow";
 
 /**
@@ -144,7 +149,128 @@ describe("App — empty-state shell", () => {
       screen.getAllByRole("button", { name: /open archive/i }).length,
     ).toBeGreaterThan(0);
   });
+
+  it("App shell retrofit: the empty-state heading and the .jwlibrary sentence render via the catalog, not a hardcoded literal duplicated in the test (D11-02, 11-03-PLAN.md Task 2)", () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "check_jwlcore") return Promise.resolve(CORE_STATUS);
+      if (cmd === "load_settings") return Promise.resolve({ language: "en", theme: "dark" });
+      return Promise.reject(new Error(`unexpected invoke: ${cmd}`));
+    });
+    render(
+      <SettingsProvider>
+        <App />
+      </SettingsProvider>,
+    );
+
+    expect(
+      screen.getByRole("heading", { name: en["app.emptyState.title"] }),
+    ).toBeInTheDocument();
+
+    const expectedSentence = `${en["app.emptyState.bodyBefore"]}.jwlibrary${en["app.emptyState.bodyAfter"]}`;
+    expect(
+      screen.getByText(
+        (_, element) =>
+          element?.tagName.toLowerCase() === "p" && element.textContent === expectedSentence,
+      ),
+    ).toBeInTheDocument();
+  });
 });
+
+/**
+ * Structural completeness (D11-02, 11-03-PLAN.md Task 2): a plain
+ * regex/brace-balance source scan of App.tsx's OWN JSX return block -- NOT
+ * a behavioural render check, so it cannot be satisfied by coincidence.
+ * Mirrors app/src/theme/styles_tokens.test.ts's (11-01-PLAN.md Task 3)
+ * technique of reading a source file at test time via a `?raw` import and
+ * scanning it structurally; the identical scan (with its own allowlist) is
+ * also applied to SettingsDialog.tsx in
+ * app/src/components/SettingsDialog.test.tsx.
+ *
+ * Scope is deliberately narrowed to the `return (...)` JSX block (not the
+ * whole file) so TypeScript generic syntax elsewhere in the file (e.g.
+ * `useState<BrowseRow[] | null>`) can never be misread as a stray `>text<`
+ * JSX text node by this line-oriented scan.
+ */
+describe("App structural completeness (D11-02, 11-03-PLAN.md Task 2)", () => {
+  // The ONLY literal allowed inside the scanned JSX: the <code> element's
+  // own text (".jwlibrary") -- everything else in App.tsx's JSX renders
+  // through t(). The product name is not referenced anywhere in App.tsx.
+  const ALLOWED_TEXT = [".jwlibrary"];
+  const ALLOWED_ATTRS: string[] = [];
+
+  it("contains zero user-facing string literals outside t() calls, except the allowlisted <code> element text", () => {
+    const found = findDisallowedLiterals(appSource, ALLOWED_TEXT, ALLOWED_ATTRS);
+    expect(found).toEqual([]);
+  });
+});
+
+/**
+ * Extracts the `return ( ... )` JSX block via paren-balance counting, then
+ * scans it for (a) non-empty JSX text nodes and (b) `aria-label=`/`title=`/
+ * `placeholder=` string-literal attributes -- after first stripping every
+ * `{...}` JS/JSX expression slot (also via brace-balance counting) to
+ * spaces, so `{t("...")}` calls and arrow-function handlers (`=>` contains
+ * a bare `>`) never register as a literal. Duplicated (not imported) from
+ * SettingsDialog.test.tsx's identical helper -- this task's file list is
+ * these three test files only, and the two call sites scan different
+ * source strings with different allowlists, so a tiny shared scanner
+ * function is kept local to each rather than introducing a new shared test
+ * util module.
+ */
+function findDisallowedLiterals(
+  source: string,
+  allowedText: string[],
+  allowedAttrs: string[],
+): string[] {
+  const returnIndex = source.indexOf("return (");
+  if (returnIndex === -1) {
+    throw new Error("could not find a `return (` JSX block in source");
+  }
+  const openParenIndex = source.indexOf("(", returnIndex);
+  let depth = 0;
+  let endIndex = openParenIndex;
+  for (; endIndex < source.length; endIndex++) {
+    if (source[endIndex] === "(") depth++;
+    else if (source[endIndex] === ")") {
+      depth--;
+      if (depth === 0) break;
+    }
+  }
+  const jsx = source.slice(openParenIndex + 1, endIndex);
+
+  let stripped = "";
+  let braceDepth = 0;
+  for (const ch of jsx) {
+    if (ch === "{") {
+      braceDepth++;
+      continue;
+    }
+    if (ch === "}") {
+      braceDepth = Math.max(0, braceDepth - 1);
+      continue;
+    }
+    stripped += braceDepth > 0 ? " " : ch;
+  }
+
+  const found: string[] = [];
+
+  const textNodePattern = />([^<>]*)</g;
+  let match: RegExpExecArray | null;
+  while ((match = textNodePattern.exec(stripped)) !== null) {
+    const text = match[1].replace(/\s+/g, " ").trim();
+    if (text.length === 0 || allowedText.includes(text)) continue;
+    found.push(`JSX text node: "${text}"`);
+  }
+
+  const attrPattern = /\b(aria-label|title|placeholder)\s*=\s*"([^"]*)"/g;
+  while ((match = attrPattern.exec(stripped)) !== null) {
+    const [, attr, value] = match;
+    if (allowedAttrs.includes(value)) continue;
+    found.push(`${attr}="${value}"`);
+  }
+
+  return found;
+}
 
 describe("App — DATA-07 end-to-end (mocked IPC)", () => {
   it("open_archive yields the initial Notes view (category defaults to Notes)", async () => {
