@@ -49,3 +49,54 @@ Reviewed against the checked-out source and the sibling `remo-code` signing refe
 ## Summary for the planner
 
 Codex is the only reviewer that actually ran. Its BLOCKER-level findings should be resolved before execution: the missing `11-VALIDATION.md` reference, the missing runtime `app_version` command, the save-error-handling self-contradiction in 11-01, and the "unsigned release still publishes" conflict with the global no-unsigned-Windows-binary rule in 11-02. MAJOR findings (ts-rs export paths, over-broad guard test, contradictory yaml-free verify step, inconsistent `--jobs 2`, settings write-through race) should be folded into the plans before execution as well.
+
+---
+
+## Re-review (post-fix)
+
+Reviewed commit `22152a88` ("docs(11): resolve cross-AI review findings in Phase 11 plans, repair stale STATE.md") against the original findings above. Same codex lane as the original review (`codex exec --ephemeral --dangerously-bypass-hook-trust --skip-git-repo-check`), re-reading the current plan/research files live rather than trusting the commit message. Ran successfully, non-empty output, no fabrication.
+
+### codex — verdict per finding
+
+**Blocker**
+
+| # | Finding | Verdict | Evidence (file:line) |
+|---|---|---|---|
+| 1 | Missing `11-VALIDATION.md` referenced in both plans' read contexts. | RESOLVED | Current contexts no longer reference it: `11-01-PLAN.md:80-89`, `11-02-PLAN.md:75-83`. |
+| 2 | 11-01: no callable runtime `app_version` command existed for About. | RESOLVED | Plan now explicitly adds/registers `app_version` and has `SettingsDialog` invoke it: `11-01-PLAN.md:167-173`. |
+| 3 | 11-01: failed save surfaced vs swallowed with console warning. | RESOLVED | Plan now rejects console warning and requires routing through the error banner: `11-01-PLAN.md:217-224`. |
+| 4 | 11-02: `app-v*` tag claimed unsigned public release was green today. | RESOLVED | Plan now uploads unsigned workflow artifacts only and gates public Release publishing on signing: `11-02-PLAN.md:260-272`. |
+
+**Major**
+
+| # | Finding | Verdict | Evidence (file:line) |
+|---|---|---|---|
+| 5 | 11-01: new ts-rs bindings lacking explicit `export_to` paths. | RESOLVED | Plan now names explicit `AppSettings.ts` and `Theme.ts` export paths and rejects bare `#[ts(export)]`: `11-01-PLAN.md:162-165`. |
+| 6 | 11-02: guard test over-broad. | RESOLVED | Test is now scoped to install, inject, and publish steps, explicitly excluding the build step: `11-02-PLAN.md:331-340`. |
+| 7 | 11-02: verify step implied Python `yaml` import. | RESOLVED | Plan now says no Python `yaml`; workflow inspection uses plain string handling/no YAML dependency: `11-02-PLAN.md:288-291`, `11-02-PLAN.md:348-350`. |
+| 8 | `--jobs 2` missing from `cargo clippy` invocations in both plans. | RESOLVED | Clippy invocations now include `--jobs 2`: `11-01-PLAN.md:238`, `11-01-PLAN.md:307`, `11-02-PLAN.md:381`, `11-02-PLAN.md:430`. |
+| 9 | 11-01: settings write-through race could drop a field. | **STILL OPEN** | Plan still says merge onto the "current in-memory" object and call `setState(next)`, which does not guarantee fresh state under batched near-simultaneous setters: `11-01-PLAN.md:208-215`. |
+
+**Minor**
+
+| # | Finding | Verdict | Evidence (file:line) |
+|---|---|---|---|
+| 10 | 11-01: "load exactly once" brittle under React StrictMode. | RESOLVED | Test wording now says once per production mount and must tolerate StrictMode double-invoke: `11-01-PLAN.md:337-340`. |
+| 11 | 11-01: "no component re-render driven by theme value" too absolute. | RESOLVED | Requirement now allows React consumers to re-render and narrows the rule to no JS color computation/inline style propagation: `11-01-PLAN.md:26`. |
+| 12 | `11-RESEARCH.md`: "9 color tokens" vs actual count. | **STILL OPEN** | Research still says 9 custom-property/color tokens, while `styles.css` has 8 color tokens at `:root`: `11-RESEARCH.md:215`, `app/src/styles.css:1-9`. |
+
+### New findings (introduced by, or surfaced during, the fix pass)
+
+| Severity | Finding | Evidence |
+|---|---|---|
+| BLOCKER | `11-02` automated verify commands contain literal HTML escapes, so copying them as written gives `&amp;&amp;` instead of shell `&&`. | `11-02-PLAN.md:285`, `11-02-PLAN.md:381` |
+| BLOCKER | `11-02` Task 2 runs `git diff` after `cd app/src-tauri` but uses repo-root-relative pathspecs; that command fails from that cwd. | `11-02-PLAN.md:285` |
+| MAJOR | `11-01` now requires generated `AppSettings.ts` and `Theme.ts` bindings, but those files are not listed in `files_modified` or produced artifacts. | `11-01-PLAN.md:7-20`, `11-01-PLAN.md:162-163`, `11-01-PLAN.md:419-428` |
+| MAJOR | `11-02` requires `verify-fail-closed.ps1`, but omits it from frontmatter `files_modified` and Task 1 `<files>`. | `11-02-PLAN.md:7-13`, `11-02-PLAN.md:143`, `11-02-PLAN.md:191`, `11-02-PLAN.md:205-207` |
+| MINOR | Supporting research/context still contain stale guidance that conflicts with the corrected plans, including `app_version` "already-exposed/no new backend" and bare `#[ts(export)]`. | `11-RESEARCH.md:25`, `11-RESEARCH.md:262-270` |
+
+### Summary for the planner (re-review)
+
+10 of 12 original findings are genuinely RESOLVED — verified against live file content, not the commit message. Two remain open: the settings write-through race (#9, still a real drop-a-field risk despite the `updateSettings(patch)` API being added) and the stale "9 color tokens" line in `11-RESEARCH.md` (#12, cosmetic but should be fixed for consistency). The fix pass also introduced/surfaced five new issues, two of them BLOCKER-severity and mechanical: literal `&amp;&amp;` HTML entities in the automated verify command strings in `11-02-PLAN.md` (lines 285, 381) that will break if copy-pasted into a shell, and a `git diff` invocation in `11-02-PLAN.md:285` run from `app/src-tauri` against repo-root-relative pathspecs that will fail from that cwd. Two MAJOR findings note that `AppSettings.ts`/`Theme.ts` bindings and `verify-fail-closed.ps1` are required by the plan text but missing from their respective `files_modified`/artifacts lists.
+
+**Verdict: BLOCKED.** Not clear to execute as-is — fix the two new BLOCKER items (HTML-entity `&&` and the `git diff` cwd/pathspec mismatch in 11-02), close #9 and #12, and add the missing artifacts to `files_modified` in both plans, then this is ready.
