@@ -1,8 +1,18 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render as rtlRender, screen } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import type { ReactElement } from "react";
 import CommandBar from "./CommandBar";
+import { I18nProvider } from "../i18n/I18nContext";
 import type { BrowseRow } from "../bindings/BrowseRow";
 import type { ErrorDto } from "../bindings/ErrorDto";
+
+function render(ui: ReactElement) {
+  return rtlRender(
+    <I18nProvider locale="en" setLocale={() => {}}>
+      {ui}
+    </I18nProvider>,
+  );
+}
 
 const invokeMock = vi.fn();
 const openMock = vi.fn();

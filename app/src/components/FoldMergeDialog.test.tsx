@@ -1,6 +1,16 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render as rtlRender, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import type { ReactElement } from "react";
 import FoldMergeDialog from "./FoldMergeDialog";
+import { I18nProvider } from "../i18n/I18nContext";
+
+function render(ui: ReactElement) {
+  return rtlRender(
+    <I18nProvider locale="en" setLocale={() => {}}>
+      {ui}
+    </I18nProvider>,
+  );
+}
 
 const PATHS = [
   "C:/archives/one.jwlibrary",

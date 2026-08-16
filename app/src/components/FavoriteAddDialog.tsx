@@ -4,6 +4,7 @@ import type { BrowseRow } from "../bindings/BrowseRow";
 import type { DryRunReport } from "../bindings/DryRunReport";
 import type { ErrorDto } from "../bindings/ErrorDto";
 import type { FavoriteEdition } from "../bindings/FavoriteEdition";
+import { useI18n } from "../i18n/I18nContext";
 import EditPreviewDialog from "./EditPreviewDialog";
 
 interface FavoriteAddDialogProps {
@@ -54,6 +55,7 @@ export default function FavoriteAddDialog({
   onCancel,
   onError,
 }: FavoriteAddDialogProps) {
+  const { t } = useI18n();
   const [languages, setLanguages] = useState<string[]>([]);
   const [selectedLanguage, setSelectedLanguage] = useState<string | null>(null);
   const [editions, setEditions] = useState<FavoriteEdition[]>([]);
@@ -192,10 +194,10 @@ export default function FavoriteAddDialog({
         report={preview}
         onConfirm={handlePreviewConfirm}
         onCancel={handlePreviewCancel}
-        title="Add this favorite?"
-        ariaLabel="Confirm add favorite"
-        confirmLabel="Add Favorite"
-        confirmPendingLabel="Adding…"
+        title={t("favoriteDialog.addTitle")}
+        ariaLabel={t("favoriteDialog.addAriaLabel")}
+        confirmLabel={t("favoriteDialog.title")}
+        confirmPendingLabel={t("favoriteDialog.adding")}
       />
     );
   }
@@ -210,13 +212,13 @@ export default function FavoriteAddDialog({
         className="favorite-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="Add Favorite"
+        aria-label={t("favoriteDialog.title")}
         data-testid="favorite-dialog"
       >
-        <h2 className="favorite-dialog-title">Add Favorite</h2>
+        <h2 className="favorite-dialog-title">{t("favoriteDialog.title")}</h2>
 
         <div className="favorite-dialog-field">
-          <label htmlFor="favorite-dialog-language-select">Language</label>
+          <label htmlFor="favorite-dialog-language-select">{t("favoriteDialog.languageLabel")}</label>
           <select
             id="favorite-dialog-language-select"
             className="favorite-dialog-select"
@@ -234,10 +236,10 @@ export default function FavoriteAddDialog({
 
         <div className="favorite-dialog-editions" data-testid="favorite-dialog-editions">
           {editionsLoading ? (
-            <p className="favorite-dialog-loading">Loading editions…</p>
+            <p className="favorite-dialog-loading">{t("favoriteDialog.loadingEditions")}</p>
           ) : sortedEditions.length === 0 ? (
             <p className="favorite-dialog-empty" data-testid="favorite-dialog-empty">
-              No editions found for {selectedLanguage}. Try a different language.
+              {t("favoriteDialog.noEditions", { language: selectedLanguage ?? "" })}
             </p>
           ) : (
             <ul className="favorite-dialog-edition-list" role="list">
@@ -273,7 +275,7 @@ export default function FavoriteAddDialog({
             onClick={handlePickerCancel}
             data-testid="favorite-dialog-cancel"
           >
-            Cancel
+            {t("common.cancel")}
           </button>
           <button
             type="button"
@@ -283,7 +285,7 @@ export default function FavoriteAddDialog({
             aria-busy={dryRunPending}
             data-testid="favorite-dialog-add"
           >
-            {dryRunPending ? "Preparing…" : "Add Favorite"}
+            {dryRunPending ? t("common.preparing") : t("favoriteDialog.title")}
           </button>
         </div>
       </div>

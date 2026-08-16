@@ -7,8 +7,9 @@ import type { ErrorDto } from "../bindings/ErrorDto";
 import type { RecordEditFields } from "../bindings/RecordEditFields";
 import type { RecordEditPayload } from "../bindings/RecordEditPayload";
 import type { RecordIdentity } from "../bindings/RecordIdentity";
+import { useI18n } from "../i18n/I18nContext";
 import EditPreviewDialog from "./EditPreviewDialog";
-import { PALETTE } from "./ColorMenu";
+import { PALETTE, colorLabel } from "./ColorMenu";
 
 interface RecordEditorProps {
   /** Only `"Notes"` or `"Annotations"` are ever passed here — those are the
@@ -55,6 +56,7 @@ function buildIdentity(category: Category, row: BrowseRow): RecordIdentity {
  * delete (rule #10).
  */
 export default function RecordEditor({ category, row, onApplied, onCancel, onError }: RecordEditorProps) {
+  const { t } = useI18n();
   const [loading, setLoading] = useState(true);
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
@@ -201,10 +203,10 @@ export default function RecordEditor({ category, row, onApplied, onCancel, onErr
           report={preview.report}
           onConfirm={handlePreviewConfirm}
           onCancel={handlePreviewCancel}
-          title="Save these changes?"
-          ariaLabel="Confirm save"
-          confirmLabel="Save Changes"
-          confirmPendingLabel="Saving…"
+          title={t("recordEditor.saveTitle")}
+          ariaLabel={t("recordEditor.saveAriaLabel")}
+          confirmLabel={t("recordEditor.saveChanges")}
+          confirmPendingLabel={t("common.saving")}
         />
       );
     }
@@ -217,9 +219,12 @@ export default function RecordEditor({ category, row, onApplied, onCancel, onErr
     const summary =
       category === "Annotations" && inputFieldDeleted > 1 ? (
         <>
-          Deleting this annotation removes <strong>all</strong> annotation fields at this
-          location, not just this one — {inputFieldDeleted} annotation field
-          {inputFieldDeleted === 1 ? "" : "s"} total will be deleted.
+          {t("recordEditor.overDeleteBefore")}
+          <strong>all</strong>
+          {t("recordEditor.overDeleteAfter", {
+            count: inputFieldDeleted,
+            plural: inputFieldDeleted === 1 ? "" : "s",
+          })}
         </>
       ) : undefined;
     return (
@@ -227,10 +232,10 @@ export default function RecordEditor({ category, row, onApplied, onCancel, onErr
         report={preview.report}
         onConfirm={handlePreviewConfirm}
         onCancel={handlePreviewCancel}
-        title={category === "Notes" ? "Delete this Note?" : "Delete this Annotation?"}
-        ariaLabel="Confirm delete"
-        confirmLabel="Delete"
-        confirmPendingLabel="Deleting…"
+        title={category === "Notes" ? t("recordEditor.deleteNoteTitle") : t("recordEditor.deleteAnnotationTitle")}
+        ariaLabel={t("common.confirmDelete")}
+        confirmLabel={t("common.delete")}
+        confirmPendingLabel={t("common.deleting")}
         summary={summary}
       />
     );
@@ -242,19 +247,19 @@ export default function RecordEditor({ category, row, onApplied, onCancel, onErr
         className="record-editor"
         role="dialog"
         aria-modal="true"
-        aria-label={category === "Notes" ? "Edit Note" : "Edit Annotation"}
+        aria-label={category === "Notes" ? t("recordEditor.editNote") : t("recordEditor.editAnnotation")}
         data-testid="record-editor"
       >
         <h2 className="record-editor-title" data-testid="record-editor-title">
-          {category === "Notes" ? "Edit Note" : "Edit Annotation"}
+          {category === "Notes" ? t("recordEditor.editNote") : t("recordEditor.editAnnotation")}
         </h2>
 
         {loading ? (
-          <p className="record-editor-loading">Loading…</p>
+          <p className="record-editor-loading">{t("recordEditor.loading")}</p>
         ) : category === "Notes" ? (
           <>
             <div className="record-editor-field">
-              <label htmlFor="record-editor-title-input">Title</label>
+              <label htmlFor="record-editor-title-input">{t("recordEditor.titleLabel")}</label>
               <input
                 id="record-editor-title-input"
                 type="text"
@@ -264,7 +269,7 @@ export default function RecordEditor({ category, row, onApplied, onCancel, onErr
               />
             </div>
             <div className="record-editor-field">
-              <label htmlFor="record-editor-content-input">Content</label>
+              <label htmlFor="record-editor-content-input">{t("recordEditor.contentLabel")}</label>
               <textarea
                 id="record-editor-content-input"
                 className="record-editor-textarea"
@@ -274,15 +279,16 @@ export default function RecordEditor({ category, row, onApplied, onCancel, onErr
               />
             </div>
             <div className="record-editor-field">
-              <span>Color</span>
+              <span>{t("common.color")}</span>
               {colorIndex === null && (
                 <p className="record-editor-no-color" data-testid="record-editor-no-color">
-                  No color
+                  {t("recordEditor.noColor")}
                 </p>
               )}
-              <div className="record-editor-colors" role="group" aria-label="Color">
+              <div className="record-editor-colors" role="group" aria-label={t("common.color")}>
                 {PALETTE.map((color, index) => {
                   const selected = colorIndex !== null && Number(colorIndex) === index;
+                  const translatedName = colorLabel(color.name, t);
                   return (
                     <button
                       key={color.name}
@@ -293,8 +299,8 @@ export default function RecordEditor({ category, row, onApplied, onCancel, onErr
                           : "record-editor-color-swatch"
                       }
                       style={{ backgroundColor: color.hex }}
-                      title={color.name}
-                      aria-label={color.name}
+                      title={translatedName}
+                      aria-label={translatedName}
                       aria-pressed={selected}
                       onClick={() => setColorIndex(BigInt(index))}
                       data-testid={`record-editor-color-${index}`}
@@ -306,7 +312,7 @@ export default function RecordEditor({ category, row, onApplied, onCancel, onErr
           </>
         ) : (
           <div className="record-editor-field">
-            <label htmlFor="record-editor-value-input">Value</label>
+            <label htmlFor="record-editor-value-input">{t("recordEditor.valueLabel")}</label>
             <textarea
               id="record-editor-value-input"
               className="record-editor-textarea"
@@ -325,7 +331,7 @@ export default function RecordEditor({ category, row, onApplied, onCancel, onErr
             disabled={loading || dryRunPending}
             data-testid="record-editor-delete"
           >
-            Delete
+            {t("common.delete")}
           </button>
           <div className="record-editor-actions-right">
             <button
@@ -335,7 +341,7 @@ export default function RecordEditor({ category, row, onApplied, onCancel, onErr
               disabled={dryRunPending}
               data-testid="record-editor-cancel"
             >
-              Cancel
+              {t("common.cancel")}
             </button>
             <button
               type="button"
@@ -344,7 +350,7 @@ export default function RecordEditor({ category, row, onApplied, onCancel, onErr
               disabled={loading || dryRunPending}
               data-testid="record-editor-save"
             >
-              {dryRunPending ? "Preparing…" : "Save Changes"}
+              {dryRunPending ? t("common.preparing") : t("recordEditor.saveChanges")}
             </button>
           </div>
         </div>

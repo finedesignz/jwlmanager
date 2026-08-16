@@ -4,6 +4,7 @@ import type { BrowseRow } from "../bindings/BrowseRow";
 import type { DryRunReport } from "../bindings/DryRunReport";
 import type { ErrorDto } from "../bindings/ErrorDto";
 import type { TagState } from "../bindings/TagState";
+import { useI18n } from "../i18n/I18nContext";
 import EditPreviewDialog from "./EditPreviewDialog";
 
 interface TagDialogProps {
@@ -86,6 +87,7 @@ export default function TagDialog({
   onCancel,
   onError,
 }: TagDialogProps) {
+  const { t } = useI18n();
   const [tags, setTags] = useState<TagState[]>([]);
   const [loading, setLoading] = useState(true);
   const [overrides, setOverrides] = useState<Map<bigint, boolean>>(new Map());
@@ -234,10 +236,10 @@ export default function TagDialog({
         report={preview}
         onConfirm={handlePreviewConfirm}
         onCancel={handlePreviewCancel}
-        title={`Update tags for ${itemCount} item${itemCount === 1 ? "" : "s"}?`}
-        ariaLabel="Confirm tag update"
-        confirmLabel="Update Tags"
-        confirmPendingLabel="Updating…"
+        title={t("tagDialog.previewTitle", { count: itemCount, plural: itemCount === 1 ? "" : "s" })}
+        ariaLabel={t("tagDialog.previewAriaLabel")}
+        confirmLabel={t("tagDialog.previewConfirmLabel")}
+        confirmPendingLabel={t("tagDialog.previewConfirmPending")}
       />
     );
   }
@@ -251,17 +253,17 @@ export default function TagDialog({
         className="tag-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="Edit Tags"
+        aria-label={t("tagDialog.title")}
         data-testid="tag-dialog"
       >
-        <h2 className="tag-dialog-title">Edit Tags</h2>
+        <h2 className="tag-dialog-title">{t("tagDialog.title")}</h2>
 
         <div className="tag-dialog-checklist" data-testid="tag-dialog-checklist">
           {loading ? (
-            <p className="tag-dialog-loading">Loading tags…</p>
+            <p className="tag-dialog-loading">{t("tagDialog.loading")}</p>
           ) : tags.length === 0 && newTagNames.length === 0 ? (
             <p className="tag-dialog-empty" data-testid="tag-dialog-empty">
-              No tags yet — type a name below to create one.
+              {t("tagDialog.empty")}
             </p>
           ) : (
             <ul className="tag-dialog-list" role="list">
@@ -290,15 +292,15 @@ export default function TagDialog({
                   key={`new-${name}`}
                   className="tag-dialog-row"
                   data-testid={`tag-dialog-item-new-${name}`}
-                  title={`${name} (new)`}
+                  title={t("tagDialog.newTagLabel", { name })}
                 >
                   <TriStateCheckbox
                     state="checked"
                     onToggle={() => handleToggleNewTag(name)}
-                    label={`${name} (new)`}
+                    label={t("tagDialog.newTagLabel", { name })}
                     testId={`tag-dialog-item-new-${name}-checkbox`}
                   />
-                  <span className="tag-dialog-row-label">{name} (new)</span>
+                  <span className="tag-dialog-row-label">{t("tagDialog.newTagLabel", { name })}</span>
                 </li>
               ))}
             </ul>
@@ -310,7 +312,7 @@ export default function TagDialog({
             type="text"
             className="tag-dialog-add-input"
             data-testid="tag-dialog-add-input"
-            placeholder="New tag name…"
+            placeholder={t("tagDialog.newTagPlaceholder")}
             value={newTagInput}
             onChange={(event) => setNewTagInput(event.target.value)}
             onKeyDown={(event) => {
@@ -327,7 +329,7 @@ export default function TagDialog({
             disabled={newTagInput.trim().length === 0}
             data-testid="tag-dialog-add-button"
           >
-            Add
+            {t("common.add")}
           </button>
         </div>
 
@@ -338,7 +340,7 @@ export default function TagDialog({
             onClick={handleDialogCancel}
             data-testid="tag-dialog-cancel"
           >
-            Cancel
+            {t("common.cancel")}
           </button>
           <button
             type="button"
@@ -348,7 +350,7 @@ export default function TagDialog({
             aria-busy={dryRunPending}
             data-testid="tag-dialog-apply"
           >
-            {dryRunPending ? "Preparing…" : "Apply"}
+            {dryRunPending ? t("common.preparing") : t("tagDialog.apply")}
           </button>
         </div>
       </div>

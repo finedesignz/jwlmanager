@@ -1,9 +1,19 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ReactElement } from "react";
 import MediaAddDialog from "./MediaAddDialog";
+import { I18nProvider } from "../i18n/I18nContext";
 import type { ErrorDto } from "../bindings/ErrorDto";
 import type { MediaAddApplyReport } from "../bindings/MediaAddApplyReport";
 import type { MediaPrecheckResult } from "../bindings/MediaPrecheckResult";
+
+function render(ui: ReactElement) {
+  return rtlRender(
+    <I18nProvider locale="en" setLocale={() => {}}>
+      {ui}
+    </I18nProvider>,
+  );
+}
 
 const invokeMock = vi.fn();
 const openMock = vi.fn();

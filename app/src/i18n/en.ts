@@ -251,6 +251,9 @@ export const en = {
   "tagDialog.previewConfirmPending": "Updating…",
 
   "favoriteDialog.title": "Add Favorite",
+  "favoriteDialog.addTitle": "Add this favorite?",
+  "favoriteDialog.addAriaLabel": "Confirm add favorite",
+  "favoriteDialog.adding": "Adding…",
   "favoriteDialog.languageLabel": "Language",
   "favoriteDialog.loadingEditions": "Loading editions…",
   "favoriteDialog.noEditions": "No editions found for {language}. Try a different language.",
@@ -276,6 +279,7 @@ export const en = {
 
   "recordEditor.editNote": "Edit Note",
   "recordEditor.editAnnotation": "Edit Annotation",
+  "recordEditor.loading": "Loading…",
   "recordEditor.titleLabel": "Title",
   "recordEditor.contentLabel": "Content",
   "recordEditor.noColor": "No color",

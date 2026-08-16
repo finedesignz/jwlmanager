@@ -1,7 +1,17 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render as rtlRender, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import type { ReactElement } from "react";
 import EditPreviewDialog from "./EditPreviewDialog";
+import { I18nProvider } from "../i18n/I18nContext";
 import type { DryRunReport } from "../bindings/DryRunReport";
+
+function render(ui: ReactElement) {
+  return rtlRender(
+    <I18nProvider locale="en" setLocale={() => {}}>
+      {ui}
+    </I18nProvider>,
+  );
+}
 
 function makeReport(overrides: Partial<DryRunReport> = {}): DryRunReport {
   return {
@@ -183,12 +193,14 @@ describe("EditPreviewDialog", () => {
     );
 
     rerender(
-      <EditPreviewDialog
-        report={makeReport()}
-        onConfirm={vi.fn()}
-        onCancel={vi.fn()}
-        requireTypedConfirm="MASK"
-      />,
+      <I18nProvider locale="en" setLocale={() => {}}>
+        <EditPreviewDialog
+          report={makeReport()}
+          onConfirm={vi.fn()}
+          onCancel={vi.fn()}
+          requireTypedConfirm="MASK"
+        />
+      </I18nProvider>,
     );
     expect(screen.getByTestId("edit-preview-dialog")).toHaveClass("edit-preview-dialog-destructive");
   });

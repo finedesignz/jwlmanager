@@ -5,6 +5,7 @@ import type { BrowseRow } from "../bindings/BrowseRow";
 import type { Category } from "../bindings/Category";
 import type { ErrorDto } from "../bindings/ErrorDto";
 import type { DryRunReport } from "../bindings/DryRunReport";
+import { useI18n } from "../i18n/I18nContext";
 import EditPreviewDialog from "./EditPreviewDialog";
 import FoldMergeDialog from "./FoldMergeDialog";
 import UtilitiesMenu from "./UtilitiesMenu";
@@ -62,8 +63,6 @@ interface CommandBarProps {
   onCategoryRowsChanged: (rows: BrowseRow[]) => void;
 }
 
-const FILTERS = [{ name: "JW Library Backup", extensions: ["jwlibrary"] }];
-
 /**
  * Open / New / Save / Save As command bar (ARCH-06/07 UI). Every file action
  * carries: an explicit per-action pending state (disables ALL file actions
@@ -82,6 +81,11 @@ export default function CommandBar({
   currentCategory,
   onCategoryRowsChanged,
 }: CommandBarProps) {
+  const { t } = useI18n();
+  // FILTERS is a per-render array (11-04-PLAN.md: `name` renders through
+  // t()) rather than a module-level constant -- it must reflect the active
+  // locale, and is only ever read at click-time inside the handlers below.
+  const FILTERS = [{ name: t("commandBar.filterBackup"), extensions: ["jwlibrary"] }];
   const [pending, setPending] = useState<ActionName | null>(null);
   // "Utilities ▾" (new, 07-03-PLAN.md Task 3) — the popover's own show/hide
   // flag; UtilitiesMenu owns its OWN dry-run/preview/apply flow internally
@@ -141,7 +145,7 @@ export default function CommandBar({
           onError(err as ErrorDto);
         }
       }),
-    [runAction, onOpened, onError, onCancelled],
+    [runAction, onOpened, onError, onCancelled, FILTERS],
   );
 
   const handleNew = useCallback(
@@ -162,7 +166,7 @@ export default function CommandBar({
           onError(err as ErrorDto);
         }
       }),
-    [runAction, onNewArchive, onError, onCancelled],
+    [runAction, onNewArchive, onError, onCancelled, FILTERS],
   );
 
   const handleSave = useCallback(
@@ -196,7 +200,7 @@ export default function CommandBar({
           onError(err as ErrorDto);
         }
       }),
-    [runAction, onSaved, onError, onCancelled],
+    [runAction, onSaved, onError, onCancelled, FILTERS],
   );
 
   // "Save v14-compatible copy…" (D4-07/SCHEMA-03): an EXPLICIT export, never
@@ -222,7 +226,7 @@ export default function CommandBar({
           onError(err as ErrorDto);
         }
       }),
-    [runAction, onError, onCancelled],
+    [runAction, onError, onCancelled, FILTERS],
   );
 
   const handleV14Confirm = useCallback(async () => {
@@ -271,7 +275,7 @@ export default function CommandBar({
           onError(err as ErrorDto);
         }
       }),
-    [runAction, onError, onCancelled],
+    [runAction, onError, onCancelled, FILTERS],
   );
 
   const handleMergeConfirm = useCallback(async () => {
@@ -326,7 +330,7 @@ export default function CommandBar({
         }
         setFoldSources(selected);
       }),
-    [runAction, onCancelled],
+    [runAction, onCancelled, FILTERS],
   );
 
   const handleFoldSourcesChange = useCallback((paths: string[]) => {
@@ -396,7 +400,7 @@ export default function CommandBar({
 
   return (
     <>
-    <div className="toolbar" role="toolbar" aria-label="Archive commands">
+    <div className="toolbar" role="toolbar" aria-label={t("commandBar.toolbarAriaLabel")}>
       <button
         type="button"
         className="toolbar-button"
@@ -404,7 +408,7 @@ export default function CommandBar({
         disabled={anyPending}
         aria-busy={pending === "open"}
       >
-        {pending === "open" ? "Opening…" : "Open Archive"}
+        {pending === "open" ? t("commandBar.opening") : t("commandBar.openArchive")}
       </button>
       <button
         type="button"
@@ -413,7 +417,7 @@ export default function CommandBar({
         disabled={anyPending}
         aria-busy={pending === "new"}
       >
-        {pending === "new" ? "Creating…" : "New Archive"}
+        {pending === "new" ? t("commandBar.creating") : t("commandBar.newArchive")}
       </button>
       <button
         type="button"
@@ -422,7 +426,7 @@ export default function CommandBar({
         disabled={anyPending || !archiveOpen}
         aria-busy={pending === "save"}
       >
-        {pending === "save" ? "Saving…" : "Save"}
+        {pending === "save" ? t("common.saving") : t("commandBar.save")}
       </button>
       <button
         type="button"
@@ -431,7 +435,7 @@ export default function CommandBar({
         disabled={anyPending || !archiveOpen}
         aria-busy={pending === "saveAs"}
       >
-        {pending === "saveAs" ? "Saving…" : "Save As"}
+        {pending === "saveAs" ? t("common.saving") : t("commandBar.saveAs")}
       </button>
       <button
         type="button"
@@ -441,7 +445,7 @@ export default function CommandBar({
         aria-busy={pending === "saveV14"}
         data-testid="save-v14-button"
       >
-        {pending === "saveV14" ? "Preparing…" : "Save v14-compatible copy…"}
+        {pending === "saveV14" ? t("common.preparing") : t("commandBar.saveV14")}
       </button>
       <button
         type="button"
@@ -451,7 +455,7 @@ export default function CommandBar({
         aria-busy={pending === "merge"}
         data-testid="merge-button"
       >
-        {pending === "merge" ? "Preparing…" : "Merge Archive…"}
+        {pending === "merge" ? t("common.preparing") : t("commandBar.merge")}
       </button>
       <button
         type="button"
@@ -461,7 +465,7 @@ export default function CommandBar({
         aria-busy={pending === "foldMerge"}
         data-testid="fold-merge-button"
       >
-        {pending === "foldMerge" ? "Preparing…" : "Merge Multiple Archives…"}
+        {pending === "foldMerge" ? t("common.preparing") : t("commandBar.foldMerge")}
       </button>
       <span style={{ position: "relative", display: "inline-block" }}>
         <button
@@ -472,7 +476,7 @@ export default function CommandBar({
           disabled={anyPending || !archiveOpen}
           data-testid="utilities-button"
         >
-          Utilities ▾
+          {t("commandBar.utilitiesTrigger")}
         </button>
         {showUtilitiesMenu && (
           <UtilitiesMenu
@@ -491,17 +495,14 @@ export default function CommandBar({
         report={v14Preview.report}
         onConfirm={handleV14Confirm}
         onCancel={handleV14Cancel}
-        title="Save v14-compatible copy?"
-        ariaLabel="Confirm v14-compatible save"
-        confirmLabel="Save v14 copy"
-        confirmPendingLabel="Saving…"
-        summary={
-          <>
-            {v14LocationsMerged} Location{v14LocationsMerged === 1 ? "" : "s"} will be
-            merged for v14 compatibility. This writes a separate copy — your open
-            archive is left unchanged.
-          </>
-        }
+        title={t("commandBar.v14Title")}
+        ariaLabel={t("commandBar.v14AriaLabel")}
+        confirmLabel={t("commandBar.v14ConfirmLabel")}
+        confirmPendingLabel={t("common.saving")}
+        summary={t("commandBar.v14Summary", {
+          count: v14LocationsMerged,
+          plural: v14LocationsMerged === 1 ? "" : "s",
+        })}
       />
     )}
     {mergePreview && (
@@ -509,19 +510,16 @@ export default function CommandBar({
         report={mergePreview.report}
         onConfirm={handleMergeConfirm}
         onCancel={handleMergeCancel}
-        title="Merge this archive?"
-        ariaLabel="Confirm merge"
-        confirmLabel="Merge"
-        confirmPendingLabel="Merging…"
-        summary={
-          <>
-            {sumCounts(mergePreview.report.added)} record
-            {sumCounts(mergePreview.report.added) === 1 ? "" : "s"} added,{" "}
-            {sumCounts(mergePreview.report.overwritten)} updated from{" "}
-            {baseName(mergePreview.sourcePath)}. This merges into your open
-            archive — nothing is written until you save.
-          </>
-        }
+        title={t("commandBar.mergeTitle")}
+        ariaLabel={t("commandBar.mergeAriaLabel")}
+        confirmLabel={t("commandBar.mergeConfirmLabel")}
+        confirmPendingLabel={t("commandBar.merging")}
+        summary={t("commandBar.mergeSummary", {
+          added: sumCounts(mergePreview.report.added),
+          plural: sumCounts(mergePreview.report.added) === 1 ? "" : "s",
+          updated: sumCounts(mergePreview.report.overwritten),
+          fileName: baseName(mergePreview.sourcePath),
+        })}
       />
     )}
     {foldSources && (
@@ -537,20 +535,16 @@ export default function CommandBar({
         report={foldPreview.report}
         onConfirm={handleFoldConfirm}
         onCancel={handleFoldPreviewCancel}
-        title="Merge these archives?"
-        ariaLabel="Confirm fold merge"
-        confirmLabel="Merge"
-        confirmPendingLabel="Merging…"
-        summary={
-          <>
-            {sumCounts(foldPreview.report.added)} record
-            {sumCounts(foldPreview.report.added) === 1 ? "" : "s"} added,{" "}
-            {sumCounts(foldPreview.report.overwritten)} updated from the
-            combined effect of {foldPreview.sourcePaths.length} archives in
-            the shown order. This merges into your open archive — nothing is
-            written until you save.
-          </>
-        }
+        title={t("commandBar.foldMergeTitle")}
+        ariaLabel={t("commandBar.foldMergeAriaLabel")}
+        confirmLabel={t("commandBar.mergeConfirmLabel")}
+        confirmPendingLabel={t("commandBar.merging")}
+        summary={t("commandBar.foldMergeSummary", {
+          added: sumCounts(foldPreview.report.added),
+          plural: sumCounts(foldPreview.report.added) === 1 ? "" : "s",
+          updated: sumCounts(foldPreview.report.overwritten),
+          archiveCount: foldPreview.sourcePaths.length,
+        })}
       />
     )}
     </>

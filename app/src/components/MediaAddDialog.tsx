@@ -4,6 +4,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import type { ErrorDto } from "../bindings/ErrorDto";
 import type { MediaAddApplyReport } from "../bindings/MediaAddApplyReport";
 import type { MediaPrecheckResult } from "../bindings/MediaPrecheckResult";
+import { useI18n } from "../i18n/I18nContext";
 
 interface MediaAddDialogProps {
   /** Called after a successful `media_add_apply` — the caller re-fetches the
@@ -45,16 +46,18 @@ function rowGlyph(status: RowStatus): { glyph: string; className: string } {
   }
 }
 
-function rowLabel(row: Row): string {
+function rowLabel(row: Row, t: ReturnType<typeof useI18n>["t"]): string {
   switch (row.status) {
     case "new":
-      return "new";
+      return t("mediaAddDialog.statusNew");
     case "duplicate":
-      return "already added";
+      return t("mediaAddDialog.statusDuplicate");
     case "unsupported":
-      return row.reason ? `unreadable — ${row.reason}` : "unreadable — not a supported image";
+      return row.reason
+        ? t("mediaAddDialog.statusUnsupportedWithReason", { reason: row.reason })
+        : t("mediaAddDialog.statusUnsupported");
     case "added":
-      return "added";
+      return t("mediaAddDialog.statusAdded");
   }
 }
 
@@ -77,6 +80,7 @@ function rowLabel(row: Row): string {
  * app's existing text-input box metrics (44px, `--bg-tertiary`).
  */
 export default function MediaAddDialog({ onApplied, onCancel, onError }: MediaAddDialogProps) {
+  const { t } = useI18n();
   const [playlistName, setPlaylistName] = useState("");
   const [rows, setRows] = useState<Row[] | null>(null);
   const [prechecking, setPrechecking] = useState(false);
@@ -96,7 +100,7 @@ export default function MediaAddDialog({ onApplied, onCancel, onError }: MediaAd
     const selected = await open({
       multiple: true,
       directory: false,
-      filters: [{ name: "Images", extensions: ["bmp", "gif", "heic", "jpg", "jpeg", "png"] }],
+      filters: [{ name: t("mediaAddDialog.filterImages"), extensions: ["bmp", "gif", "heic", "jpg", "jpeg", "png"] }],
     });
     const paths = Array.isArray(selected) ? selected : typeof selected === "string" ? [selected] : null;
     if (paths === null || paths.length === 0) {
@@ -117,7 +121,7 @@ export default function MediaAddDialog({ onApplied, onCancel, onError }: MediaAd
     } finally {
       setPrechecking(false);
     }
-  }, [onError]);
+  }, [onError, t]);
 
   const newCount = rows?.filter((r) => r.status === "new").length ?? 0;
   const allDuplicates = rows !== null && rows.length > 0 && rows.every((r) => r.status === "duplicate");
@@ -189,14 +193,14 @@ export default function MediaAddDialog({ onApplied, onCancel, onError }: MediaAd
         className="media-add-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="Add Media"
+        aria-label={t("mediaAddDialog.ariaLabel")}
         data-testid="media-add-dialog"
       >
-        <h2 className="edit-preview-title">Add media?</h2>
+        <h2 className="edit-preview-title">{t("mediaAddDialog.heading")}</h2>
 
         {!completed && (
           <div className="media-add-playlist-field">
-            <label htmlFor="media-add-playlist-name">Playlist</label>
+            <label htmlFor="media-add-playlist-name">{t("mediaAddDialog.playlistLabel")}</label>
             <input
               id="media-add-playlist-name"
               type="text"
@@ -204,7 +208,7 @@ export default function MediaAddDialog({ onApplied, onCancel, onError }: MediaAd
               data-testid="media-add-playlist-name"
               value={playlistName}
               onChange={(e) => setPlaylistName(e.target.value)}
-              placeholder="Select existing or type a new playlist name"
+              placeholder={t("mediaAddDialog.playlistPlaceholder")}
               disabled={applying}
             />
           </div>
@@ -220,20 +224,24 @@ export default function MediaAddDialog({ onApplied, onCancel, onError }: MediaAd
               aria-busy={prechecking}
               data-testid="media-add-pick-files"
             >
-              {prechecking ? "Checking files…" : "Choose files…"}
+              {prechecking ? t("mediaAddDialog.checkingFiles") : t("mediaAddDialog.chooseFiles")}
             </button>
           </div>
         ) : allDuplicates ? (
           <p className="media-add-empty" data-testid="media-add-all-duplicates">
-            All selected files are already in this archive.
+            {t("mediaAddDialog.allDuplicates")}
           </p>
         ) : (
           <>
             {(applying || completed) && (
               <p className="media-add-list-header" data-testid="media-add-list-header">
                 {applying
-                  ? `Copying files… 0 of ${newCount}`
-                  : `${addedCount} added${failedCount > 0 ? `, ${failedCount} failed` : ""}.`}
+                  ? t("mediaAddDialog.copyingFiles", { count: newCount })
+                  : t("mediaAddDialog.addedSummary", {
+                      count: addedCount,
+                      failedSuffix:
+                        failedCount > 0 ? t("mediaAddDialog.failedSuffix", { count: failedCount }) : "",
+                    })}
               </p>
             )}
             <ul className="media-add-file-list" role="list">
@@ -249,7 +257,7 @@ export default function MediaAddDialog({ onApplied, onCancel, onError }: MediaAd
                     <span className="media-add-file-name" title={row.path}>
                       {fileNameOf(row.path)}
                     </span>
-                    <span className="media-add-file-status">{rowLabel(row)}</span>
+                    <span className="media-add-file-status">{rowLabel(row, t)}</span>
                   </li>
                 );
               })}
@@ -265,7 +273,7 @@ export default function MediaAddDialog({ onApplied, onCancel, onError }: MediaAd
               onClick={handleDone}
               data-testid="media-add-done"
             >
-              Done
+              {t("mediaAddDialog.done")}
             </button>
           ) : (
             <>
@@ -276,7 +284,7 @@ export default function MediaAddDialog({ onApplied, onCancel, onError }: MediaAd
                 disabled={applying}
                 data-testid="media-add-cancel"
               >
-                Cancel
+                {t("common.cancel")}
               </button>
               {rows !== null && !allDuplicates && (
                 <button
@@ -287,7 +295,9 @@ export default function MediaAddDialog({ onApplied, onCancel, onError }: MediaAd
                   aria-busy={applying}
                   data-testid="media-add-confirm"
                 >
-                  {applying ? `Copying files… 0 of ${newCount}` : `Add Media (${newCount})`}
+                  {applying
+                    ? t("mediaAddDialog.copyingFiles", { count: newCount })
+                    : t("mediaAddDialog.addMediaButton", { count: newCount })}
                 </button>
               )}
             </>

@@ -1,4 +1,5 @@
 import { useCallback } from "react";
+import { useI18n } from "../i18n/I18nContext";
 
 interface FoldMergeDialogProps {
   /** The chosen source archive paths, in fold order (top = first, applied
@@ -45,6 +46,7 @@ export default function FoldMergeDialog({
   onContinue,
   onCancel,
 }: FoldMergeDialogProps) {
+  const { t } = useI18n();
   const handleMoveUp = useCallback(
     (index: number) => {
       if (index <= 0) {
@@ -84,13 +86,12 @@ export default function FoldMergeDialog({
         className="fold-merge-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="Merge multiple archives"
+        aria-label={t("foldMergeDialog.ariaLabel")}
         data-testid="fold-merge-dialog"
       >
-        <h2 className="fold-merge-title">Merge Multiple Archives</h2>
+        <h2 className="fold-merge-title">{t("foldMergeDialog.title")}</h2>
         <p className="fold-merge-order-note" data-testid="fold-merge-order-note">
-          Archives merge in the order shown, top to bottom. When two archives
-          change the same record, the one lower in the list wins.
+          {t("foldMergeDialog.orderNote")}
         </p>
         <ul className="fold-merge-list" role="list" data-testid="fold-merge-list">
           {paths.map((path, index) => (
@@ -107,7 +108,7 @@ export default function FoldMergeDialog({
                 className="toolbar-button"
                 onClick={() => handleMoveUp(index)}
                 disabled={index === 0}
-                aria-label={`Move ${baseName(path)} up`}
+                aria-label={t("foldMergeDialog.moveUp", { name: baseName(path) })}
                 data-testid={`fold-merge-row-${index}-up`}
               >
                 ▲
@@ -117,7 +118,7 @@ export default function FoldMergeDialog({
                 className="toolbar-button"
                 onClick={() => handleMoveDown(index)}
                 disabled={index === paths.length - 1}
-                aria-label={`Move ${baseName(path)} down`}
+                aria-label={t("foldMergeDialog.moveDown", { name: baseName(path) })}
                 data-testid={`fold-merge-row-${index}-down`}
               >
                 ▼
@@ -126,7 +127,7 @@ export default function FoldMergeDialog({
                 type="button"
                 className="toolbar-button"
                 onClick={() => handleRemove(index)}
-                aria-label={`Remove ${baseName(path)}`}
+                aria-label={t("foldMergeDialog.remove", { name: baseName(path) })}
                 data-testid={`fold-merge-row-${index}-remove`}
               >
                 ✕
@@ -136,7 +137,7 @@ export default function FoldMergeDialog({
         </ul>
         {!canContinue && (
           <p className="fold-merge-reason" data-testid="fold-merge-reason">
-            Pick at least {MIN_SOURCES} archives to merge.
+            {t("foldMergeDialog.reason", { count: MIN_SOURCES })}
           </p>
         )}
         <div className="fold-merge-actions">
@@ -146,7 +147,7 @@ export default function FoldMergeDialog({
             onClick={onCancel}
             data-testid="fold-merge-cancel"
           >
-            Cancel
+            {t("common.cancel")}
           </button>
           <button
             type="button"
@@ -155,7 +156,7 @@ export default function FoldMergeDialog({
             disabled={!canContinue}
             data-testid="fold-merge-continue"
           >
-            Continue
+            {t("foldMergeDialog.continue")}
           </button>
         </div>
       </div>

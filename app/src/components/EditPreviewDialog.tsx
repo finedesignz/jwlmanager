@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import type { DryRunReport } from "../bindings/DryRunReport";
+import { useI18n } from "../i18n/I18nContext";
 
 interface EditPreviewDialogProps {
   report: DryRunReport;
@@ -54,13 +55,21 @@ export default function EditPreviewDialog({
   report,
   onConfirm,
   onCancel,
-  title = "Delete these Notes?",
-  ariaLabel = "Confirm delete",
+  title,
+  ariaLabel,
   summary,
-  confirmLabel = "Delete",
-  confirmPendingLabel = "Deleting…",
+  confirmLabel,
+  confirmPendingLabel,
   requireTypedConfirm,
 }: EditPreviewDialogProps) {
+  const { t } = useI18n();
+  // Defaults resolve through the catalog (11-04-PLAN.md) -- they can't be
+  // plain destructuring defaults since `t` isn't available until the hook
+  // above runs.
+  const resolvedTitle = title ?? t("editPreviewDialog.defaultTitle");
+  const resolvedAriaLabel = ariaLabel ?? t("common.confirmDelete");
+  const resolvedConfirmLabel = confirmLabel ?? t("common.delete");
+  const resolvedConfirmPendingLabel = confirmPendingLabel ?? t("common.deleting");
   const [pending, setPending] = useState(false);
   const [typedValue, setTypedValue] = useState("");
   const busyRef = useRef(false);
@@ -126,7 +135,7 @@ export default function EditPreviewDialog({
   const defaultSummary =
     entries.length > 0
       ? entries.map(([table, count]) => `${count} ${table}`).join(", ")
-      : "nothing";
+      : t("editPreviewDialog.nothing");
 
   return (
     <div
@@ -142,18 +151,17 @@ export default function EditPreviewDialog({
         }
         role="dialog"
         aria-modal="true"
-        aria-label={ariaLabel}
+        aria-label={resolvedAriaLabel}
         data-testid="edit-preview-dialog"
       >
-        <h2 className="edit-preview-title">{title}</h2>
+        <h2 className="edit-preview-title">{resolvedTitle}</h2>
         <p className="edit-preview-summary" data-testid="edit-preview-summary">
-          {summary ?? (
-            <>
-              This will remove {defaultSummary} ({report.total_deleted} row
-              {report.total_deleted === 1 ? "" : "s"} total). This can't be undone once
-              you save.
-            </>
-          )}
+          {summary ??
+            t("editPreviewDialog.defaultSummary", {
+              items: defaultSummary,
+              count: report.total_deleted,
+              plural: report.total_deleted === 1 ? "" : "s",
+            })}
         </p>
         {requireTypedConfirm !== undefined && (
           <input
@@ -163,7 +171,7 @@ export default function EditPreviewDialog({
             onChange={(event) => setTypedValue(event.target.value)}
             onKeyDown={handleTypedInputKeyDown}
             disabled={pending}
-            aria-label={`Type ${requireTypedConfirm} to confirm`}
+            aria-label={t("editPreviewDialog.typedConfirmAriaLabel", { value: requireTypedConfirm })}
             data-testid="edit-preview-typed-confirm-input"
           />
         )}
@@ -175,7 +183,7 @@ export default function EditPreviewDialog({
             disabled={pending}
             data-testid="edit-preview-cancel"
           >
-            Cancel
+            {t("common.cancel")}
           </button>
           <button
             type="button"
@@ -185,7 +193,7 @@ export default function EditPreviewDialog({
             aria-busy={pending}
             data-testid="edit-preview-confirm"
           >
-            {pending ? confirmPendingLabel : confirmLabel}
+            {pending ? resolvedConfirmPendingLabel : resolvedConfirmLabel}
           </button>
         </div>
       </div>
