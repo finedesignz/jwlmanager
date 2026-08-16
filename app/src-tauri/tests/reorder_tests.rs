@@ -18,7 +18,11 @@ fn insert_note(conn: &Connection, note_id: i64) {
          LastModified, Created, BlockType, BlockIdentifier) \
          VALUES (?1, ?2, NULL, NULL, ?3, 'content', '2026-01-01T00:00:00Z', \
          '2026-01-01T00:00:00Z', 0, NULL)",
-        rusqlite::params![note_id, format!("fixture-reorder-note-{note_id}"), format!("Note {note_id}")],
+        rusqlite::params![
+            note_id,
+            format!("fixture-reorder-note-{note_id}"),
+            format!("Note {note_id}")
+        ],
     )
     .expect("insert Note");
 }
@@ -34,8 +38,11 @@ fn insert_note(conn: &Connection, note_id: i64) {
 /// rewrite — the exact `UNIQUE(TagId, Position)` hazard D7-05 exists to
 /// solve.
 fn seed_max_collision_fixture(conn: &Connection) {
-    conn.execute("INSERT INTO Tag (TagId, Type, Name) VALUES (600, 1, 'Collision Tag')", [])
-        .expect("insert Tag 600");
+    conn.execute(
+        "INSERT INTO Tag (TagId, Type, Name) VALUES (600, 1, 'Collision Tag')",
+        [],
+    )
+    .expect("insert Tag 600");
     for note_id in [10_i64, 20, 30] {
         insert_note(conn, note_id);
     }
@@ -83,7 +90,10 @@ fn reorder_produces_zero_based_dense_positions_ordered_by_note_id() {
     let (_dir, conn) = open_seeded_with(seed_max_collision_fixture);
     let tx = conn.unchecked_transaction().expect("open tx");
     let changed = apply_reorder(&tx).expect("apply_reorder must not raise a UNIQUE violation");
-    assert_eq!(changed, 2, "NoteId 20 keeps its Position 1 unchanged; the other two rows move");
+    assert_eq!(
+        changed, 2,
+        "NoteId 20 keeps its Position 1 unchanged; the other two rows move"
+    );
 
     assert_eq!(
         positions_for_tag(&tx, 600),
@@ -97,8 +107,11 @@ fn reorder_produces_zero_based_dense_positions_ordered_by_note_id() {
 #[test]
 fn every_tag_id_sorted_position_set_equals_0_to_n() {
     let (_dir, conn) = open_seeded_with(|conn| {
-        conn.execute("INSERT INTO Tag (TagId, Type, Name) VALUES (601, 1, 'Second Tag')", [])
-            .unwrap();
+        conn.execute(
+            "INSERT INTO Tag (TagId, Type, Name) VALUES (601, 1, 'Second Tag')",
+            [],
+        )
+        .unwrap();
         for note_id in [100_i64, 200] {
             insert_note(conn, note_id);
         }
@@ -120,10 +133,16 @@ fn every_tag_id_sorted_position_set_equals_0_to_n() {
     apply_reorder(&tx).expect("apply_reorder must succeed");
 
     for tag_id in [600_i64, 601] {
-        let mut positions: Vec<i64> = positions_for_tag(&tx, tag_id).into_iter().map(|(_, p)| p).collect();
+        let mut positions: Vec<i64> = positions_for_tag(&tx, tag_id)
+            .into_iter()
+            .map(|(_, p)| p)
+            .collect();
         positions.sort_unstable();
         let expected: Vec<i64> = (0..positions.len() as i64).collect();
-        assert_eq!(positions, expected, "TagId {tag_id}'s position set must equal 0..n");
+        assert_eq!(
+            positions, expected,
+            "TagId {tag_id}'s position set must equal 0..n"
+        );
     }
 
     tx.rollback().unwrap();
@@ -132,8 +151,11 @@ fn every_tag_id_sorted_position_set_equals_0_to_n() {
 #[test]
 fn already_sorted_dense_fixture_reports_zero_changes_and_is_unchanged() {
     let (_dir, conn) = open_seeded_with(|conn| {
-        conn.execute("INSERT INTO Tag (TagId, Type, Name) VALUES (610, 1, 'Sorted Tag')", [])
-            .unwrap();
+        conn.execute(
+            "INSERT INTO Tag (TagId, Type, Name) VALUES (610, 1, 'Sorted Tag')",
+            [],
+        )
+        .unwrap();
         for note_id in [1_i64, 2, 3] {
             insert_note(conn, note_id);
         }
@@ -159,8 +181,15 @@ fn already_sorted_dense_fixture_reports_zero_changes_and_is_unchanged() {
     let tx = conn.unchecked_transaction().expect("open tx");
     let before = positions_for_tag(&tx, 610);
     let changed = apply_reorder(&tx).expect("apply_reorder must succeed");
-    assert_eq!(changed, 0, "an already-sorted-dense fixture must report zero changes");
-    assert_eq!(positions_for_tag(&tx, 610), before, "positions must be unchanged");
+    assert_eq!(
+        changed, 0,
+        "an already-sorted-dense fixture must report zero changes"
+    );
+    assert_eq!(
+        positions_for_tag(&tx, 610),
+        before,
+        "positions must be unchanged"
+    );
 
     tx.rollback().unwrap();
 }
@@ -171,10 +200,16 @@ fn favorite_and_playlist_tags_are_never_touched() {
         seed_max_collision_fixture(conn);
         // Type 0 (Favorite) and Type 2 (Playlist) tags with out-of-order
         // positions of their own — reorder must leave both untouched.
-        conn.execute("INSERT INTO Tag (TagId, Type, Name) VALUES (700, 0, 'Fixture Favorite Alt')", [])
-            .unwrap();
-        conn.execute("INSERT INTO Tag (TagId, Type, Name) VALUES (701, 2, 'Playlist Tag')", [])
-            .unwrap();
+        conn.execute(
+            "INSERT INTO Tag (TagId, Type, Name) VALUES (700, 0, 'Fixture Favorite Alt')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO Tag (TagId, Type, Name) VALUES (701, 2, 'Playlist Tag')",
+            [],
+        )
+        .unwrap();
         conn.execute(
             "INSERT INTO Location (LocationId, BookNumber, ChapterNumber, DocumentId, Track, \
              IssueTagNumber, KeySymbol, MepsLanguage, Type, Title, Specialty, Edition) \
@@ -206,13 +241,23 @@ fn favorite_and_playlist_tags_are_never_touched() {
     apply_reorder(&tx).expect("apply_reorder must succeed");
 
     let favorite_position: i64 = tx
-        .query_row("SELECT Position FROM TagMap WHERE TagMapId = 50", [], |r| r.get(0))
+        .query_row("SELECT Position FROM TagMap WHERE TagMapId = 50", [], |r| {
+            r.get(0)
+        })
         .unwrap();
     let playlist_position: i64 = tx
-        .query_row("SELECT Position FROM TagMap WHERE TagMapId = 51", [], |r| r.get(0))
+        .query_row("SELECT Position FROM TagMap WHERE TagMapId = 51", [], |r| {
+            r.get(0)
+        })
         .unwrap();
-    assert_eq!(favorite_position, 7, "Type=0 (Favorite) tag rows must be untouched");
-    assert_eq!(playlist_position, 9, "Type=2 (Playlist) tag rows must be untouched");
+    assert_eq!(
+        favorite_position, 7,
+        "Type=0 (Favorite) tag rows must be untouched"
+    );
+    assert_eq!(
+        playlist_position, 9,
+        "Type=2 (Playlist) tag rows must be untouched"
+    );
 
     tx.rollback().unwrap();
 }
@@ -231,7 +276,10 @@ fn reorder_then_save_path_redensify_is_idempotent() {
     trim_sweep(&tx).expect("trim_sweep must succeed");
     let after_trim = positions_for_tag(&tx, 600);
 
-    assert_eq!(after_reorder, after_trim, "reorder + save's re-densify must compose idempotently");
+    assert_eq!(
+        after_reorder, after_trim,
+        "reorder + save's re-densify must compose idempotently"
+    );
 
     tx.rollback().unwrap();
 }

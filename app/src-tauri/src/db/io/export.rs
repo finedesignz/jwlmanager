@@ -74,7 +74,8 @@ pub(crate) fn read_favorite_id_lines(
     conn: &Connection,
     ids: Option<&NonEmptyTagMapIds>,
 ) -> Result<Vec<(i64, String)>, ArchiveError> {
-    let base_sql = "SELECT TagMapId, DocumentId, Track, IssueTagNumber, KeySymbol, MepsLanguage, Type \
+    let base_sql =
+        "SELECT TagMapId, DocumentId, Track, IssueTagNumber, KeySymbol, MepsLanguage, Type \
          FROM Location JOIN TagMap USING (LocationId) \
          WHERE TagId = (SELECT TagId FROM Tag WHERE Type = 0 AND Name = 'Favorite')";
 
@@ -108,7 +109,8 @@ pub(crate) fn read_favorite_id_lines(
 
     let mut lines = Vec::new();
     for row in rows {
-        let (id, fields) = row.map_err(|e| map_sqlite_err(e, "read_favorite_id_lines: read row"))?;
+        let (id, fields) =
+            row.map_err(|e| map_sqlite_err(e, "read_favorite_id_lines: read row"))?;
         let fields: Vec<Option<String>> = fields.into_iter().map(value_to_field).collect();
         lines.push((id, join_row(&fields)));
     }
@@ -144,7 +146,8 @@ pub fn export_favorites(
         .map_err(ArchiveError::from)?;
     for line in &lines {
         file.write_all(b"\n").map_err(ArchiveError::from)?;
-        file.write_all(line.as_bytes()).map_err(ArchiveError::from)?;
+        file.write_all(line.as_bytes())
+            .map_err(ArchiveError::from)?;
     }
 
     Ok(lines.len())
@@ -216,7 +219,8 @@ pub(crate) fn read_bookmark_id_lines(
 
     let mut lines = Vec::new();
     for row in rows {
-        let (id, fields) = row.map_err(|e| map_sqlite_err(e, "read_bookmark_id_lines: read row"))?;
+        let (id, fields) =
+            row.map_err(|e| map_sqlite_err(e, "read_bookmark_id_lines: read row"))?;
         let fields: Vec<Option<String>> = fields.into_iter().map(value_to_field).collect();
         lines.push((id, join_row(&fields)));
     }
@@ -251,7 +255,8 @@ pub fn export_bookmarks(
         .map_err(ArchiveError::from)?;
     for line in &lines {
         file.write_all(b"\n").map_err(ArchiveError::from)?;
-        file.write_all(line.as_bytes()).map_err(ArchiveError::from)?;
+        file.write_all(line.as_bytes())
+            .map_err(ArchiveError::from)?;
     }
 
     Ok(lines.len())
@@ -294,7 +299,8 @@ pub(crate) fn read_annotation_id_rows(
     conn: &Connection,
     ids: Option<&NonEmptyLocationIds>,
 ) -> Result<Vec<(i64, AnnotationExportRow)>, ArchiveError> {
-    let base_sql = "SELECT LocationId, TextTag, Value, l.DocumentId doc, l.IssueTagNumber, l.KeySymbol, \
+    let base_sql =
+        "SELECT LocationId, TextTag, Value, l.DocumentId doc, l.IssueTagNumber, l.KeySymbol, \
          CAST(TRIM(TextTag, 'abcdefghijklmnopqrstuvwxyz') AS INT) i \
          FROM InputField LEFT JOIN Location l USING (LocationId) \
          WHERE Value <> '' AND Value IS NOT NULL";
@@ -336,7 +342,9 @@ pub(crate) fn read_annotation_id_rows(
             AnnotationExportRow {
                 label,
                 value: value.trim().to_string(),
-                doc: doc.map(|d| d.to_string()).unwrap_or_else(|| "None".to_string()),
+                doc: doc
+                    .map(|d| d.to_string())
+                    .unwrap_or_else(|| "None".to_string()),
                 issue: issue_tag_number.filter(|n| *n > 10_000_000),
                 pub_sym: pub_sym.unwrap_or_default(),
             },
@@ -398,7 +406,8 @@ pub fn export_annotations(
         file.write_all(format_annotation_record(row).as_bytes())
             .map_err(ArchiveError::from)?;
     }
-    file.write_all(b"\n==={END}===").map_err(ArchiveError::from)?;
+    file.write_all(b"\n==={END}===")
+        .map_err(ArchiveError::from)?;
 
     Ok(rows.len())
 }
@@ -466,7 +475,8 @@ pub(crate) fn read_highlight_id_lines(
 
     let mut lines = Vec::new();
     for row in rows {
-        let (id, fields) = row.map_err(|e| map_sqlite_err(e, "read_highlight_id_lines: read row"))?;
+        let (id, fields) =
+            row.map_err(|e| map_sqlite_err(e, "read_highlight_id_lines: read row"))?;
         let fields: Vec<Option<String>> = fields.into_iter().map(value_to_field).collect();
         lines.push((id, join_row(&fields)));
     }
@@ -501,7 +511,8 @@ pub fn export_highlights(
         .map_err(ArchiveError::from)?;
     for line in &lines {
         file.write_all(b"\n").map_err(ArchiveError::from)?;
-        file.write_all(line.as_bytes()).map_err(ArchiveError::from)?;
+        file.write_all(line.as_bytes())
+            .map_err(ArchiveError::from)?;
     }
 
     Ok(lines.len())
@@ -676,9 +687,11 @@ pub fn export_notes(
             None => None,
         };
         let record = format_note_record(raw, range.as_deref(), catalog, now);
-        file.write_all(record.as_bytes()).map_err(ArchiveError::from)?;
+        file.write_all(record.as_bytes())
+            .map_err(ArchiveError::from)?;
     }
-    file.write_all(b"\n==={END}===").map_err(ArchiveError::from)?;
+    file.write_all(b"\n==={END}===")
+        .map_err(ArchiveError::from)?;
 
     Ok(count)
 }
@@ -723,8 +736,7 @@ pub(crate) fn format_note_record(
         created = format!("{}T00:00:00", created.chars().take(10).collect::<String>());
     }
 
-    let mut out =
-        format!("\n==={{CREATED={created}}}{{MODIFIED={modified}}}{{TAGS={tags}}}");
+    let mut out = format!("\n==={{CREATED={created}}}{{MODIFIED={modified}}}{{TAGS={tags}}}");
 
     // `item.get('DOC')` truthiness (`JWLManager.py:1622`/`:1655`/`:1661`):
     // a `DocumentId` of `0` is treated as absent, same as `NULL`.
@@ -739,7 +751,9 @@ pub(crate) fn format_note_record(
         // actually renders for a Bible-shaped note.
         let vs = raw.block_identifier;
         let ch = raw.chapter_number.unwrap_or(0);
-        let vs_str = vs.map(|v| format!("{v:03}")).unwrap_or_else(|| "000".to_string());
+        let vs_str = vs
+            .map(|v| format!("{v:03}"))
+            .unwrap_or_else(|| "000".to_string());
         let reference = format!("{bk:02}{ch:03}{vs_str}");
 
         let mut heading = raw.location_title.clone().unwrap_or_default();
@@ -752,7 +766,9 @@ pub(crate) fn format_note_record(
 
         let lang = raw.meps_language.unwrap_or(0);
         let pub_sym = raw.key_symbol.clone().unwrap_or_default();
-        out.push_str(&format!("{{LANG={lang}}}{{PUB={pub_sym}}}{{BK={bk}}}{{CH={ch}}}"));
+        out.push_str(&format!(
+            "{{LANG={lang}}}{{PUB={pub_sym}}}{{BK={bk}}}{{CH={ch}}}"
+        ));
         if let Some(v) = vs {
             out.push_str(&format!("{{VS={v}}}"));
         }
@@ -816,7 +832,10 @@ pub(crate) fn read_note_id_records(
                 Some(id) => read_note_range(conn, id)?,
                 None => None,
             };
-            Ok((raw.note_id, format_note_record(raw, range.as_deref(), catalog, now)))
+            Ok((
+                raw.note_id,
+                format_note_record(raw, range.as_deref(), catalog, now),
+            ))
         })
         .collect()
 }

@@ -79,7 +79,11 @@ fn shared_thumbnail_survives_deletion_of_one_of_its_referencing_items() {
     seed_accuracy(&conn);
 
     insert_media(&conn, 1, "shared_thumb.png", "hash-shared-thumb");
-    fs::write(media_dir.path().join("shared_thumb.png"), b"shared-thumb-bytes").unwrap();
+    fs::write(
+        media_dir.path().join("shared_thumb.png"),
+        b"shared-thumb-bytes",
+    )
+    .unwrap();
 
     // Item 100 (KEPT) and item 200 (DELETED) share the same thumbnail.
     insert_item(&conn, 100, "Kept Item", Some("shared_thumb.png"));
@@ -90,7 +94,10 @@ fn shared_thumbnail_survives_deletion_of_one_of_its_referencing_items() {
     let outcome = delete_playlist_items_db(&tx, &ids).unwrap();
     tx.commit().unwrap();
 
-    assert!(outcome.removed_files.is_empty(), "shared thumbnail must not be removed");
+    assert!(
+        outcome.removed_files.is_empty(),
+        "shared thumbnail must not be removed"
+    );
     assert_eq!(outcome.kept_count, 1);
     assert!(media_exists(&conn, "shared_thumb.png"));
     assert!(media_dir.path().join("shared_thumb.png").exists());
@@ -143,10 +150,20 @@ fn thumbnail_and_full_media_used_sets_are_evaluated_independently() {
     insert_media(&conn, 1, "dual_role.png", "hash-dual-role");
     fs::write(media_dir.path().join("dual_role.png"), b"dual-role-bytes").unwrap();
 
-    insert_item(&conn, 400, "Kept Item (uses as thumb)", Some("dual_role.png"));
+    insert_item(
+        &conn,
+        400,
+        "Kept Item (uses as thumb)",
+        Some("dual_role.png"),
+    );
     insert_item(&conn, 410, "Kept Item (uses as full media)", None);
     insert_media_map(&conn, 410, 1);
-    insert_item(&conn, 500, "Deleted Item (uses both roles)", Some("dual_role.png"));
+    insert_item(
+        &conn,
+        500,
+        "Deleted Item (uses both roles)",
+        Some("dual_role.png"),
+    );
     insert_media_map(&conn, 500, 1);
 
     let ids = NonEmptyPlaylistItemIds::try_from(vec![500]).unwrap();
@@ -154,8 +171,14 @@ fn thumbnail_and_full_media_used_sets_are_evaluated_independently() {
     let outcome = delete_playlist_items_db(&tx, &ids).unwrap();
     tx.commit().unwrap();
 
-    assert!(outcome.removed_files.is_empty(), "shared-by-role media must survive");
-    assert_eq!(outcome.kept_count, 1, "protected by both used-sets, but counted once");
+    assert!(
+        outcome.removed_files.is_empty(),
+        "shared-by-role media must survive"
+    );
+    assert_eq!(
+        outcome.kept_count, 1,
+        "protected by both used-sets, but counted once"
+    );
     assert!(media_exists(&conn, "dual_role.png"));
     // Only item 500's own map row is gone; item 410's survives.
     assert_eq!(table_count(&conn, "PlaylistItemIndependentMediaMap"), 1);

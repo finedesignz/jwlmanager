@@ -16,8 +16,8 @@
 
 use super::export::{
     export_annotations, export_bookmarks, export_favorites, export_highlights, export_notes,
-    format_annotation_record, read_annotation_id_rows, read_bookmark_id_lines, read_favorite_id_lines,
-    read_highlight_id_lines, read_note_id_records,
+    format_annotation_record, read_annotation_id_rows, read_bookmark_id_lines,
+    read_favorite_id_lines, read_highlight_id_lines, read_note_id_records,
 };
 use super::header::ExportHeaderCtx;
 use super::import::{
@@ -613,7 +613,10 @@ pub fn export_annotations_incremental(
             split_prior_annotation_records(text)
                 .into_iter()
                 .map(|((doc, label), record_text)| {
-                    (annotations_identity(&doc, &label), record_hash(&record_text))
+                    (
+                        annotations_identity(&doc, &label),
+                        record_hash(&record_text),
+                    )
                 })
                 .collect()
         }
@@ -845,7 +848,10 @@ mod tests {
         let a = "\n==={CREATED=2026-01-01T00:00:00}{MODIFIED=2026-06-01T00:00:00}{TAGS=}===\ntitle\nnote";
         let b = "\n==={CREATED=2026-01-01T00:00:00}{MODIFIED=2026-06-02T00:00:00}{TAGS=}===\ntitle\nnote";
         assert_eq!(notes_hash_input(a), notes_hash_input(b));
-        assert_eq!(record_hash(notes_hash_input(a)), record_hash(notes_hash_input(b)));
+        assert_eq!(
+            record_hash(notes_hash_input(a)),
+            record_hash(notes_hash_input(b))
+        );
     }
 
     #[test]
@@ -897,7 +903,8 @@ mod tests {
 
     #[test]
     fn split_prior_lines_skips_header_and_blank_lines() {
-        let text = "{FAVORITES}\n \nExported from x\nby y (1.0) on z\n****\n1|2|3|4|5|6\n7|8|9|10|11|12";
+        let text =
+            "{FAVORITES}\n \nExported from x\nby y (1.0) on z\n****\n1|2|3|4|5|6\n7|8|9|10|11|12";
         let lines = split_prior_lines(text);
         assert_eq!(lines, vec!["1|2|3|4|5|6", "7|8|9|10|11|12"]);
     }
@@ -937,7 +944,11 @@ mod tests {
             \n==={PUB=w}{DOC=None}{LABEL=p2}===\nSecond value\
             \n==={END}===";
         let records = split_prior_annotation_records(text);
-        assert_eq!(records.len(), 2, "both siblings at one LocationId's DOC must be retained");
+        assert_eq!(
+            records.len(),
+            2,
+            "both siblings at one LocationId's DOC must be retained"
+        );
         assert_eq!(records[0].0, ("None".to_string(), "p1".to_string()));
         assert_eq!(records[1].0, ("None".to_string(), "p2".to_string()));
         assert_ne!(

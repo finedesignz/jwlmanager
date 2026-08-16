@@ -564,7 +564,9 @@ pub fn fold_dry_run_merge_with_lib_path(
         fs::create_dir_all(&root)?;
 
         let final_step_db =
-            run_fold_chain(lib_path, &session.db_path, sources, &root, |_step_dir| Ok(()))?;
+            run_fold_chain(lib_path, &session.db_path, sources, &root, |_step_dir| {
+                Ok(())
+            })?;
 
         content_diff(&session.db_path, &final_step_db)
     })();
@@ -785,7 +787,10 @@ mod tests {
         let sources: Vec<PathBuf> = vec![PathBuf::from("a"), PathBuf::from("b")];
         match require_fold_sources(&sources) {
             Err(ArchiveError::MergeFailed { reason }) => {
-                assert!(reason.contains('2'), "reason should mention the count: {reason}");
+                assert!(
+                    reason.contains('2'),
+                    "reason should mention the count: {reason}"
+                );
             }
             other => panic!("expected MergeFailed, got {other:?}"),
         }

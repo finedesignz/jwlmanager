@@ -57,11 +57,23 @@ fn two_overlapping_ranges_merge_into_one_union_and_absorbed_row_is_gone() {
     assert_eq!(block_ranges(&conn), vec![(1, 0, 5)]);
 
     // Record B: SAME (Identifier, Location) — range [3, 10] overlaps [0, 5].
-    apply_lines(&mut conn, "{HIGHLIGHTS}\n1|1|3|10|2|1|1|1|None|0|nwt|0|0", 2);
+    apply_lines(
+        &mut conn,
+        "{HIGHLIGHTS}\n1|1|3|10|2|1|1|1|None|0|nwt|0|0",
+        2,
+    );
 
     let ranges = block_ranges(&conn);
-    assert_eq!(ranges.len(), 1, "the overlapping ranges must merge into exactly one row");
-    assert_eq!((ranges[0].1, ranges[0].2), (0, 10), "the union must span [0, 10]");
+    assert_eq!(
+        ranges.len(),
+        1,
+        "the overlapping ranges must merge into exactly one row"
+    );
+    assert_eq!(
+        (ranges[0].1, ranges[0].2),
+        (0, 10),
+        "the union must span [0, 10]"
+    );
     // The absorbed row's ORIGINAL content ([0, 5]) must no longer exist as
     // its own row — asserted by content rather than by `BlockRangeId`
     // because SQLite reuses a just-freed max-rowid on the very next INSERT
@@ -76,7 +88,10 @@ fn two_overlapping_ranges_merge_into_one_union_and_absorbed_row_is_gone() {
             |r| r.get(0),
         )
         .expect("count old-shaped row");
-    assert_eq!(old_row_still_exists, 0, "the absorbed row's original [0, 5] shape must be gone");
+    assert_eq!(
+        old_row_still_exists, 0,
+        "the absorbed row's original [0, 5] shape must be gone"
+    );
 }
 
 #[test]
@@ -85,13 +100,25 @@ fn overlapping_range_of_a_different_color_still_merges() {
     let mut conn = Connection::open(&db_path).expect("open db");
 
     // ColorIndex 1 (field 4) on the first import.
-    apply_lines(&mut conn, "{HIGHLIGHTS}\n1|1|0|5|1|1|1|1|None|0|nwt|0|0", 10);
+    apply_lines(
+        &mut conn,
+        "{HIGHLIGHTS}\n1|1|0|5|1|1|1|1|None|0|nwt|0|0",
+        10,
+    );
     // ColorIndex 5 on the overlapping second import — grouping is by
     // (Identifier, LocationId) ONLY, never filtered by color (D8-05).
-    apply_lines(&mut conn, "{HIGHLIGHTS}\n1|1|4|12|5|1|1|1|None|0|nwt|0|0", 11);
+    apply_lines(
+        &mut conn,
+        "{HIGHLIGHTS}\n1|1|4|12|5|1|1|1|None|0|nwt|0|0",
+        11,
+    );
 
     let ranges = block_ranges(&conn);
-    assert_eq!(ranges.len(), 1, "a different ColorIndex must not prevent the merge");
+    assert_eq!(
+        ranges.len(),
+        1,
+        "a different ColorIndex must not prevent the merge"
+    );
     assert_eq!((ranges[0].1, ranges[0].2), (0, 12));
 }
 
@@ -101,11 +128,23 @@ fn three_chained_overlapping_imports_coalesce_to_one_range() {
     let mut conn = Connection::open(&db_path).expect("open db");
 
     apply_lines(&mut conn, "{HIGHLIGHTS}\n1|1|0|5|1|1|1|1|None|0|nwt|0|0", 1);
-    apply_lines(&mut conn, "{HIGHLIGHTS}\n1|1|3|10|1|1|1|1|None|0|nwt|0|0", 2);
-    apply_lines(&mut conn, "{HIGHLIGHTS}\n1|1|8|15|1|1|1|1|None|0|nwt|0|0", 3);
+    apply_lines(
+        &mut conn,
+        "{HIGHLIGHTS}\n1|1|3|10|1|1|1|1|None|0|nwt|0|0",
+        2,
+    );
+    apply_lines(
+        &mut conn,
+        "{HIGHLIGHTS}\n1|1|8|15|1|1|1|1|None|0|nwt|0|0",
+        3,
+    );
 
     let ranges = block_ranges(&conn);
-    assert_eq!(ranges.len(), 1, "three chained overlaps must coalesce to one range");
+    assert_eq!(
+        ranges.len(),
+        1,
+        "three chained overlaps must coalesce to one range"
+    );
     assert_eq!((ranges[0].1, ranges[0].2), (0, 15));
 }
 
@@ -116,7 +155,11 @@ fn disjoint_ranges_at_the_same_identifier_stay_as_separate_rows() {
 
     apply_lines(&mut conn, "{HIGHLIGHTS}\n1|1|0|5|1|1|1|1|None|0|nwt|0|0", 1);
     // Disjoint: starts well past the first range's end (ce=5 < ns=100).
-    apply_lines(&mut conn, "{HIGHLIGHTS}\n1|1|100|110|1|1|1|1|None|0|nwt|0|0", 2);
+    apply_lines(
+        &mut conn,
+        "{HIGHLIGHTS}\n1|1|100|110|1|1|1|1|None|0|nwt|0|0",
+        2,
+    );
 
     let ranges = block_ranges(&conn);
     assert_eq!(ranges.len(), 2, "disjoint ranges must not merge");
@@ -147,7 +190,11 @@ fn reimporting_the_same_file_converges_blockrange_geometry_while_usermark_grows(
         1,
         "the identical range must absorb itself back into one row, not duplicate"
     );
-    assert_eq!((after_second[0].1, after_second[0].2), (0, 5), "geometry must be stable");
+    assert_eq!(
+        (after_second[0].1, after_second[0].2),
+        (0, 5),
+        "geometry must be stable"
+    );
     assert_eq!(
         count(&conn, "UserMark"),
         2,
@@ -163,7 +210,9 @@ fn new_block_range_id_consumes_a_recycled_gap_before_autoincrement() {
     // Seed a gap at BlockRangeId 1: insert ids 1 and 2, then delete 1.
     {
         let tx_conn = Connection::open(&db_path).expect("open db");
-        tx_conn.execute_batch("PRAGMA foreign_keys = OFF").expect("fk off");
+        tx_conn
+            .execute_batch("PRAGMA foreign_keys = OFF")
+            .expect("fk off");
         tx_conn
             .execute(
                 "INSERT INTO Location (BookNumber, ChapterNumber, DocumentId, Track, IssueTagNumber, KeySymbol, MepsLanguage, Type) \
@@ -203,7 +252,10 @@ fn new_block_range_id_consumes_a_recycled_gap_before_autoincrement() {
             |r| r.get(0),
         )
         .expect("read new range id");
-    assert_eq!(new_range_id, 1, "the new BlockRange must consume the recycled gap id 1");
+    assert_eq!(
+        new_range_id, 1,
+        "the new BlockRange must consume the recycled gap id 1"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -217,8 +269,15 @@ fn apply_note_lines(conn: &mut Connection, text: &str, guid_seed: u64) {
     let (bucket, records) = parse_notes_file(text).expect("parse");
     let tx = conn.transaction().expect("begin tx");
     let mut available = compute_available_ids(&tx).expect("compute ids");
-    apply_import_notes(&tx, bucket, &records, &mut available, guid_seed, "2099-01-01T00:00:00Z")
-        .expect("apply");
+    apply_import_notes(
+        &tx,
+        bucket,
+        &records,
+        &mut available,
+        guid_seed,
+        "2099-01-01T00:00:00Z",
+    )
+    .expect("apply");
     tx.commit().expect("commit");
 }
 
@@ -231,7 +290,11 @@ fn notes_sequential_sub_ranges_merge_into_one_row() {
     apply_note_lines(&mut conn, text, 1);
 
     let ranges = block_ranges(&conn);
-    assert_eq!(ranges.len(), 1, "the second sub-range must see the first sub-range's insert");
+    assert_eq!(
+        ranges.len(),
+        1,
+        "the second sub-range must see the first sub-range's insert"
+    );
     assert_eq!((ranges[0].1, ranges[0].2), (5, 12));
 }
 
@@ -244,7 +307,11 @@ fn notes_sub_ranges_at_different_identifiers_stay_separate() {
     apply_note_lines(&mut conn, text, 1);
 
     let ranges = block_ranges(&conn);
-    assert_eq!(ranges.len(), 2, "sub-ranges naming different identifiers must not merge");
+    assert_eq!(
+        ranges.len(),
+        2,
+        "sub-ranges naming different identifiers must not merge"
+    );
 }
 
 #[test]
@@ -263,6 +330,10 @@ fn notes_range_merges_into_an_existing_highlight_range_via_the_shared_primitive(
     apply_note_lines(&mut conn, text, 2);
 
     let ranges = block_ranges(&conn);
-    assert_eq!(ranges.len(), 1, "Notes' range must merge into the existing Highlights BlockRange");
+    assert_eq!(
+        ranges.len(),
+        1,
+        "Notes' range must merge into the existing Highlights BlockRange"
+    );
     assert_eq!((ranges[0].1, ranges[0].2), (0, 8));
 }

@@ -75,7 +75,10 @@ mod tests {
             "*".repeat(76)
         );
         assert_eq!(header, expected);
-        assert!(!header.ends_with('\n'), "header must not end with a newline");
+        assert!(
+            !header.ends_with('\n'),
+            "header must not end with a newline"
+        );
         assert_eq!(header.matches('*').count(), 76);
     }
 }

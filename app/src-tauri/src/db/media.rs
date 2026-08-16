@@ -38,10 +38,12 @@
 //! list, so it is STRUCTURALLY incapable of reaching [`remove_media_files`]
 //! at all (D8-07's "not merely unreached" requirement).
 
-use crate::db::edit::{diff_snapshots, snapshot_tables, DryRunReport, MEDIA_DELETE_SNAPSHOT_TABLES};
+use crate::db::edit::{
+    diff_snapshots, snapshot_tables, DryRunReport, MEDIA_DELETE_SNAPSHOT_TABLES,
+};
 use crate::db::ids::take_id;
-use crate::db::pragma_guard::PragmaGuard;
 use crate::db::playlist_io::NonEmptyPlaylistItemIds;
+use crate::db::pragma_guard::PragmaGuard;
 use crate::db::trim::trim_sweep;
 use crate::error::ArchiveError;
 use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Transaction};
@@ -222,7 +224,9 @@ pub fn media_precheck(
             .prepare("SELECT Hash, IndependentMediaId FROM IndependentMedia")
             .map_err(|e| map_sqlite_err(e, "media_precheck: prepare"))?;
         let rows = stmt
-            .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)))
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
             .map_err(|e| map_sqlite_err(e, "media_precheck: query"))?;
         rows.collect::<Result<_, _>>()
             .map_err(|e| map_sqlite_err(e, "media_precheck: read rows"))?
@@ -678,8 +682,11 @@ pub fn delete_playlist_items_db(
                 kept.insert(fp);
                 continue;
             }
-            tx.execute("DELETE FROM IndependentMedia WHERE FilePath = ?1", params![fp])
-                .map_err(|e| map_delete_err(e, "delete_playlist_items_db: delete thumb media"))?;
+            tx.execute(
+                "DELETE FROM IndependentMedia WHERE FilePath = ?1",
+                params![fp],
+            )
+            .map_err(|e| map_delete_err(e, "delete_playlist_items_db: delete thumb media"))?;
             removed_files.push(fp);
         }
     }
@@ -708,8 +715,11 @@ pub fn delete_playlist_items_db(
                 kept.insert(fp);
                 continue;
             }
-            tx.execute("DELETE FROM IndependentMedia WHERE FilePath = ?1", params![fp])
-                .map_err(|e| map_delete_err(e, "delete_playlist_items_db: delete full media"))?;
+            tx.execute(
+                "DELETE FROM IndependentMedia WHERE FilePath = ?1",
+                params![fp],
+            )
+            .map_err(|e| map_delete_err(e, "delete_playlist_items_db: delete full media"))?;
             removed_files.push(fp);
         }
     }

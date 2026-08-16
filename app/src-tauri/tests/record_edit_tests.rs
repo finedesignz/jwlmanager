@@ -155,12 +155,17 @@ fn saving_a_note_with_an_existing_usermark_updates_its_colorindex_no_new_synthes
     let after_count: i64 = tx
         .query_row("SELECT COUNT(*) FROM UserMark", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(before_count, after_count, "no new UserMark must be synthesized");
+    assert_eq!(
+        before_count, after_count,
+        "no new UserMark must be synthesized"
+    );
 
     let color_index: i64 = tx
-        .query_row("SELECT ColorIndex FROM UserMark WHERE UserMarkId = 500", [], |r| {
-            r.get(0)
-        })
+        .query_row(
+            "SELECT ColorIndex FROM UserMark WHERE UserMarkId = 500",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
     assert_eq!(color_index, 6);
 
@@ -194,7 +199,10 @@ fn saving_an_annotation_updates_only_that_texttag_sibling_untouched() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(value_b, "value b", "sibling TextTag at the same LocationId must be untouched");
+    assert_eq!(
+        value_b, "value b",
+        "sibling TextTag at the same LocationId must be untouched"
+    );
 
     tx.rollback().unwrap();
 }
@@ -276,9 +284,11 @@ fn apply_record_edit_same_now_produces_identical_last_modified_across_two_calls(
     };
     apply_record_edit(&tx1, &payload, NOW, SEED).unwrap();
     let last_modified_1: String = tx1
-        .query_row("SELECT LastModified FROM Note WHERE NoteId = 501", [], |r| {
-            r.get(0)
-        })
+        .query_row(
+            "SELECT LastModified FROM Note WHERE NoteId = 501",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
     tx1.rollback().unwrap();
 
@@ -286,13 +296,18 @@ fn apply_record_edit_same_now_produces_identical_last_modified_across_two_calls(
     let tx2 = conn2.unchecked_transaction().expect("open tx2");
     apply_record_edit(&tx2, &payload, NOW, SEED).unwrap();
     let last_modified_2: String = tx2
-        .query_row("SELECT LastModified FROM Note WHERE NoteId = 501", [], |r| {
-            r.get(0)
-        })
+        .query_row(
+            "SELECT LastModified FROM Note WHERE NoteId = 501",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
     tx2.rollback().unwrap();
 
-    assert_eq!(last_modified_1, last_modified_2, "same injected `now` must produce identical LastModified");
+    assert_eq!(
+        last_modified_1, last_modified_2,
+        "same injected `now` must produce identical LastModified"
+    );
     assert_eq!(last_modified_1, NOW);
 }
 

@@ -293,7 +293,9 @@ mod tests {
         );
 
         // An unknown language name returns empty, not an error.
-        assert!(catalog.load_favorite_editions("Not A Real Language").is_empty());
+        assert!(catalog
+            .load_favorite_editions("Not A Real Language")
+            .is_empty());
 
         // The language list is the FULL bundled catalog (~1400 entries),
         // deliberately broader than the ~9 languages with favorite-eligible

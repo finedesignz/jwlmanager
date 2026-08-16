@@ -51,8 +51,7 @@ fn map_sqlite_err(err: rusqlite::Error, context: &str) -> ArchiveError {
 /// name is `added`) and `TagMap` (mark/unmark rows). Follows the per-op-
 /// table-set precedent (`db::favorites::FAVORITE_SNAPSHOT_TABLES`) rather
 /// than the broader default.
-pub(crate) const TAG_SNAPSHOT_TABLES: &[(&str, &str)] =
-    &[("Tag", "TagId"), ("TagMap", "TagMapId")];
+pub(crate) const TAG_SNAPSHOT_TABLES: &[(&str, &str)] = &[("Tag", "TagId"), ("TagMap", "TagMapId")];
 
 /// One `Tag WHERE Type = 1` row's tri-state count for a given note
 /// selection — `count == 0` (unchecked), `count == selection.len()`
@@ -251,8 +250,7 @@ pub fn apply_tag_edit(
     if !removed_tag_ids.is_empty() {
         let note_ph = placeholders(ids.len());
         let tag_ph = placeholders(removed_tag_ids.len());
-        let sql =
-            format!("DELETE FROM TagMap WHERE NoteId IN ({note_ph}) AND TagId IN ({tag_ph})");
+        let sql = format!("DELETE FROM TagMap WHERE NoteId IN ({note_ph}) AND TagId IN ({tag_ph})");
         let params: Vec<i64> = ids
             .iter()
             .copied()

@@ -50,11 +50,7 @@ fn map_sqlite_err(err: rusqlite::Error, context: &str) -> ArchiveError {
 ///
 /// No SQL, no `rusqlite` type anywhere in this signature or body — testable
 /// with zero database setup.
-pub(crate) fn plan_merge(
-    existing: &[(i64, i64, i64)],
-    ns: i64,
-    ne: i64,
-) -> (Vec<i64>, (i64, i64)) {
+pub(crate) fn plan_merge(existing: &[(i64, i64, i64)], ns: i64, ne: i64) -> (Vec<i64>, (i64, i64)) {
     let mut ns = ns;
     let mut ne = ne;
     let mut absorbed: Vec<i64> = Vec::new();
@@ -107,7 +103,7 @@ pub(crate) fn plan_merge(
 /// implementation the prohibitions in `07-02-PLAN.md`/`08-03-PLAN.md`
 /// require it to be.
 #[allow(clippy::too_many_arguments)] // each param is a distinct typed value; a struct would add
-                                      // ceremony for a single-call-site internal primitive
+                                     // ceremony for a single-call-site internal primitive
 pub fn merge_block_ranges(
     tx: &Transaction,
     identifier: i64,

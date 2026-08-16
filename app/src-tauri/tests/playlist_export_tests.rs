@@ -125,7 +125,11 @@ fn export_produces_compact_manifest_with_correct_hash() {
     .expect("export should succeed");
 
     assert_eq!(report.item_count, 1);
-    assert!(report.warnings.is_empty(), "warnings: {:?}", report.warnings);
+    assert!(
+        report.warnings.is_empty(),
+        "warnings: {:?}",
+        report.warnings
+    );
 
     let file = fs::File::open(&dest).expect("open produced zip");
     let mut zip = zip::ZipArchive::new(file).expect("valid zip");
@@ -137,9 +141,18 @@ fn export_produces_compact_manifest_with_correct_hash() {
         buf
     };
     let manifest_str = String::from_utf8(manifest_bytes.clone()).unwrap();
-    assert!(!manifest_str.contains(", "), "manifest must not contain ', '");
-    assert!(!manifest_str.contains(": "), "manifest must not contain ': '");
-    assert!(!manifest_str.contains('\n'), "manifest must not contain a newline");
+    assert!(
+        !manifest_str.contains(", "),
+        "manifest must not contain ', '"
+    );
+    assert!(
+        !manifest_str.contains(": "),
+        "manifest must not contain ': '"
+    );
+    assert!(
+        !manifest_str.contains('\n'),
+        "manifest must not contain a newline"
+    );
 
     let db_bytes = {
         let mut entry = zip.by_name("userData.db").expect("userData.db present");
@@ -149,7 +162,10 @@ fn export_produces_compact_manifest_with_correct_hash() {
     };
     let recomputed_hash = {
         let digest = Sha256::digest(&db_bytes);
-        digest.iter().map(|b| format!("{b:02x}")).collect::<String>()
+        digest
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
     };
     let manifest_json: serde_json::Value = serde_json::from_slice(&manifest_bytes).unwrap();
     assert_eq!(

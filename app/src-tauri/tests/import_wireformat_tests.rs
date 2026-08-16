@@ -46,7 +46,10 @@ fn all_duplicates_file_yields_empty_added_and_nonzero_skipped() {
     let mut conn = Connection::open(&db_path).expect("open db");
     let report = dry_run_import_favorites(&mut conn, &records).expect("dry run");
 
-    assert!(report.added.is_empty(), "an all-duplicate file must add nothing");
+    assert!(
+        report.added.is_empty(),
+        "an all-duplicate file must add nothing"
+    );
     assert_eq!(report.skipped.get("TagMap"), Some(&1));
 }
 
@@ -66,8 +69,16 @@ fn dry_run_leaves_every_affected_table_row_count_unchanged() {
     assert_eq!(report.added.get("TagMap"), Some(&1));
     assert_eq!(report.skipped.get("TagMap"), Some(&1));
 
-    assert_eq!(count(&conn, "TagMap"), before_tagmap, "dry run must not commit");
-    assert_eq!(count(&conn, "Location"), before_location, "dry run must not commit");
+    assert_eq!(
+        count(&conn, "TagMap"),
+        before_tagmap,
+        "dry run must not commit"
+    );
+    assert_eq!(
+        count(&conn, "Location"),
+        before_location,
+        "dry run must not commit"
+    );
 }
 
 #[test]
@@ -106,7 +117,8 @@ fn new_location_ids_consume_the_seeded_gap_before_autoincrement() {
     // the new record's find-or-insert predicate below.
     {
         let conn = Connection::open(&db_path).expect("open db");
-        conn.execute_batch("PRAGMA foreign_keys = OFF").expect("fk off");
+        conn.execute_batch("PRAGMA foreign_keys = OFF")
+            .expect("fk off");
         for id in [1_i64, 2, 4] {
             conn.execute(
                 "INSERT INTO Location (LocationId, DocumentId, Track, IssueTagNumber, KeySymbol, MepsLanguage, Type) \
@@ -135,7 +147,10 @@ fn new_location_ids_consume_the_seeded_gap_before_autoincrement() {
             |r| r.get(0),
         )
         .expect("read new location id");
-    assert_eq!(new_location_id, 3, "the new Location must consume the seeded gap id 3, not autoincrement");
+    assert_eq!(
+        new_location_id, 3,
+        "the new Location must consume the seeded gap id 3, not autoincrement"
+    );
 }
 
 #[test]
@@ -172,7 +187,8 @@ fn bookmark_reimport_updates_existing_slot_and_reports_overwritten() {
     let (_dir, db_path) = fresh_v16_db();
     {
         let conn = Connection::open(&db_path).expect("open db");
-        conn.execute_batch("PRAGMA foreign_keys = OFF").expect("fk off");
+        conn.execute_batch("PRAGMA foreign_keys = OFF")
+            .expect("fk off");
         conn.execute(
             "INSERT INTO Location (KeySymbol, MepsLanguage, Type) VALUES ('nwt', 0, 1)",
             [],
@@ -209,7 +225,8 @@ fn scripture_import_reuses_existing_location_not_a_duplicate() {
     let (_dir, db_path) = fresh_v16_db();
     let existing_id = {
         let conn = Connection::open(&db_path).expect("open db");
-        conn.execute_batch("PRAGMA foreign_keys = OFF").expect("fk off");
+        conn.execute_batch("PRAGMA foreign_keys = OFF")
+            .expect("fk off");
         conn.execute(
             "INSERT INTO Location (BookNumber, ChapterNumber, DocumentId, Track, IssueTagNumber, KeySymbol, MepsLanguage, Type) \
              VALUES (1, 1, NULL, NULL, 0, 'nwt', 0, 0)",
@@ -237,7 +254,10 @@ fn scripture_import_reuses_existing_location_not_a_duplicate() {
             |r| r.get(0),
         )
         .expect("count matching locations");
-    assert_eq!(location_count, 1, "must reuse the existing scripture Location, not duplicate");
+    assert_eq!(
+        location_count, 1,
+        "must reuse the existing scripture Location, not duplicate"
+    );
 
     let bookmark_location: i64 = conn
         .query_row("SELECT LocationId FROM Bookmark", [], |r| r.get(0))
@@ -263,7 +283,10 @@ fn bookmark_title_broken_bar_is_not_reversed_on_import() {
     let title: String = conn
         .query_row("SELECT Title FROM Bookmark", [], |r| r.get(0))
         .expect("read title");
-    assert_eq!(title, "Genesis \u{A6} Note", "the \u{A6} must not be reversed back to |");
+    assert_eq!(
+        title, "Genesis \u{A6} Note",
+        "the \u{A6} must not be reversed back to |"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -290,7 +313,11 @@ fn two_record_annotations_file_imports_as_two_inputfield_rows() {
     assert_eq!(count(&conn, "InputField"), 2);
 
     let second_value: String = conn
-        .query_row("SELECT Value FROM InputField WHERE TextTag = 'tag2'", [], |r| r.get(0))
+        .query_row(
+            "SELECT Value FROM InputField WHERE TextTag = 'tag2'",
+            [],
+            |r| r.get(0),
+        )
         .expect("read tag2 value");
     assert_eq!(second_value, "Second\nline value");
 }
@@ -300,7 +327,8 @@ fn annotations_reimport_updates_in_place_and_reports_overwritten() {
     let (_dir, db_path) = fresh_v16_db();
     {
         let conn = Connection::open(&db_path).expect("open db");
-        conn.execute_batch("PRAGMA foreign_keys = OFF").expect("fk off");
+        conn.execute_batch("PRAGMA foreign_keys = OFF")
+            .expect("fk off");
         conn.execute(
             "INSERT INTO Location (DocumentId, IssueTagNumber, KeySymbol, MepsLanguage, Type) \
              VALUES (1001, 0, 'w', NULL, 0)",
@@ -315,7 +343,8 @@ fn annotations_reimport_updates_in_place_and_reports_overwritten() {
         .expect("insert inputfield");
     }
 
-    let text = "{ANNOTATIONS}\n \nheader\n==={PUB=w}{DOC=1001}{LABEL=tag1}===\nNew Value\n==={END}===";
+    let text =
+        "{ANNOTATIONS}\n \nheader\n==={PUB=w}{DOC=1001}{LABEL=tag1}===\nNew Value\n==={END}===";
     let records = parse_annotations_file(text).expect("parse");
     assert_eq!(records.len(), 1);
 
@@ -323,7 +352,11 @@ fn annotations_reimport_updates_in_place_and_reports_overwritten() {
     let before = count(&conn, "InputField");
     let report = dry_run_import_annotations(&mut conn, &records).expect("dry run");
     assert_eq!(report.overwritten.get("InputField"), Some(&1));
-    assert_eq!(count(&conn, "InputField"), before, "dry run must not commit");
+    assert_eq!(
+        count(&conn, "InputField"),
+        before,
+        "dry run must not commit"
+    );
 }
 
 #[test]
@@ -348,7 +381,10 @@ fn annotation_without_issue_bracket_creates_location_with_zero_not_null() {
             |r| r.get(0),
         )
         .expect("read issue tag number");
-    assert_eq!(issue, 0, "a missing {{ISSUE}} bracket must fill IssueTagNumber to 0, never NULL");
+    assert_eq!(
+        issue, 0,
+        "a missing {{ISSUE}} bracket must fill IssueTagNumber to 0, never NULL"
+    );
 }
 
 /// Pre-existing Phase 8 defect (found during Phase 9): `{DOC=None}` with no
@@ -389,8 +425,16 @@ fn annotation_without_doc_and_no_existing_location_rejected_with_typed_error() {
     // `con.execute('ROLLBACK;')` on the same failure (`JWLManager.py:1933`).
     tx.rollback().expect("rollback");
 
-    assert_eq!(count(&conn, "Location"), before_location, "rejected import must not create a Location row");
-    assert_eq!(count(&conn, "InputField"), before_inputfield, "rejected import must not create an InputField row");
+    assert_eq!(
+        count(&conn, "Location"),
+        before_location,
+        "rejected import must not create a Location row"
+    );
+    assert_eq!(
+        count(&conn, "InputField"),
+        before_inputfield,
+        "rejected import must not create an InputField row"
+    );
 }
 
 /// Round-trip stability for a DOC-less annotation that already exists in the
@@ -409,7 +453,8 @@ fn doc_less_annotation_export_is_unchanged_by_a_rejected_reimport() {
     let (_dir, db_path) = fresh_v16_db();
     {
         let conn = Connection::open(&db_path).expect("open db");
-        conn.execute_batch("PRAGMA foreign_keys = OFF").expect("fk off");
+        conn.execute_batch("PRAGMA foreign_keys = OFF")
+            .expect("fk off");
         conn.execute(
             "INSERT INTO Location (LocationId, BookNumber, ChapterNumber, KeySymbol, MepsLanguage, Type) \
              VALUES (930, 1, 1, 'nwt', NULL, 0)",
@@ -425,9 +470,13 @@ fn doc_less_annotation_export_is_unchanged_by_a_rejected_reimport() {
 
     let conn = Connection::open(&db_path).expect("reopen");
     let export_path_1 = _dir.path().join("first.txt");
-    export_annotations(&conn, None, &pinned_annotations_header(), &export_path_1).expect("first export");
+    export_annotations(&conn, None, &pinned_annotations_header(), &export_path_1)
+        .expect("first export");
     let first_text = std::fs::read_to_string(&export_path_1).expect("read first export");
-    assert!(first_text.contains("{DOC=None}"), "scripture-shaped Location must export DOC=None:\n{first_text}");
+    assert!(
+        first_text.contains("{DOC=None}"),
+        "scripture-shaped Location must export DOC=None:\n{first_text}"
+    );
 
     let records = parse_annotations_file(&first_text).expect("parse re-exported text");
     assert_eq!(records[0].doc, None);
@@ -436,15 +485,22 @@ fn doc_less_annotation_export_is_unchanged_by_a_rejected_reimport() {
     let tx = conn.transaction().expect("begin tx");
     let mut available = compute_available_ids(&tx).expect("compute ids");
     let result = apply_import_annotations(&tx, &records, &mut available);
-    assert!(matches!(result, Err(ArchiveError::ImportFailed { .. })), "re-import of a DOC-less record must be rejected: {result:?}");
+    assert!(
+        matches!(result, Err(ArchiveError::ImportFailed { .. })),
+        "re-import of a DOC-less record must be rejected: {result:?}"
+    );
     tx.rollback().expect("rollback");
 
     let conn = Connection::open(&db_path).expect("reopen after rejected import");
     let export_path_2 = _dir.path().join("second.txt");
-    export_annotations(&conn, None, &pinned_annotations_header(), &export_path_2).expect("second export");
+    export_annotations(&conn, None, &pinned_annotations_header(), &export_path_2)
+        .expect("second export");
     let second_text = std::fs::read_to_string(&export_path_2).expect("read second export");
 
-    assert_eq!(first_text, second_text, "export must be byte-identical before/after a rejected re-import");
+    assert_eq!(
+        first_text, second_text,
+        "export must be byte-identical before/after a rejected re-import"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -510,7 +566,8 @@ fn scripture_highlight_reuses_existing_location_not_a_duplicate() {
     let (_dir, db_path) = fresh_v16_db();
     let existing_id = {
         let conn = Connection::open(&db_path).expect("open db");
-        conn.execute_batch("PRAGMA foreign_keys = OFF").expect("fk off");
+        conn.execute_batch("PRAGMA foreign_keys = OFF")
+            .expect("fk off");
         conn.execute(
             "INSERT INTO Location (BookNumber, ChapterNumber, DocumentId, Track, IssueTagNumber, KeySymbol, MepsLanguage, Type) \
              VALUES (1, 1, NULL, NULL, 0, 'nwt', 0, 0)",
@@ -531,7 +588,11 @@ fn scripture_highlight_reuses_existing_location_not_a_duplicate() {
         tx.commit().expect("commit");
     }
 
-    assert_eq!(count(&conn, "Location"), 1, "must reuse the existing scripture Location");
+    assert_eq!(
+        count(&conn, "Location"),
+        1,
+        "must reuse the existing scripture Location"
+    );
     let user_mark_location: i64 = conn
         .query_row("SELECT LocationId FROM UserMark", [], |r| r.get(0))
         .expect("read usermark location");
@@ -555,8 +616,16 @@ fn reimporting_the_same_highlight_creates_a_second_usermark_but_one_blockrange()
         tx.commit().expect("commit");
     }
 
-    assert_eq!(count(&conn, "UserMark"), 2, "each import synthesizes a fresh UserMark");
-    assert_eq!(count(&conn, "BlockRange"), 1, "the identical range absorbs into itself, not two rows");
+    assert_eq!(
+        count(&conn, "UserMark"),
+        2,
+        "each import synthesizes a fresh UserMark"
+    );
+    assert_eq!(
+        count(&conn, "BlockRange"),
+        1,
+        "the identical range absorbs into itself, not two rows"
+    );
 }
 
 #[test]
@@ -575,9 +644,21 @@ fn highlights_dry_run_leaves_every_affected_table_row_count_unchanged() {
     assert_eq!(report.added.get("UserMark"), Some(&1));
     assert_eq!(report.added.get("BlockRange"), Some(&1));
 
-    assert_eq!(count(&conn, "Location"), before_location, "dry run must not commit");
-    assert_eq!(count(&conn, "UserMark"), before_usermark, "dry run must not commit");
-    assert_eq!(count(&conn, "BlockRange"), before_blockrange, "dry run must not commit");
+    assert_eq!(
+        count(&conn, "Location"),
+        before_location,
+        "dry run must not commit"
+    );
+    assert_eq!(
+        count(&conn, "UserMark"),
+        before_usermark,
+        "dry run must not commit"
+    );
+    assert_eq!(
+        count(&conn, "BlockRange"),
+        before_blockrange,
+        "dry run must not commit"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -602,14 +683,23 @@ fn independent_note_inserts_with_untitled_or_titled_match() {
     {
         let tx = conn.transaction().expect("begin tx");
         let mut available = compute_available_ids(&tx).expect("compute ids");
-        apply_import_notes(&tx, None, &records, &mut available, 1, "2099-01-01T00:00:00Z")
-            .expect("apply");
+        apply_import_notes(
+            &tx,
+            None,
+            &records,
+            &mut available,
+            1,
+            "2099-01-01T00:00:00Z",
+        )
+        .expect("apply");
         tx.commit().expect("commit");
     }
 
     assert_eq!(count(&conn, "Note"), 1);
     let (title, content): (String, String) = conn
-        .query_row("SELECT Title, Content FROM Note", [], |r| Ok((r.get(0)?, r.get(1)?)))
+        .query_row("SELECT Title, Content FROM Note", [], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
         .expect("read note");
     assert_eq!(title, "My Title");
     assert_eq!(content, "My note body");
@@ -625,8 +715,15 @@ fn reimporting_titled_note_updates_rather_than_inserts() {
     {
         let tx = conn.transaction().expect("begin tx");
         let mut available = compute_available_ids(&tx).expect("compute ids");
-        apply_import_notes(&tx, None, &records, &mut available, 1, "2099-01-01T00:00:00Z")
-            .expect("apply");
+        apply_import_notes(
+            &tx,
+            None,
+            &records,
+            &mut available,
+            1,
+            "2099-01-01T00:00:00Z",
+        )
+        .expect("apply");
         tx.commit().expect("commit");
     }
 
@@ -635,12 +732,23 @@ fn reimporting_titled_note_updates_rather_than_inserts() {
     {
         let tx = conn.transaction().expect("begin tx");
         let mut available = compute_available_ids(&tx).expect("compute ids");
-        apply_import_notes(&tx, None, &records2, &mut available, 2, "2099-01-01T00:00:00Z")
-            .expect("apply");
+        apply_import_notes(
+            &tx,
+            None,
+            &records2,
+            &mut available,
+            2,
+            "2099-01-01T00:00:00Z",
+        )
+        .expect("apply");
         tx.commit().expect("commit");
     }
 
-    assert_eq!(count(&conn, "Note"), 1, "a titled re-import must UPDATE, not insert a second Note");
+    assert_eq!(
+        count(&conn, "Note"),
+        1,
+        "a titled re-import must UPDATE, not insert a second Note"
+    );
     let content: String = conn
         .query_row("SELECT Content FROM Note", [], |r| r.get(0))
         .expect("read note");
@@ -657,8 +765,15 @@ fn multiline_note_round_trips_internal_newlines() {
     let mut conn = Connection::open(&db_path).expect("open db");
     let tx = conn.transaction().expect("begin tx");
     let mut available = compute_available_ids(&tx).expect("compute ids");
-    apply_import_notes(&tx, None, &records, &mut available, 1, "2099-01-01T00:00:00Z")
-        .expect("apply");
+    apply_import_notes(
+        &tx,
+        None,
+        &records,
+        &mut available,
+        1,
+        "2099-01-01T00:00:00Z",
+    )
+    .expect("apply");
     tx.commit().expect("commit");
     drop(conn);
 
@@ -672,15 +787,23 @@ fn multiline_note_round_trips_internal_newlines() {
 #[test]
 fn missing_created_falls_back_to_now_truncated_to_twenty_chars() {
     let (_dir, db_path) = fresh_v16_db();
-    let text = "{NOTES=}\nheader\n==={MODIFIED=2024-01-01T00:00:00}{TAGS=}===\nTitle\nBody\n==={END}===";
+    let text =
+        "{NOTES=}\nheader\n==={MODIFIED=2024-01-01T00:00:00}{TAGS=}===\nTitle\nBody\n==={END}===";
     let (_bucket, records) = parse_notes_file(text).expect("parse");
     assert_eq!(records[0].created, None);
 
     let mut conn = Connection::open(&db_path).expect("open db");
     let tx = conn.transaction().expect("begin tx");
     let mut available = compute_available_ids(&tx).expect("compute ids");
-    apply_import_notes(&tx, None, &records, &mut available, 1, "2099-06-15T12:00:00Z")
-        .expect("apply");
+    apply_import_notes(
+        &tx,
+        None,
+        &records,
+        &mut available,
+        1,
+        "2099-06-15T12:00:00Z",
+    )
+    .expect("apply");
     tx.commit().expect("commit");
     drop(conn);
 
@@ -688,7 +811,11 @@ fn missing_created_falls_back_to_now_truncated_to_twenty_chars() {
     let created: String = conn
         .query_row("SELECT Created FROM Note", [], |r| r.get(0))
         .expect("read created");
-    assert_eq!(created.len(), 20, "expected a 20-character timestamp, got: {created}");
+    assert_eq!(
+        created.len(),
+        20,
+        "expected a 20-character timestamp, got: {created}"
+    );
     assert!(created.ends_with('Z'));
 }
 
@@ -702,8 +829,15 @@ fn bible_note_color_zero_with_range_creates_no_usermark_or_blockrange() {
     let mut conn = Connection::open(&db_path).expect("open db");
     let tx = conn.transaction().expect("begin tx");
     let mut available = compute_available_ids(&tx).expect("compute ids");
-    apply_import_notes(&tx, None, &records, &mut available, 1, "2099-01-01T00:00:00Z")
-        .expect("apply");
+    apply_import_notes(
+        &tx,
+        None,
+        &records,
+        &mut available,
+        1,
+        "2099-01-01T00:00:00Z",
+    )
+    .expect("apply");
     tx.commit().expect("commit");
     drop(conn);
 
@@ -722,14 +856,25 @@ fn bible_note_with_range_creates_usermark_and_merged_blockrange() {
     let mut conn = Connection::open(&db_path).expect("open db");
     let tx = conn.transaction().expect("begin tx");
     let mut available = compute_available_ids(&tx).expect("compute ids");
-    apply_import_notes(&tx, None, &records, &mut available, 1, "2099-01-01T00:00:00Z")
-        .expect("apply");
+    apply_import_notes(
+        &tx,
+        None,
+        &records,
+        &mut available,
+        1,
+        "2099-01-01T00:00:00Z",
+    )
+    .expect("apply");
     tx.commit().expect("commit");
     drop(conn);
 
     let conn = Connection::open(&db_path).expect("reopen");
     assert_eq!(count(&conn, "UserMark"), 1);
-    assert_eq!(count(&conn, "BlockRange"), 1, "sequential sub-ranges merge into one BlockRange");
+    assert_eq!(
+        count(&conn, "BlockRange"),
+        1,
+        "sequential sub-ranges merge into one BlockRange"
+    );
     let (start, end): (i64, i64) = conn
         .query_row("SELECT StartToken, EndToken FROM BlockRange", [], |r| {
             Ok((r.get(0)?, r.get(1)?))
@@ -760,14 +905,25 @@ fn notes_bucket_delete_none_leaves_bucket_notes_untouched() {
     let mut available = compute_available_ids(&tx).expect("compute ids");
     // Caller passes `None` regardless of the file's own bucket — the opt-in
     // decision belongs to the frontend, never inferred from the file.
-    let deleted = apply_import_notes(&tx, None, &records, &mut available, 1, "2099-01-01T00:00:00Z")
-        .expect("apply");
+    let deleted = apply_import_notes(
+        &tx,
+        None,
+        &records,
+        &mut available,
+        1,
+        "2099-01-01T00:00:00Z",
+    )
+    .expect("apply");
     tx.commit().expect("commit");
     drop(conn);
 
     assert_eq!(deleted, 0);
     let conn = Connection::open(&db_path).expect("reopen");
-    assert_eq!(count(&conn, "Note"), 2, "bucket delete must not run without explicit opt-in");
+    assert_eq!(
+        count(&conn, "Note"),
+        2,
+        "bucket delete must not run without explicit opt-in"
+    );
 }
 
 #[test]
@@ -800,8 +956,12 @@ fn notes_dry_run_with_bucket_reports_deleted() {
     let (_bucket, records) = parse_notes_file(text).expect("parse");
 
     let mut conn = Connection::open(&db_path).expect("open db");
-    let report =
-        dry_run_import_notes(&mut conn, Some('a'), &records, 1, "2099-01-01T00:00:00Z").expect("dry run");
+    let report = dry_run_import_notes(&mut conn, Some('a'), &records, 1, "2099-01-01T00:00:00Z")
+        .expect("dry run");
     assert_eq!(report.deleted.get("Note"), Some(&1));
-    assert_eq!(count(&conn, "Note"), 2, "dry run must not commit the delete");
+    assert_eq!(
+        count(&conn, "Note"),
+        2,
+        "dry run must not commit the delete"
+    );
 }

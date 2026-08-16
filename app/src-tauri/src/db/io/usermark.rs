@@ -74,8 +74,8 @@ pub fn synthesize_usermark(
 /// autoincrement (`None`) exactly like every other insert in this module.
 /// Returns the new/merged `BlockRangeId`.
 #[allow(clippy::too_many_arguments)] // each param is a distinct typed value threaded straight
-                                      // through to `merge_block_ranges`; a struct would add
-                                      // ceremony for a single-call-site internal primitive
+                                     // through to `merge_block_ranges`; a struct would add
+                                     // ceremony for a single-call-site internal primitive
 pub fn merge_range_into(
     tx: &Transaction,
     identifier: i64,

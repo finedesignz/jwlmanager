@@ -50,7 +50,8 @@ fn catalog() -> ResourceCatalog {
 /// `NoteId`.
 fn seed_one_note(db_path: &std::path::Path, title: &str, content: &str) -> i64 {
     let conn = Connection::open(db_path).expect("open fixture db");
-    conn.execute_batch("PRAGMA foreign_keys = OFF").expect("fk off");
+    conn.execute_batch("PRAGMA foreign_keys = OFF")
+        .expect("fk off");
     conn.execute(
         "INSERT INTO Note (Guid, UserMarkId, LocationId, Title, Content, BlockType, \
          BlockIdentifier, LastModified, Created) \
@@ -64,8 +65,15 @@ fn seed_one_note(db_path: &std::path::Path, title: &str, content: &str) -> i64 {
 
 fn export_baseline(db_path: &std::path::Path, out_path: &std::path::Path) -> String {
     let conn = Connection::open(db_path).expect("open db");
-    export_notes(&conn, None, &catalog(), &pinned_header(), "2099-01-01T00:00:00Z", out_path)
-        .expect("baseline export");
+    export_notes(
+        &conn,
+        None,
+        &catalog(),
+        &pinned_header(),
+        "2099-01-01T00:00:00Z",
+        out_path,
+    )
+    .expect("baseline export");
     std::fs::read_to_string(out_path).expect("read baseline export")
 }
 
@@ -90,8 +98,15 @@ fn incremental_no_prior_file_exports_all() {
     let full_path = out_dir.path().join("full.txt");
     let incremental_path = out_dir.path().join("incremental.txt");
 
-    export_notes(&conn, None, &catalog(), &pinned_header(), "2099-01-01T00:00:00Z", &full_path)
-        .expect("full export");
+    export_notes(
+        &conn,
+        None,
+        &catalog(),
+        &pinned_header(),
+        "2099-01-01T00:00:00Z",
+        &full_path,
+    )
+    .expect("full export");
 
     let summary = export_notes_incremental(
         &conn,
@@ -127,11 +142,8 @@ fn timestamp_only_change_excluded() {
     // Bump ONLY LastModified — never Content/Title/Tags/Color/Range.
     {
         let conn = Connection::open(&db_path).expect("open db");
-        conn.execute(
-            "UPDATE Note SET LastModified = '2024-06-01T00:00:00'",
-            [],
-        )
-        .expect("bump LastModified");
+        conn.execute("UPDATE Note SET LastModified = '2024-06-01T00:00:00'", [])
+            .expect("bump LastModified");
     }
 
     let conn = Connection::open(&db_path).expect("open db");
@@ -146,8 +158,14 @@ fn timestamp_only_change_excluded() {
     )
     .expect("incremental export");
 
-    assert_eq!(summary.added, 0, "IO-04 criterion 2: a timestamp-only change is not an add");
-    assert_eq!(summary.modified, 0, "IO-04 criterion 2: a timestamp-only change is not a modify");
+    assert_eq!(
+        summary.added, 0,
+        "IO-04 criterion 2: a timestamp-only change is not an add"
+    );
+    assert_eq!(
+        summary.modified, 0,
+        "IO-04 criterion 2: a timestamp-only change is not a modify"
+    );
     assert_eq!(summary.exported, 0);
 
     let text = std::fs::read_to_string(&incremental_path).expect("read incremental export");
@@ -247,8 +265,11 @@ fn deleted_candidate_not_exported() {
 
     {
         let conn = Connection::open(&db_path).expect("open db");
-        conn.execute("DELETE FROM Note WHERE NoteId = ?1", rusqlite::params![first_id])
-            .expect("delete first note");
+        conn.execute(
+            "DELETE FROM Note WHERE NoteId = ?1",
+            rusqlite::params![first_id],
+        )
+        .expect("delete first note");
     }
 
     let conn = Connection::open(&db_path).expect("open db");
@@ -358,8 +379,15 @@ fn incremental_export_converges() {
         let mut conn = Connection::open(&db_path).expect("reopen db");
         let tx = conn.transaction().expect("begin tx");
         let mut available = compute_available_ids(&tx).expect("compute available ids");
-        apply_import_notes(&tx, bucket, &records, &mut available, 1, "2099-01-01T00:00:00Z")
-            .expect("apply re-import");
+        apply_import_notes(
+            &tx,
+            bucket,
+            &records,
+            &mut available,
+            1,
+            "2099-01-01T00:00:00Z",
+        )
+        .expect("apply re-import");
         tx.commit().expect("commit re-import");
     }
 
@@ -377,8 +405,14 @@ fn incremental_export_converges() {
     )
     .expect("second incremental export");
 
-    assert_eq!(second_summary.added, 0, "second run must converge to zero added");
-    assert_eq!(second_summary.modified, 0, "second run must converge to zero modified");
+    assert_eq!(
+        second_summary.added, 0,
+        "second run must converge to zero added"
+    );
+    assert_eq!(
+        second_summary.modified, 0,
+        "second run must converge to zero modified"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -455,7 +489,8 @@ fn favorites_no_change_reports_zero_and_writes_valid_empty_output() {
     assert_eq!(summary.exported, 0);
 
     let text = std::fs::read_to_string(&incremental_path).expect("read incremental export");
-    let records = parse_favorites_file(&text).expect("output must itself be a valid Favorites file");
+    let records =
+        parse_favorites_file(&text).expect("output must itself be a valid Favorites file");
     assert!(records.is_empty(), "output file must contain zero records");
 }
 
@@ -510,7 +545,10 @@ fn favorites_removed_reports_deleted_candidate_never_modified() {
     .expect("incremental export");
 
     assert_eq!(summary.added, 0);
-    assert_eq!(summary.modified, 0, "IO-04: Favorites has no mutable wire field, modified is always 0");
+    assert_eq!(
+        summary.modified, 0,
+        "IO-04: Favorites has no mutable wire field, modified is always 0"
+    );
     assert_eq!(summary.exported, 0);
     assert_eq!(summary.deleted_candidates, 1);
 }
@@ -554,7 +592,10 @@ fn favorites_never_reports_modified() {
     )
     .expect("incremental export");
 
-    assert_eq!(summary.modified, 0, "Favorites must never report modified (no mutable wire field)");
+    assert_eq!(
+        summary.modified, 0,
+        "Favorites must never report modified (no mutable wire field)"
+    );
 }
 
 #[test]
@@ -567,7 +608,8 @@ fn favorites_no_prior_file_exports_all() {
     let full_path = out_dir.path().join("full.txt");
     let incremental_path = out_dir.path().join("incremental.txt");
 
-    export_favorites(&conn, None, &pinned_header_for("{FAVORITES}"), &full_path).expect("full export");
+    export_favorites(&conn, None, &pinned_header_for("{FAVORITES}"), &full_path)
+        .expect("full export");
     let summary = export_favorites_incremental(
         &conn,
         None,
@@ -658,7 +700,8 @@ fn bookmarks_no_change_reports_zero_and_writes_valid_empty_output() {
     assert_eq!(summary.exported, 0);
 
     let text = std::fs::read_to_string(&incremental_path).expect("read incremental export");
-    let records = parse_bookmarks_file(&text).expect("output must itself be a valid Bookmarks file");
+    let records =
+        parse_bookmarks_file(&text).expect("output must itself be a valid Bookmarks file");
     assert!(records.is_empty());
 }
 
@@ -706,7 +749,8 @@ fn bookmarks_no_prior_file_exports_all() {
     let full_path = out_dir.path().join("full.txt");
     let incremental_path = out_dir.path().join("incremental.txt");
 
-    export_bookmarks(&conn, None, &pinned_header_for("{BOOKMARKS}"), &full_path).expect("full export");
+    export_bookmarks(&conn, None, &pinned_header_for("{BOOKMARKS}"), &full_path)
+        .expect("full export");
     let summary = export_bookmarks_incremental(
         &conn,
         None,
@@ -802,7 +846,8 @@ fn highlights_no_change_reports_zero_and_writes_valid_empty_output() {
     assert_eq!(summary.exported, 0);
 
     let text = std::fs::read_to_string(&incremental_path).expect("read incremental export");
-    let records = parse_highlights_file(&text).expect("output must itself be a valid Highlights file");
+    let records =
+        parse_highlights_file(&text).expect("output must itself be a valid Highlights file");
     assert!(records.is_empty());
 }
 
@@ -847,7 +892,8 @@ fn highlights_no_prior_file_exports_all() {
     let full_path = out_dir.path().join("full.txt");
     let incremental_path = out_dir.path().join("incremental.txt");
 
-    export_highlights(&conn, None, &pinned_header_for("{HIGHLIGHTS}"), &full_path).expect("full export");
+    export_highlights(&conn, None, &pinned_header_for("{HIGHLIGHTS}"), &full_path)
+        .expect("full export");
     let summary = export_highlights_incremental(
         &conn,
         None,
@@ -906,16 +952,24 @@ fn highlights_incremental_converges() {
     let baseline_path = out_dir.path().join("baseline.txt");
     let baseline_prior_text = {
         let conn = Connection::open(&db_path).expect("open db");
-        export_highlights(&conn, None, &pinned_header_for("{HIGHLIGHTS}"), &baseline_path)
-            .expect("baseline export");
+        export_highlights(
+            &conn,
+            None,
+            &pinned_header_for("{HIGHLIGHTS}"),
+            &baseline_path,
+        )
+        .expect("baseline export");
         std::fs::read_to_string(&baseline_path).expect("read baseline export")
     };
 
     // Recolor — the one real diff in this test (modified=1).
     {
         let conn = Connection::open(&db_path).expect("open db");
-        conn.execute("UPDATE UserMark SET ColorIndex = 2 WHERE UserMarkId = 920", [])
-            .expect("recolor");
+        conn.execute(
+            "UPDATE UserMark SET ColorIndex = 2 WHERE UserMarkId = 920",
+            [],
+        )
+        .expect("recolor");
     }
 
     let first_output_path = out_dir.path().join("first_incremental.txt");
@@ -956,8 +1010,14 @@ fn highlights_incremental_converges() {
     )
     .expect("second incremental export");
 
-    assert_eq!(second_summary.added, 0, "second run must converge to zero added");
-    assert_eq!(second_summary.modified, 0, "second run must converge to zero modified");
+    assert_eq!(
+        second_summary.added, 0,
+        "second run must converge to zero added"
+    );
+    assert_eq!(
+        second_summary.modified, 0,
+        "second run must converge to zero modified"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1034,9 +1094,13 @@ fn annotations_no_change_reports_zero_and_writes_valid_empty_output() {
     assert_eq!(summary.exported, 0);
 
     let text = std::fs::read_to_string(&incremental_path).expect("read incremental export");
-    let records = parse_annotations_file(&text).expect("output must itself be a valid Annotations file");
+    let records =
+        parse_annotations_file(&text).expect("output must itself be a valid Annotations file");
     assert!(records.is_empty(), "output file must contain zero records");
-    assert!(text.ends_with("==={END}==="), "the end sentinel must still be written");
+    assert!(
+        text.ends_with("==={END}==="),
+        "the end sentinel must still be written"
+    );
 }
 
 #[test]
@@ -1110,8 +1174,11 @@ fn annotations_deleted_candidate_not_exported() {
 
     {
         let conn = Connection::open(&db_path).expect("open db");
-        conn.execute("DELETE FROM InputField WHERE LocationId = 930 AND TextTag = 'p1'", [])
-            .expect("delete annotation");
+        conn.execute(
+            "DELETE FROM InputField WHERE LocationId = 930 AND TextTag = 'p1'",
+            [],
+        )
+        .expect("delete annotation");
     }
 
     let conn = Connection::open(&db_path).expect("open db");
@@ -1141,7 +1208,8 @@ fn annotations_no_prior_file_exports_all() {
     let full_path = out_dir.path().join("full.txt");
     let incremental_path = out_dir.path().join("incremental.txt");
 
-    export_annotations(&conn, None, &pinned_header_for("{ANNOTATIONS}"), &full_path).expect("full export");
+    export_annotations(&conn, None, &pinned_header_for("{ANNOTATIONS}"), &full_path)
+        .expect("full export");
     let summary = export_annotations_incremental(
         &conn,
         None,
@@ -1199,8 +1267,13 @@ fn annotations_composite_identity() {
     let conn = Connection::open(&db_path).expect("open db");
     let out_dir = TempDir::new().expect("tempdir");
     let baseline_path = out_dir.path().join("baseline.txt");
-    export_annotations(&conn, None, &pinned_header_for("{ANNOTATIONS}"), &baseline_path)
-        .expect("baseline export");
+    export_annotations(
+        &conn,
+        None,
+        &pinned_header_for("{ANNOTATIONS}"),
+        &baseline_path,
+    )
+    .expect("baseline export");
     let baseline_text = std::fs::read_to_string(&baseline_path).expect("read baseline export");
     drop(conn);
 
@@ -1236,10 +1309,17 @@ fn annotations_composite_identity() {
     );
 
     let text = std::fs::read_to_string(&incremental_path).expect("read incremental export");
-    let records = parse_annotations_file(&text).expect("output must itself be a valid Annotations file");
+    let records =
+        parse_annotations_file(&text).expect("output must itself be a valid Annotations file");
     assert_eq!(records.len(), 2, "neither annotation is omitted");
-    assert!(text.contains("Changed value"), "the changed record is present");
-    assert!(text.contains("Sibling value"), "the unchanged sibling rides along, disclosed, never hidden");
+    assert!(
+        text.contains("Changed value"),
+        "the changed record is present"
+    );
+    assert!(
+        text.contains("Sibling value"),
+        "the unchanged sibling rides along, disclosed, never hidden"
+    );
 }
 
 /// Convergence (09-03-PLAN.md Task 2): export changed, re-import that output
@@ -1258,8 +1338,13 @@ fn annotations_incremental_converges() {
     let baseline_path = out_dir.path().join("baseline.txt");
     let baseline_prior_text = {
         let conn = Connection::open(&db_path).expect("open db");
-        export_annotations(&conn, None, &pinned_header_for("{ANNOTATIONS}"), &baseline_path)
-            .expect("baseline export");
+        export_annotations(
+            &conn,
+            None,
+            &pinned_header_for("{ANNOTATIONS}"),
+            &baseline_path,
+        )
+        .expect("baseline export");
         std::fs::read_to_string(&baseline_path).expect("read baseline export")
     };
 
@@ -1307,8 +1392,14 @@ fn annotations_incremental_converges() {
     )
     .expect("second incremental export");
 
-    assert_eq!(second_summary.added, 0, "second run must converge to zero added");
-    assert_eq!(second_summary.modified, 0, "second run must converge to zero modified");
+    assert_eq!(
+        second_summary.added, 0,
+        "second run must converge to zero added"
+    );
+    assert_eq!(
+        second_summary.modified, 0,
+        "second run must converge to zero modified"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1407,7 +1498,10 @@ fn notes_invariant_identity_collision_and_new_record_all_exported() {
     )
     .expect("incremental export");
 
-    assert_eq!(summary.added, 1, "the identity collision must not swallow the new note into 'modified'");
+    assert_eq!(
+        summary.added, 1,
+        "the identity collision must not swallow the new note into 'modified'"
+    );
     assert_eq!(summary.modified, 1);
 
     let text = std::fs::read_to_string(&incremental_path).expect("read incremental output");
@@ -1453,7 +1547,11 @@ fn favorites_invariant_untouched_excluded_added_included() {
     let text = std::fs::read_to_string(&incremental_path).expect("read incremental output");
     let exported = favorites_record_set(&text);
     let prior_records = favorites_record_set(&prior_text);
-    assert_eq!(exported.len(), 1, "exactly the newly added favorite is written");
+    assert_eq!(
+        exported.len(),
+        1,
+        "exactly the newly added favorite is written"
+    );
     assert!(
         exported.is_disjoint(&prior_records),
         "the untouched prior favorite must not appear in the exported set"
@@ -1530,8 +1628,14 @@ fn bookmarks_invariant_identity_collision_and_new_record_all_exported() {
     assert_eq!(summary.added, 0);
 
     let text = std::fs::read_to_string(&incremental_path).expect("read incremental output");
-    assert!(text.contains("Edited Title"), "the edited bookmark must be exported");
-    assert!(text.contains("Untouched Snippet"), "the new colliding bookmark must be exported");
+    assert!(
+        text.contains("Edited Title"),
+        "the edited bookmark must be exported"
+    );
+    assert!(
+        text.contains("Untouched Snippet"),
+        "the new colliding bookmark must be exported"
+    );
 }
 
 /// **The invariant test (Highlights).** Two highlights share an IDENTICAL
@@ -1629,8 +1733,13 @@ fn annotations_invariant_edit_add_and_untouched_sibling_all_correct() {
     let conn = Connection::open(&db_path).expect("open db");
     let out_dir = TempDir::new().expect("tempdir");
     let baseline_path = out_dir.path().join("baseline.txt");
-    export_annotations(&conn, None, &pinned_header_for("{ANNOTATIONS}"), &baseline_path)
-        .expect("baseline export");
+    export_annotations(
+        &conn,
+        None,
+        &pinned_header_for("{ANNOTATIONS}"),
+        &baseline_path,
+    )
+    .expect("baseline export");
     let baseline_text = std::fs::read_to_string(&baseline_path).expect("read baseline export");
     drop(conn);
 
@@ -1669,8 +1778,14 @@ fn annotations_invariant_edit_add_and_untouched_sibling_all_correct() {
 
     let text = std::fs::read_to_string(&incremental_path).expect("read incremental output");
     let exported = annotations_record_set(&text);
-    assert!(exported.contains("Edited value"), "the edited annotation must be exported");
-    assert!(exported.contains("Brand new value"), "the brand-new annotation must be exported");
+    assert!(
+        exported.contains("Edited value"),
+        "the edited annotation must be exported"
+    );
+    assert!(
+        exported.contains("Brand new value"),
+        "the brand-new annotation must be exported"
+    );
     assert!(
         exported.contains("Sibling value"),
         "p2 (the unchanged sibling at p1's LocationId) rides along — LocationId over-selection, disclosed not hidden"
@@ -1701,17 +1816,30 @@ fn notes_crlf_prior_diffs_identically_to_lf() {
     let crlf_path = out_dir.path().join("crlf.txt");
     let conn = Connection::open(&db_path).expect("open db");
     let lf_summary = export_notes_incremental(
-        &conn, Some(&prior_lf), &catalog(), &pinned_header(), "2099-01-01T00:00:00Z", &lf_path,
+        &conn,
+        Some(&prior_lf),
+        &catalog(),
+        &pinned_header(),
+        "2099-01-01T00:00:00Z",
+        &lf_path,
     )
     .expect("lf export");
     let crlf_summary = export_notes_incremental(
-        &conn, Some(&prior_crlf), &catalog(), &pinned_header(), "2099-01-01T00:00:00Z", &crlf_path,
+        &conn,
+        Some(&prior_crlf),
+        &catalog(),
+        &pinned_header(),
+        "2099-01-01T00:00:00Z",
+        &crlf_path,
     )
     .expect("crlf export");
 
     assert_eq!(lf_summary.added, crlf_summary.added);
     assert_eq!(lf_summary.modified, crlf_summary.modified);
-    assert_eq!(lf_summary.deleted_candidates, crlf_summary.deleted_candidates);
+    assert_eq!(
+        lf_summary.deleted_candidates,
+        crlf_summary.deleted_candidates
+    );
     assert_eq!(
         notes_record_set(&std::fs::read_to_string(&lf_path).unwrap()),
         notes_record_set(&std::fs::read_to_string(&crlf_path).unwrap()),
@@ -1730,15 +1858,27 @@ fn favorites_crlf_prior_diffs_identically_to_lf() {
     let lf_path = out_dir.path().join("lf.txt");
     let crlf_path = out_dir.path().join("crlf.txt");
     let conn = Connection::open(&db_path).expect("open db");
-    let lf_summary = export_favorites_incremental(&conn, Some(&prior_lf), &pinned_header_for("{FAVORITES}"), &lf_path)
-        .expect("lf export");
-    let crlf_summary =
-        export_favorites_incremental(&conn, Some(&prior_crlf), &pinned_header_for("{FAVORITES}"), &crlf_path)
-            .expect("crlf export");
+    let lf_summary = export_favorites_incremental(
+        &conn,
+        Some(&prior_lf),
+        &pinned_header_for("{FAVORITES}"),
+        &lf_path,
+    )
+    .expect("lf export");
+    let crlf_summary = export_favorites_incremental(
+        &conn,
+        Some(&prior_crlf),
+        &pinned_header_for("{FAVORITES}"),
+        &crlf_path,
+    )
+    .expect("crlf export");
 
     assert_eq!(lf_summary.added, crlf_summary.added);
     assert_eq!(lf_summary.modified, crlf_summary.modified);
-    assert_eq!(lf_summary.deleted_candidates, crlf_summary.deleted_candidates);
+    assert_eq!(
+        lf_summary.deleted_candidates,
+        crlf_summary.deleted_candidates
+    );
     assert_eq!(
         favorites_record_set(&std::fs::read_to_string(&lf_path).unwrap()),
         favorites_record_set(&std::fs::read_to_string(&crlf_path).unwrap()),
@@ -1764,15 +1904,27 @@ fn bookmarks_crlf_prior_diffs_identically_to_lf() {
     let lf_path = out_dir.path().join("lf.txt");
     let crlf_path = out_dir.path().join("crlf.txt");
     let conn = Connection::open(&db_path).expect("open db");
-    let lf_summary = export_bookmarks_incremental(&conn, Some(&prior_lf), &pinned_header_for("{BOOKMARKS}"), &lf_path)
-        .expect("lf export");
-    let crlf_summary =
-        export_bookmarks_incremental(&conn, Some(&prior_crlf), &pinned_header_for("{BOOKMARKS}"), &crlf_path)
-            .expect("crlf export");
+    let lf_summary = export_bookmarks_incremental(
+        &conn,
+        Some(&prior_lf),
+        &pinned_header_for("{BOOKMARKS}"),
+        &lf_path,
+    )
+    .expect("lf export");
+    let crlf_summary = export_bookmarks_incremental(
+        &conn,
+        Some(&prior_crlf),
+        &pinned_header_for("{BOOKMARKS}"),
+        &crlf_path,
+    )
+    .expect("crlf export");
 
     assert_eq!(lf_summary.added, crlf_summary.added);
     assert_eq!(lf_summary.modified, crlf_summary.modified);
-    assert_eq!(lf_summary.deleted_candidates, crlf_summary.deleted_candidates);
+    assert_eq!(
+        lf_summary.deleted_candidates,
+        crlf_summary.deleted_candidates
+    );
     assert_eq!(
         bookmarks_record_set(&std::fs::read_to_string(&lf_path).unwrap()),
         bookmarks_record_set(&std::fs::read_to_string(&crlf_path).unwrap()),
@@ -1798,16 +1950,27 @@ fn highlights_crlf_prior_diffs_identically_to_lf() {
     let lf_path = out_dir.path().join("lf.txt");
     let crlf_path = out_dir.path().join("crlf.txt");
     let conn = Connection::open(&db_path).expect("open db");
-    let lf_summary =
-        export_highlights_incremental(&conn, Some(&prior_lf), &pinned_header_for("{HIGHLIGHTS}"), &lf_path)
-            .expect("lf export");
-    let crlf_summary =
-        export_highlights_incremental(&conn, Some(&prior_crlf), &pinned_header_for("{HIGHLIGHTS}"), &crlf_path)
-            .expect("crlf export");
+    let lf_summary = export_highlights_incremental(
+        &conn,
+        Some(&prior_lf),
+        &pinned_header_for("{HIGHLIGHTS}"),
+        &lf_path,
+    )
+    .expect("lf export");
+    let crlf_summary = export_highlights_incremental(
+        &conn,
+        Some(&prior_crlf),
+        &pinned_header_for("{HIGHLIGHTS}"),
+        &crlf_path,
+    )
+    .expect("crlf export");
 
     assert_eq!(lf_summary.added, crlf_summary.added);
     assert_eq!(lf_summary.modified, crlf_summary.modified);
-    assert_eq!(lf_summary.deleted_candidates, crlf_summary.deleted_candidates);
+    assert_eq!(
+        lf_summary.deleted_candidates,
+        crlf_summary.deleted_candidates
+    );
     assert_eq!(
         highlights_record_set(&std::fs::read_to_string(&lf_path).unwrap()),
         highlights_record_set(&std::fs::read_to_string(&crlf_path).unwrap()),
@@ -1833,16 +1996,27 @@ fn annotations_crlf_prior_diffs_identically_to_lf() {
     let lf_path = out_dir.path().join("lf.txt");
     let crlf_path = out_dir.path().join("crlf.txt");
     let conn = Connection::open(&db_path).expect("open db");
-    let lf_summary =
-        export_annotations_incremental(&conn, Some(&prior_lf), &pinned_header_for("{ANNOTATIONS}"), &lf_path)
-            .expect("lf export");
-    let crlf_summary =
-        export_annotations_incremental(&conn, Some(&prior_crlf), &pinned_header_for("{ANNOTATIONS}"), &crlf_path)
-            .expect("crlf export");
+    let lf_summary = export_annotations_incremental(
+        &conn,
+        Some(&prior_lf),
+        &pinned_header_for("{ANNOTATIONS}"),
+        &lf_path,
+    )
+    .expect("lf export");
+    let crlf_summary = export_annotations_incremental(
+        &conn,
+        Some(&prior_crlf),
+        &pinned_header_for("{ANNOTATIONS}"),
+        &crlf_path,
+    )
+    .expect("crlf export");
 
     assert_eq!(lf_summary.added, crlf_summary.added);
     assert_eq!(lf_summary.modified, crlf_summary.modified);
-    assert_eq!(lf_summary.deleted_candidates, crlf_summary.deleted_candidates);
+    assert_eq!(
+        lf_summary.deleted_candidates,
+        crlf_summary.deleted_candidates
+    );
     assert_eq!(
         annotations_record_set(&std::fs::read_to_string(&lf_path).unwrap()),
         annotations_record_set(&std::fs::read_to_string(&crlf_path).unwrap()),
@@ -1876,7 +2050,10 @@ fn notes_wrong_category_prior_file_rejected() {
         Err(ArchiveError::ImportMalformed { .. }) => {}
         other => panic!("expected ImportMalformed, got {other:?}"),
     }
-    assert!(!incremental_path.exists(), "no output file when the prior file's category tag is wrong");
+    assert!(
+        !incremental_path.exists(),
+        "no output file when the prior file's category tag is wrong"
+    );
 }
 
 #[test]
@@ -1983,8 +2160,15 @@ fn notes_empty_prior_body_behaves_as_no_prior_file() {
     let empty_prior_path = empty_prior_dir.path().join("empty_prior.txt");
     {
         let conn = Connection::open(&db_path).expect("open db");
-        export_notes(&conn, None, &catalog(), &pinned_header(), "2099-01-01T00:00:00Z", &empty_prior_path)
-            .expect("export empty prior");
+        export_notes(
+            &conn,
+            None,
+            &catalog(),
+            &pinned_header(),
+            "2099-01-01T00:00:00Z",
+            &empty_prior_path,
+        )
+        .expect("export empty prior");
     }
     let empty_prior_text = std::fs::read_to_string(&empty_prior_path).expect("read empty prior");
 
@@ -1993,8 +2177,15 @@ fn notes_empty_prior_body_behaves_as_no_prior_file() {
     let out_dir = TempDir::new().expect("tempdir");
     let full_path = out_dir.path().join("full.txt");
     let incremental_path = out_dir.path().join("incremental.txt");
-    export_notes(&conn, None, &catalog(), &pinned_header(), "2099-01-01T00:00:00Z", &full_path)
-        .expect("full export");
+    export_notes(
+        &conn,
+        None,
+        &catalog(),
+        &pinned_header(),
+        "2099-01-01T00:00:00Z",
+        &full_path,
+    )
+    .expect("full export");
 
     let summary = export_notes_incremental(
         &conn,
@@ -2006,7 +2197,10 @@ fn notes_empty_prior_body_behaves_as_no_prior_file() {
     )
     .expect("incremental export against an empty-but-valid prior");
 
-    assert_eq!(summary.added, 1, "an empty prior body must export everything, exactly like no prior file");
+    assert_eq!(
+        summary.added, 1,
+        "an empty prior body must export everything, exactly like no prior file"
+    );
     assert_eq!(summary.deleted_candidates, 0);
     assert_eq!(
         common::read_file_bytes(&full_path),
@@ -2022,8 +2216,13 @@ fn favorites_empty_prior_body_behaves_as_no_prior_file() {
     let empty_prior_path = empty_prior_dir.path().join("empty_prior.txt");
     {
         let conn = Connection::open(&db_path).expect("open db");
-        export_favorites(&conn, None, &pinned_header_for("{FAVORITES}"), &empty_prior_path)
-            .expect("export empty prior");
+        export_favorites(
+            &conn,
+            None,
+            &pinned_header_for("{FAVORITES}"),
+            &empty_prior_path,
+        )
+        .expect("export empty prior");
     }
     let empty_prior_text = std::fs::read_to_string(&empty_prior_path).expect("read empty prior");
 
@@ -2050,8 +2249,13 @@ fn bookmarks_empty_prior_body_behaves_as_no_prior_file() {
     let empty_prior_path = empty_prior_dir.path().join("empty_prior.txt");
     {
         let conn = Connection::open(&db_path).expect("open db");
-        export_bookmarks(&conn, None, &pinned_header_for("{BOOKMARKS}"), &empty_prior_path)
-            .expect("export empty prior");
+        export_bookmarks(
+            &conn,
+            None,
+            &pinned_header_for("{BOOKMARKS}"),
+            &empty_prior_path,
+        )
+        .expect("export empty prior");
     }
     let empty_prior_text = std::fs::read_to_string(&empty_prior_path).expect("read empty prior");
 
@@ -2078,8 +2282,13 @@ fn highlights_empty_prior_body_behaves_as_no_prior_file() {
     let empty_prior_path = empty_prior_dir.path().join("empty_prior.txt");
     {
         let conn = Connection::open(&db_path).expect("open db");
-        export_highlights(&conn, None, &pinned_header_for("{HIGHLIGHTS}"), &empty_prior_path)
-            .expect("export empty prior");
+        export_highlights(
+            &conn,
+            None,
+            &pinned_header_for("{HIGHLIGHTS}"),
+            &empty_prior_path,
+        )
+        .expect("export empty prior");
     }
     let empty_prior_text = std::fs::read_to_string(&empty_prior_path).expect("read empty prior");
 
@@ -2106,8 +2315,13 @@ fn annotations_empty_prior_body_behaves_as_no_prior_file() {
     let empty_prior_path = empty_prior_dir.path().join("empty_prior.txt");
     {
         let conn = Connection::open(&db_path).expect("open db");
-        export_annotations(&conn, None, &pinned_header_for("{ANNOTATIONS}"), &empty_prior_path)
-            .expect("export empty prior");
+        export_annotations(
+            &conn,
+            None,
+            &pinned_header_for("{ANNOTATIONS}"),
+            &empty_prior_path,
+        )
+        .expect("export empty prior");
     }
     let empty_prior_text = std::fs::read_to_string(&empty_prior_path).expect("read empty prior");
 

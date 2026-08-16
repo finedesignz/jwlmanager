@@ -14,7 +14,8 @@ use jwlmanager_lib::error::ArchiveError;
 use rusqlite::Connection;
 
 fn note_count(conn: &Connection) -> i64 {
-    conn.query_row("SELECT COUNT(*) FROM Note", [], |r| r.get(0)).expect("count")
+    conn.query_row("SELECT COUNT(*) FROM Note", [], |r| r.get(0))
+        .expect("count")
 }
 
 fn tagmap_count(conn: &Connection) -> i64 {
@@ -57,7 +58,11 @@ fn missing_tag_line_is_rejected_at_line_1() {
         }
         other => panic!("expected ImportMalformed, got {other:?}"),
     }
-    assert_eq!(tagmap_count(&conn), before, "a rejected parse must never touch the archive");
+    assert_eq!(
+        tagmap_count(&conn),
+        before,
+        "a rejected parse must never touch the archive"
+    );
 }
 
 #[test]
@@ -72,11 +77,18 @@ fn a_five_field_line_is_rejected_and_leaves_tagmap_count_unchanged() {
     match err {
         ArchiveError::ImportMalformed { line, reason, .. } => {
             assert_eq!(line, 6);
-            assert!(reason.contains('5'), "reason should name the actual field count: {reason}");
+            assert!(
+                reason.contains('5'),
+                "reason should name the actual field count: {reason}"
+            );
         }
         other => panic!("expected ImportMalformed, got {other:?}"),
     }
-    assert_eq!(tagmap_count(&conn), before, "a rejected parse must never touch the archive");
+    assert_eq!(
+        tagmap_count(&conn),
+        before,
+        "a rejected parse must never touch the archive"
+    );
 }
 
 #[test]
@@ -120,7 +132,11 @@ fn bookmarks_missing_tag_line_is_rejected_at_line_1() {
         }
         other => panic!("expected ImportMalformed, got {other:?}"),
     }
-    assert_eq!(bookmark_count(&conn), before, "a rejected parse must never touch the archive");
+    assert_eq!(
+        bookmark_count(&conn),
+        before,
+        "a rejected parse must never touch the archive"
+    );
 }
 
 #[test]
@@ -135,11 +151,18 @@ fn bookmarks_eleven_field_line_is_rejected_and_leaves_row_count_unchanged() {
     match err {
         ArchiveError::ImportMalformed { line, reason, .. } => {
             assert_eq!(line, 2);
-            assert!(reason.contains("11"), "reason should name the actual field count: {reason}");
+            assert!(
+                reason.contains("11"),
+                "reason should name the actual field count: {reason}"
+            );
         }
         other => panic!("expected ImportMalformed, got {other:?}"),
     }
-    assert_eq!(bookmark_count(&conn), before, "a rejected parse must never touch the archive");
+    assert_eq!(
+        bookmark_count(&conn),
+        before,
+        "a rejected parse must never touch the archive"
+    );
 }
 
 #[test]
@@ -160,7 +183,8 @@ fn annotations_missing_tag_line_is_rejected_at_record_1() {
     let before = inputfield_count(&conn);
 
     let text = "no tag line\n==={PUB=w}{DOC=None}{LABEL=tag1}===\nValue\n==={END}===";
-    let err = parse_annotations_file(text).expect_err("must reject a missing {ANNOTATIONS} tag line");
+    let err =
+        parse_annotations_file(text).expect_err("must reject a missing {ANNOTATIONS} tag line");
     match err {
         ArchiveError::ImportMalformed { category, line, .. } => {
             assert_eq!(category, "Annotations");
@@ -168,7 +192,11 @@ fn annotations_missing_tag_line_is_rejected_at_record_1() {
         }
         other => panic!("expected ImportMalformed, got {other:?}"),
     }
-    assert_eq!(inputfield_count(&conn), before, "a rejected parse must never touch the archive");
+    assert_eq!(
+        inputfield_count(&conn),
+        before,
+        "a rejected parse must never touch the archive"
+    );
 }
 
 #[test]
@@ -200,8 +228,16 @@ fn highlights_missing_tag_line_is_rejected_at_line_1() {
         }
         other => panic!("expected ImportMalformed, got {other:?}"),
     }
-    assert_eq!(usermark_count(&conn), before_um, "a rejected parse must never touch the archive");
-    assert_eq!(blockrange_count(&conn), before_br, "a rejected parse must never touch the archive");
+    assert_eq!(
+        usermark_count(&conn),
+        before_um,
+        "a rejected parse must never touch the archive"
+    );
+    assert_eq!(
+        blockrange_count(&conn),
+        before_br,
+        "a rejected parse must never touch the archive"
+    );
 }
 
 #[test]
@@ -218,12 +254,23 @@ fn highlights_twelve_field_line_is_rejected_and_leaves_row_counts_unchanged() {
     match err {
         ArchiveError::ImportMalformed { line, reason, .. } => {
             assert_eq!(line, 2);
-            assert!(reason.contains("12"), "reason should name the actual field count: {reason}");
+            assert!(
+                reason.contains("12"),
+                "reason should name the actual field count: {reason}"
+            );
         }
         other => panic!("expected ImportMalformed, got {other:?}"),
     }
-    assert_eq!(usermark_count(&conn), before_um, "a rejected parse must never touch the archive");
-    assert_eq!(blockrange_count(&conn), before_br, "a rejected parse must never touch the archive");
+    assert_eq!(
+        usermark_count(&conn),
+        before_um,
+        "a rejected parse must never touch the archive"
+    );
+    assert_eq!(
+        blockrange_count(&conn),
+        before_br,
+        "a rejected parse must never touch the archive"
+    );
 }
 
 #[test]
@@ -245,7 +292,8 @@ fn highlights_overflowing_start_token_is_rejected() {
 
 #[test]
 fn highlights_header_and_divider_lines_are_skipped_without_error() {
-    let text = "{HIGHLIGHTS}\n \nExported from x\nby y (1) on z\n****\n1|1|0|5|1|1|1|1|None|0|nwt|0|0";
+    let text =
+        "{HIGHLIGHTS}\n \nExported from x\nby y (1) on z\n****\n1|1|0|5|1|1|1|1|None|0|nwt|0|0";
     let records = parse_highlights_file(text).expect("header/divider lines must not error");
     assert_eq!(records.len(), 1);
 }

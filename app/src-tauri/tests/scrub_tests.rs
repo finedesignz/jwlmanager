@@ -64,7 +64,11 @@ fn clean_normalizes_nbsp_and_ideographic_space_to_ascii_space_in_input_field() {
     assert_eq!(counts.get("InputField"), Some(&1));
 
     let value: String = tx
-        .query_row("SELECT Value FROM InputField WHERE TextTag = 'tag1'", [], |r| r.get(0))
+        .query_row(
+            "SELECT Value FROM InputField WHERE TextTag = 'tag1'",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
     assert_eq!(value, "a b c");
 
@@ -93,9 +97,16 @@ fn clean_removes_line_and_paragraph_separators() {
     let tx = conn.unchecked_transaction().expect("open tx");
     apply_clean(&tx).expect("apply_clean must succeed");
     let value: String = tx
-        .query_row("SELECT Value FROM InputField WHERE TextTag = 'tag1'", [], |r| r.get(0))
+        .query_row(
+            "SELECT Value FROM InputField WHERE TextTag = 'tag1'",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
-    assert_eq!(value, "abc", "Zl/Zp separators must be removed, not space-substituted");
+    assert_eq!(
+        value, "abc",
+        "Zl/Zp separators must be removed, not space-substituted"
+    );
     tx.rollback().unwrap();
 }
 
@@ -108,7 +119,9 @@ fn clean_converts_cr_to_lf() {
     let counts = apply_clean(&tx).expect("apply_clean must succeed");
     assert_eq!(counts.get("Note"), Some(&1));
     let content: String = tx
-        .query_row("SELECT Content FROM Note WHERE NoteId = 1", [], |r| r.get(0))
+        .query_row("SELECT Content FROM Note WHERE NoteId = 1", [], |r| {
+            r.get(0)
+        })
         .unwrap();
     assert_eq!(content, "line1\n\nline2");
     tx.rollback().unwrap();
@@ -139,12 +152,17 @@ fn clean_note_touches_title_and_content_independently_but_counts_row_once() {
     let counts = apply_clean(&tx).expect("apply_clean must succeed");
     assert_eq!(counts.get("Note"), Some(&1));
     let (title, content): (String, String) = tx
-        .query_row("SELECT Title, Content FROM Note WHERE NoteId = 1", [], |r| {
-            Ok((r.get(0)?, r.get(1)?))
-        })
+        .query_row(
+            "SELECT Title, Content FROM Note WHERE NoteId = 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
         .unwrap();
     assert_eq!(title, "a b");
-    assert_eq!(content, "already clean", "untouched field must be preserved verbatim");
+    assert_eq!(
+        content, "already clean",
+        "untouched field must be preserved verbatim"
+    );
     tx.rollback().unwrap();
 }
 
@@ -152,7 +170,13 @@ fn clean_note_touches_title_and_content_independently_but_counts_row_once() {
 // Mask
 // ---------------------------------------------------------------------------
 
-fn insert_bookmark(conn: &Connection, bookmark_id: i64, location_id: i64, title: &str, snippet: &str) {
+fn insert_bookmark(
+    conn: &Connection,
+    bookmark_id: i64,
+    location_id: i64,
+    title: &str,
+    snippet: &str,
+) {
     conn.execute(
         "INSERT INTO Location (LocationId, BookNumber, ChapterNumber, DocumentId, Track, \
          IssueTagNumber, KeySymbol, MepsLanguage, Type, Title, Specialty, Edition) \
@@ -242,12 +266,18 @@ fn mask_same_seed_produces_identical_table_state() {
     let tx1 = conn1.unchecked_transaction().expect("open tx1");
     apply_mask(&tx1, 12345).expect("apply_mask must succeed");
     let note1: (String, String) = tx1
-        .query_row("SELECT Title, Content FROM Note WHERE NoteId = 1", [], |r| {
-            Ok((r.get(0)?, r.get(1)?))
-        })
+        .query_row(
+            "SELECT Title, Content FROM Note WHERE NoteId = 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
         .unwrap();
     let field1: String = tx1
-        .query_row("SELECT Value FROM InputField WHERE TextTag = 'tag1'", [], |r| r.get(0))
+        .query_row(
+            "SELECT Value FROM InputField WHERE TextTag = 'tag1'",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
     tx1.rollback().unwrap();
 
@@ -255,17 +285,29 @@ fn mask_same_seed_produces_identical_table_state() {
     let tx2 = conn2.unchecked_transaction().expect("open tx2");
     apply_mask(&tx2, 12345).expect("apply_mask must succeed");
     let note2: (String, String) = tx2
-        .query_row("SELECT Title, Content FROM Note WHERE NoteId = 1", [], |r| {
-            Ok((r.get(0)?, r.get(1)?))
-        })
+        .query_row(
+            "SELECT Title, Content FROM Note WHERE NoteId = 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
         .unwrap();
     let field2: String = tx2
-        .query_row("SELECT Value FROM InputField WHERE TextTag = 'tag1'", [], |r| r.get(0))
+        .query_row(
+            "SELECT Value FROM InputField WHERE TextTag = 'tag1'",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
     tx2.rollback().unwrap();
 
-    assert_eq!(note1, note2, "same seed must produce identical Note table state");
-    assert_eq!(field1, field2, "same seed must produce identical InputField table state");
+    assert_eq!(
+        note1, note2,
+        "same seed must produce identical Note table state"
+    );
+    assert_eq!(
+        field1, field2,
+        "same seed must produce identical InputField table state"
+    );
 }
 
 #[test]
@@ -284,18 +326,26 @@ fn mask_covers_input_field_bookmark_note_and_location() {
     assert_eq!(counts.get("Location"), Some(&1));
 
     let field: String = tx
-        .query_row("SELECT Value FROM InputField WHERE TextTag = 'annot-tag'", [], |r| r.get(0))
+        .query_row(
+            "SELECT Value FROM InputField WHERE TextTag = 'annot-tag'",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
     assert_ne!(field, "annotation value");
     let (bm_title, bm_snippet): (String, String) = tx
-        .query_row("SELECT Title, Snippet FROM Bookmark WHERE BookmarkId = 2", [], |r| {
-            Ok((r.get(0)?, r.get(1)?))
-        })
+        .query_row(
+            "SELECT Title, Snippet FROM Bookmark WHERE BookmarkId = 2",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
         .unwrap();
     assert_ne!(bm_title, "Bookmark Title");
     assert_ne!(bm_snippet, "Bookmark Snippet");
     let loc_title: String = tx
-        .query_row("SELECT Title FROM Location WHERE LocationId = 4", [], |r| r.get(0))
+        .query_row("SELECT Title FROM Location WHERE LocationId = 4", [], |r| {
+            r.get(0)
+        })
         .unwrap();
     assert_ne!(loc_title, "Location Title");
 
@@ -339,8 +389,9 @@ fn no_rand_or_fancy_regex_dependency_declared() {
     )
     .expect("read Cargo.toml");
     assert!(
-        !cargo_toml.lines().any(|l| l.trim_start().starts_with("rand")
-            || l.trim_start().starts_with("fancy-regex")),
+        !cargo_toml.lines().any(
+            |l| l.trim_start().starts_with("rand") || l.trim_start().starts_with("fancy-regex")
+        ),
         "no rand/fancy-regex dependency may be declared without a recorded legitimacy checkpoint"
     );
 }

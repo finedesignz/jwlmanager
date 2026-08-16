@@ -739,7 +739,8 @@ fn python_export_matches_rust_export_content() {
         )
         .unwrap();
         let rust_out = scratch.path().join("favorites_rust.txt");
-        export_favorites(&conn, None, &pinned_wire_header("{FAVORITES}"), &rust_out).expect("rust export");
+        export_favorites(&conn, None, &pinned_wire_header("{FAVORITES}"), &rust_out)
+            .expect("rust export");
         let rust_bytes = common::read_file_bytes(&rust_out);
         let py_out = scratch.path().join("favorites_py.txt");
         let py_bytes = run_python_export_replica("favorites", &db_path, &py_out);

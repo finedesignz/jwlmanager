@@ -34,17 +34,30 @@ fn seed_tag_fixture(conn: &Connection) {
              LastModified, Created, BlockType, BlockIdentifier) \
              VALUES (?1, ?2, NULL, NULL, ?3, 'content', '2026-01-01T00:00:00Z', \
              '2026-01-01T00:00:00Z', 0, NULL)",
-            rusqlite::params![note_id, format!("fixture-tag-note-{note_id}"), format!("Note {note_id}")],
+            rusqlite::params![
+                note_id,
+                format!("fixture-tag-note-{note_id}"),
+                format!("Note {note_id}")
+            ],
         )
         .expect("insert Note");
     }
 
-    conn.execute("INSERT INTO Tag (TagId, Type, Name) VALUES (500, 1, 'Alpha')", [])
-        .expect("insert Tag 500");
-    conn.execute("INSERT INTO Tag (TagId, Type, Name) VALUES (501, 1, 'Beta')", [])
-        .expect("insert Tag 501");
-    conn.execute("INSERT INTO Tag (TagId, Type, Name) VALUES (502, 1, 'Gamma')", [])
-        .expect("insert Tag 502");
+    conn.execute(
+        "INSERT INTO Tag (TagId, Type, Name) VALUES (500, 1, 'Alpha')",
+        [],
+    )
+    .expect("insert Tag 500");
+    conn.execute(
+        "INSERT INTO Tag (TagId, Type, Name) VALUES (501, 1, 'Beta')",
+        [],
+    )
+    .expect("insert Tag 501");
+    conn.execute(
+        "INSERT INTO Tag (TagId, Type, Name) VALUES (502, 1, 'Gamma')",
+        [],
+    )
+    .expect("insert Tag 502");
 
     conn.execute(
         "INSERT INTO TagMap (TagMapId, PlaylistItemId, LocationId, NoteId, TagId, Position) \
@@ -92,10 +105,25 @@ fn tag_states_reports_checked_unchecked_and_indeterminate() {
     assert_eq!(states.len(), 3);
 
     let by_name = |name: &str| states.iter().find(|s| s.name == name).unwrap().count;
-    assert_eq!(by_name("Alpha"), 1, "Alpha: 1 of 2 selected notes -> indeterminate");
-    assert!(by_name("Alpha") > 0 && by_name("Alpha") < 2, "must be strictly between 0 and selection size");
-    assert_eq!(by_name("Beta"), 2, "Beta: both selected notes carry it -> checked");
-    assert_eq!(by_name("Gamma"), 0, "Gamma: neither selected note carries it -> unchecked");
+    assert_eq!(
+        by_name("Alpha"),
+        1,
+        "Alpha: 1 of 2 selected notes -> indeterminate"
+    );
+    assert!(
+        by_name("Alpha") > 0 && by_name("Alpha") < 2,
+        "must be strictly between 0 and selection size"
+    );
+    assert_eq!(
+        by_name("Beta"),
+        2,
+        "Beta: both selected notes carry it -> checked"
+    );
+    assert_eq!(
+        by_name("Gamma"),
+        0,
+        "Gamma: neither selected note carries it -> unchecked"
+    );
 }
 
 #[test]
@@ -125,9 +153,18 @@ fn unchecking_a_tag_removes_only_selected_notes_rows() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(remaining_970, 0, "selected Note 970's mapping must be removed");
-    assert_eq!(remaining_980, 0, "selected Note 980's mapping must be removed");
-    assert_eq!(remaining_990, 1, "un-selected Note 990's mapping must survive");
+    assert_eq!(
+        remaining_970, 0,
+        "selected Note 970's mapping must be removed"
+    );
+    assert_eq!(
+        remaining_980, 0,
+        "selected Note 980's mapping must be removed"
+    );
+    assert_eq!(
+        remaining_990, 1,
+        "un-selected Note 990's mapping must survive"
+    );
 
     tx.rollback().unwrap();
 }
@@ -153,7 +190,10 @@ fn checking_a_tag_inserts_only_for_notes_missing_it_and_ignores_already_mapped()
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(count_970, 1, "already-mapped note must stay at exactly one row (INSERT OR IGNORE no-op)");
+    assert_eq!(
+        count_970, 1,
+        "already-mapped note must stay at exactly one row (INSERT OR IGNORE no-op)"
+    );
     assert_eq!(count_980, 1, "missing note must gain exactly one new row");
 
     tx.rollback().unwrap();
@@ -182,7 +222,10 @@ fn adding_a_new_tag_name_creates_tag_row_and_maps_selection() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(mapped_count, 2, "the new tag must map to both selected notes");
+    assert_eq!(
+        mapped_count, 2,
+        "the new tag must map to both selected notes"
+    );
 
     tx.rollback().unwrap();
 }
@@ -201,9 +244,14 @@ fn new_tag_id_recycles_a_freed_gap_rather_than_extending_past_max() {
         .expect("apply_tag_edit must succeed");
 
     let new_tag_id: i64 = tx
-        .query_row("SELECT TagId FROM Tag WHERE Name = 'Epsilon'", [], |r| r.get(0))
+        .query_row("SELECT TagId FROM Tag WHERE Name = 'Epsilon'", [], |r| {
+            r.get(0)
+        })
         .expect("new Tag 'Epsilon' must exist");
-    assert_eq!(new_tag_id, 501, "the new tag must reuse the freed gap id, not extend past max");
+    assert_eq!(
+        new_tag_id, 501,
+        "the new tag must reuse the freed gap id, not extend past max"
+    );
 
     tx.rollback().unwrap();
 }
@@ -218,8 +266,14 @@ fn dry_run_tag_edit_leaves_the_database_unchanged() {
         .query_row("SELECT COUNT(*) FROM Tag", [], |r| r.get(0))
         .unwrap();
 
-    let _report = dry_run_tag_edit(&mut conn, &selection(), &[501], &[500], &["Zeta".to_string()])
-        .expect("dry_run_tag_edit must succeed");
+    let _report = dry_run_tag_edit(
+        &mut conn,
+        &selection(),
+        &[501],
+        &[500],
+        &["Zeta".to_string()],
+    )
+    .expect("dry_run_tag_edit must succeed");
 
     let after: i64 = conn
         .query_row("SELECT COUNT(*) FROM TagMap", [], |r| r.get(0))
@@ -227,8 +281,14 @@ fn dry_run_tag_edit_leaves_the_database_unchanged() {
     let after_tags: i64 = conn
         .query_row("SELECT COUNT(*) FROM Tag", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(before, after, "dry-run must leave TagMap row count unchanged");
-    assert_eq!(before_tags, after_tags, "dry-run must leave Tag row count unchanged");
+    assert_eq!(
+        before, after,
+        "dry-run must leave TagMap row count unchanged"
+    );
+    assert_eq!(
+        before_tags, after_tags,
+        "dry-run must leave Tag row count unchanged"
+    );
 }
 
 #[test]
@@ -239,5 +299,8 @@ fn dry_run_tag_edit_report_reflects_a_real_change() {
     // 500 already mapped to 970 (overwritten, PK survives), newly mapped to
     // 980 (a fresh TagMapId, added).
     let added = report.added.get("TagMap").copied().unwrap_or(0);
-    assert!(added >= 1, "checking a tag for a previously-unmapped note must show as added");
+    assert!(
+        added >= 1,
+        "checking a tag for a previously-unmapped note must show as added"
+    );
 }

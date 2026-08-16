@@ -340,20 +340,25 @@ fn favorite_remove_dry_run(
     ids: NonEmptyTagMapIds,
     state: tauri::State<SessionState>,
 ) -> Result<DryRunReport, ErrorDto> {
-    let guard = state.lock().map_err(|_| {
-        error::ArchiveError::StatePoisoned.to_dto("favorite_remove_dry_run", None)
-    })?;
+    let guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("favorite_remove_dry_run", None))?;
     let session = guard.as_ref().ok_or_else(|| {
         error::ArchiveError::MissingUserDataBackup.to_dto("favorite_remove_dry_run", None)
     })?;
 
     let mut conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("favorite_remove_dry_run", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "favorite_remove_dry_run",
+            Some(session.target_path.as_path()),
+        )
     })?;
 
     db::favorites::dry_run_favorite_remove(&mut conn, &ids).map_err(|err| {
-        err.to_dto("favorite_remove_dry_run", Some(session.target_path.as_path()))
+        err.to_dto(
+            "favorite_remove_dry_run",
+            Some(session.target_path.as_path()),
+        )
     })
 }
 
@@ -401,9 +406,8 @@ fn favorite_remove_apply(
         error::ArchiveError::from(err)
             .to_dto("favorite_remove_apply", Some(session.target_path.as_path()))
     })?;
-    let removed = db::favorites::apply_favorite_remove(&tx, &ids).map_err(|err| {
-        err.to_dto("favorite_remove_apply", Some(session.target_path.as_path()))
-    })?;
+    let removed = db::favorites::apply_favorite_remove(&tx, &ids)
+        .map_err(|err| err.to_dto("favorite_remove_apply", Some(session.target_path.as_path())))?;
     tx.commit().map_err(|err| {
         error::ArchiveError::from(err)
             .to_dto("favorite_remove_apply", Some(session.target_path.as_path()))
@@ -486,9 +490,8 @@ fn favorite_add_dry_run(
             .to_dto("favorite_add_dry_run", Some(session.target_path.as_path()))
     })?;
 
-    db::favorites::dry_run_favorite_add(&mut conn, &edition).map_err(|err| {
-        err.to_dto("favorite_add_dry_run", Some(session.target_path.as_path()))
-    })
+    db::favorites::dry_run_favorite_add(&mut conn, &edition)
+        .map_err(|err| err.to_dto("favorite_add_dry_run", Some(session.target_path.as_path())))
 }
 
 /// Applies marking the given Bible edition as a Favorite — ensures the
@@ -531,9 +534,8 @@ fn favorite_add_apply(
         error::ArchiveError::from(err)
             .to_dto("favorite_add_apply", Some(session.target_path.as_path()))
     })?;
-    let report = db::favorites::apply_favorite_add_reporting(&tx, &edition).map_err(|err| {
-        err.to_dto("favorite_add_apply", Some(session.target_path.as_path()))
-    })?;
+    let report = db::favorites::apply_favorite_add_reporting(&tx, &edition)
+        .map_err(|err| err.to_dto("favorite_add_apply", Some(session.target_path.as_path())))?;
     tx.commit().map_err(|err| {
         error::ArchiveError::from(err)
             .to_dto("favorite_add_apply", Some(session.target_path.as_path()))
@@ -561,9 +563,9 @@ fn color_dry_run(
     let guard = state
         .lock()
         .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("color_dry_run", None))?;
-    let session = guard.as_ref().ok_or_else(|| {
-        error::ArchiveError::MissingUserDataBackup.to_dto("color_dry_run", None)
-    })?;
+    let session = guard
+        .as_ref()
+        .ok_or_else(|| error::ArchiveError::MissingUserDataBackup.to_dto("color_dry_run", None))?;
 
     let mut conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
         error::ArchiveError::from(err).to_dto("color_dry_run", Some(session.target_path.as_path()))
@@ -584,9 +586,9 @@ fn color_apply(
     let mut guard = state
         .lock()
         .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("color_apply", None))?;
-    let session = guard.as_mut().ok_or_else(|| {
-        error::ArchiveError::MissingUserDataBackup.to_dto("color_apply", None)
-    })?;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| error::ArchiveError::MissingUserDataBackup.to_dto("color_apply", None))?;
 
     let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
         error::ArchiveError::from(err).to_dto("color_apply", Some(session.target_path.as_path()))
@@ -624,20 +626,25 @@ fn highlight_delete_dry_run(
     ids: NonEmptyBlockRangeIds,
     state: tauri::State<SessionState>,
 ) -> Result<DryRunReport, ErrorDto> {
-    let guard = state.lock().map_err(|_| {
-        error::ArchiveError::StatePoisoned.to_dto("highlight_delete_dry_run", None)
-    })?;
+    let guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("highlight_delete_dry_run", None))?;
     let session = guard.as_ref().ok_or_else(|| {
         error::ArchiveError::MissingUserDataBackup.to_dto("highlight_delete_dry_run", None)
     })?;
 
     let mut conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("highlight_delete_dry_run", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "highlight_delete_dry_run",
+            Some(session.target_path.as_path()),
+        )
     })?;
 
     db::delete::dry_run_delete_highlights(&mut conn, &ids).map_err(|err| {
-        err.to_dto("highlight_delete_dry_run", Some(session.target_path.as_path()))
+        err.to_dto(
+            "highlight_delete_dry_run",
+            Some(session.target_path.as_path()),
+        )
     })
 }
 
@@ -649,38 +656,51 @@ fn highlight_delete_apply(
     ids: NonEmptyBlockRangeIds,
     state: tauri::State<SessionState>,
 ) -> Result<DryRunReport, ErrorDto> {
-    let mut guard = state.lock().map_err(|_| {
-        error::ArchiveError::StatePoisoned.to_dto("highlight_delete_apply", None)
-    })?;
+    let mut guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("highlight_delete_apply", None))?;
     let session = guard.as_mut().ok_or_else(|| {
         error::ArchiveError::MissingUserDataBackup.to_dto("highlight_delete_apply", None)
     })?;
 
     let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("highlight_delete_apply", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "highlight_delete_apply",
+            Some(session.target_path.as_path()),
+        )
     })?;
 
     let guard_pragma = db::pragma_guard::PragmaGuard::new(&conn).map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("highlight_delete_apply", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "highlight_delete_apply",
+            Some(session.target_path.as_path()),
+        )
     })?;
     conn.execute_batch("PRAGMA foreign_keys = 'OFF';")
         .map_err(|err| {
-            error::ArchiveError::from(err)
-                .to_dto("highlight_delete_apply", Some(session.target_path.as_path()))
+            error::ArchiveError::from(err).to_dto(
+                "highlight_delete_apply",
+                Some(session.target_path.as_path()),
+            )
         })?;
 
     let tx = conn.unchecked_transaction().map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("highlight_delete_apply", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "highlight_delete_apply",
+            Some(session.target_path.as_path()),
+        )
     })?;
     let deleted = db::delete::delete_highlights(&tx, &ids).map_err(|err| {
-        err.to_dto("highlight_delete_apply", Some(session.target_path.as_path()))
+        err.to_dto(
+            "highlight_delete_apply",
+            Some(session.target_path.as_path()),
+        )
     })?;
     tx.commit().map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("highlight_delete_apply", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "highlight_delete_apply",
+            Some(session.target_path.as_path()),
+        )
     })?;
     drop(guard_pragma);
 
@@ -708,20 +728,25 @@ fn bookmark_delete_dry_run(
     ids: NonEmptyBookmarkIds,
     state: tauri::State<SessionState>,
 ) -> Result<DryRunReport, ErrorDto> {
-    let guard = state.lock().map_err(|_| {
-        error::ArchiveError::StatePoisoned.to_dto("bookmark_delete_dry_run", None)
-    })?;
+    let guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("bookmark_delete_dry_run", None))?;
     let session = guard.as_ref().ok_or_else(|| {
         error::ArchiveError::MissingUserDataBackup.to_dto("bookmark_delete_dry_run", None)
     })?;
 
     let mut conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("bookmark_delete_dry_run", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "bookmark_delete_dry_run",
+            Some(session.target_path.as_path()),
+        )
     })?;
 
     db::delete::dry_run_delete_bookmarks(&mut conn, &ids).map_err(|err| {
-        err.to_dto("bookmark_delete_dry_run", Some(session.target_path.as_path()))
+        err.to_dto(
+            "bookmark_delete_dry_run",
+            Some(session.target_path.as_path()),
+        )
     })
 }
 
@@ -733,9 +758,9 @@ fn bookmark_delete_apply(
     ids: NonEmptyBookmarkIds,
     state: tauri::State<SessionState>,
 ) -> Result<DryRunReport, ErrorDto> {
-    let mut guard = state.lock().map_err(|_| {
-        error::ArchiveError::StatePoisoned.to_dto("bookmark_delete_apply", None)
-    })?;
+    let mut guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("bookmark_delete_apply", None))?;
     let session = guard.as_mut().ok_or_else(|| {
         error::ArchiveError::MissingUserDataBackup.to_dto("bookmark_delete_apply", None)
     })?;
@@ -759,9 +784,8 @@ fn bookmark_delete_apply(
         error::ArchiveError::from(err)
             .to_dto("bookmark_delete_apply", Some(session.target_path.as_path()))
     })?;
-    let deleted = db::delete::delete_bookmarks(&tx, &ids).map_err(|err| {
-        err.to_dto("bookmark_delete_apply", Some(session.target_path.as_path()))
-    })?;
+    let deleted = db::delete::delete_bookmarks(&tx, &ids)
+        .map_err(|err| err.to_dto("bookmark_delete_apply", Some(session.target_path.as_path())))?;
     tx.commit().map_err(|err| {
         error::ArchiveError::from(err)
             .to_dto("bookmark_delete_apply", Some(session.target_path.as_path()))
@@ -801,12 +825,17 @@ fn annotation_delete_dry_run(
     })?;
 
     let mut conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("annotation_delete_dry_run", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "annotation_delete_dry_run",
+            Some(session.target_path.as_path()),
+        )
     })?;
 
     db::delete::dry_run_delete_annotations(&mut conn, &ids).map_err(|err| {
-        err.to_dto("annotation_delete_dry_run", Some(session.target_path.as_path()))
+        err.to_dto(
+            "annotation_delete_dry_run",
+            Some(session.target_path.as_path()),
+        )
     })
 }
 
@@ -818,38 +847,51 @@ fn annotation_delete_apply(
     ids: NonEmptyLocationIds,
     state: tauri::State<SessionState>,
 ) -> Result<DryRunReport, ErrorDto> {
-    let mut guard = state.lock().map_err(|_| {
-        error::ArchiveError::StatePoisoned.to_dto("annotation_delete_apply", None)
-    })?;
+    let mut guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("annotation_delete_apply", None))?;
     let session = guard.as_mut().ok_or_else(|| {
         error::ArchiveError::MissingUserDataBackup.to_dto("annotation_delete_apply", None)
     })?;
 
     let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("annotation_delete_apply", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "annotation_delete_apply",
+            Some(session.target_path.as_path()),
+        )
     })?;
 
     let guard_pragma = db::pragma_guard::PragmaGuard::new(&conn).map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("annotation_delete_apply", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "annotation_delete_apply",
+            Some(session.target_path.as_path()),
+        )
     })?;
     conn.execute_batch("PRAGMA foreign_keys = 'OFF';")
         .map_err(|err| {
-            error::ArchiveError::from(err)
-                .to_dto("annotation_delete_apply", Some(session.target_path.as_path()))
+            error::ArchiveError::from(err).to_dto(
+                "annotation_delete_apply",
+                Some(session.target_path.as_path()),
+            )
         })?;
 
     let tx = conn.unchecked_transaction().map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("annotation_delete_apply", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "annotation_delete_apply",
+            Some(session.target_path.as_path()),
+        )
     })?;
     let deleted = db::delete::delete_annotations(&tx, &ids).map_err(|err| {
-        err.to_dto("annotation_delete_apply", Some(session.target_path.as_path()))
+        err.to_dto(
+            "annotation_delete_apply",
+            Some(session.target_path.as_path()),
+        )
     })?;
     tx.commit().map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("annotation_delete_apply", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "annotation_delete_apply",
+            Some(session.target_path.as_path()),
+        )
     })?;
     drop(guard_pragma);
 
@@ -1105,8 +1147,14 @@ fn tag_dry_run(
         error::ArchiveError::from(err).to_dto("tag_dry_run", Some(session.target_path.as_path()))
     })?;
 
-    db::tags::dry_run_tag_edit(&mut conn, &ids, &removed_tag_ids, &added_tag_ids, &new_tag_names)
-        .map_err(|err| err.to_dto("tag_dry_run", Some(session.target_path.as_path())))
+    db::tags::dry_run_tag_edit(
+        &mut conn,
+        &ids,
+        &removed_tag_ids,
+        &added_tag_ids,
+        &new_tag_names,
+    )
+    .map_err(|err| err.to_dto("tag_dry_run", Some(session.target_path.as_path())))
 }
 
 /// Applies a tag edit — the committed counterpart to [`tag_dry_run`]
@@ -1335,8 +1383,7 @@ fn mask_apply(state: tauri::State<SessionState>) -> Result<DryRunReport, ErrorDt
     })?;
     conn.execute_batch("PRAGMA foreign_keys = 'OFF';")
         .map_err(|err| {
-            error::ArchiveError::from(err)
-                .to_dto("mask_apply", Some(session.target_path.as_path()))
+            error::ArchiveError::from(err).to_dto("mask_apply", Some(session.target_path.as_path()))
         })?;
 
     let tx = conn.unchecked_transaction().map_err(|err| {
@@ -1476,9 +1523,9 @@ fn fold_merge_dry_run(
     state: tauri::State<SessionState>,
 ) -> Result<DryRunReport, ErrorDto> {
     let sources: Vec<PathBuf> = source_paths.into_iter().map(PathBuf::from).collect();
-    let guard = state.lock().map_err(|_| {
-        error::ArchiveError::StatePoisoned.to_dto("fold_merge_dry_run", None)
-    })?;
+    let guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("fold_merge_dry_run", None))?;
     let session = guard.as_ref().ok_or_else(|| {
         error::ArchiveError::MissingUserDataBackup.to_dto("fold_merge_dry_run", None)
     })?;
@@ -1503,9 +1550,9 @@ fn fold_merge_commit(
     state: tauri::State<SessionState>,
 ) -> Result<(), ErrorDto> {
     let sources: Vec<PathBuf> = source_paths.into_iter().map(PathBuf::from).collect();
-    let mut guard = state.lock().map_err(|_| {
-        error::ArchiveError::StatePoisoned.to_dto("fold_merge_commit", None)
-    })?;
+    let mut guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("fold_merge_commit", None))?;
     let session = guard.as_mut().ok_or_else(|| {
         error::ArchiveError::MissingUserDataBackup.to_dto("fold_merge_commit", None)
     })?;
@@ -1532,9 +1579,9 @@ fn export_favorites(
     let guard = state
         .lock()
         .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("export_favorites", None))?;
-    let session = guard
-        .as_ref()
-        .ok_or_else(|| error::ArchiveError::MissingUserDataBackup.to_dto("export_favorites", None))?;
+    let session = guard.as_ref().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("export_favorites", None)
+    })?;
 
     let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
         error::ArchiveError::from(err)
@@ -1578,8 +1625,10 @@ fn export_favorites_incremental(
     })?;
 
     let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("export_favorites_incremental", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "export_favorites_incremental",
+            Some(session.target_path.as_path()),
+        )
     })?;
 
     let archive_name = session
@@ -1618,9 +1667,9 @@ fn import_favorites_dry_run(
     path: String,
     state: tauri::State<SessionState>,
 ) -> Result<DryRunReport, ErrorDto> {
-    let guard = state.lock().map_err(|_| {
-        error::ArchiveError::StatePoisoned.to_dto("import_favorites_dry_run", None)
-    })?;
+    let guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("import_favorites_dry_run", None))?;
     let session = guard.as_ref().ok_or_else(|| {
         error::ArchiveError::MissingUserDataBackup.to_dto("import_favorites_dry_run", None)
     })?;
@@ -1633,12 +1682,17 @@ fn import_favorites_dry_run(
         .map_err(|err| err.to_dto("import_favorites_dry_run", Some(in_path.as_path())))?;
 
     let mut conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("import_favorites_dry_run", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "import_favorites_dry_run",
+            Some(session.target_path.as_path()),
+        )
     })?;
 
     dry_run_import_favorites(&mut conn, &records).map_err(|err| {
-        err.to_dto("import_favorites_dry_run", Some(session.target_path.as_path()))
+        err.to_dto(
+            "import_favorites_dry_run",
+            Some(session.target_path.as_path()),
+        )
     })
 }
 
@@ -1666,37 +1720,65 @@ fn import_favorites_apply(
         .map_err(|err| err.to_dto("import_favorites_apply", Some(in_path.as_path())))?;
 
     let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("import_favorites_apply", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "import_favorites_apply",
+            Some(session.target_path.as_path()),
+        )
     })?;
 
     let guard_pragma = db::pragma_guard::PragmaGuard::new(&conn).map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("import_favorites_apply", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "import_favorites_apply",
+            Some(session.target_path.as_path()),
+        )
     })?;
     conn.execute_batch("PRAGMA foreign_keys = 'OFF';")
         .map_err(|err| {
-            error::ArchiveError::from(err)
-                .to_dto("import_favorites_apply", Some(session.target_path.as_path()))
+            error::ArchiveError::from(err).to_dto(
+                "import_favorites_apply",
+                Some(session.target_path.as_path()),
+            )
         })?;
 
     let tx = conn.unchecked_transaction().map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("import_favorites_apply", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "import_favorites_apply",
+            Some(session.target_path.as_path()),
+        )
     })?;
 
-    let mut available = compute_available_ids(&tx)
-        .map_err(|err| err.to_dto("import_favorites_apply", Some(session.target_path.as_path())))?;
-    let before = db::edit::snapshot_tables(&tx, db::edit::FAVORITE_SNAPSHOT_TABLES)
-        .map_err(|err| err.to_dto("import_favorites_apply", Some(session.target_path.as_path())))?;
-    let skipped = apply_import_favorites(&tx, &records, &mut available)
-        .map_err(|err| err.to_dto("import_favorites_apply", Some(session.target_path.as_path())))?;
-    let after = db::edit::snapshot_tables(&tx, db::edit::FAVORITE_SNAPSHOT_TABLES)
-        .map_err(|err| err.to_dto("import_favorites_apply", Some(session.target_path.as_path())))?;
+    let mut available = compute_available_ids(&tx).map_err(|err| {
+        err.to_dto(
+            "import_favorites_apply",
+            Some(session.target_path.as_path()),
+        )
+    })?;
+    let before =
+        db::edit::snapshot_tables(&tx, db::edit::FAVORITE_SNAPSHOT_TABLES).map_err(|err| {
+            err.to_dto(
+                "import_favorites_apply",
+                Some(session.target_path.as_path()),
+            )
+        })?;
+    let skipped = apply_import_favorites(&tx, &records, &mut available).map_err(|err| {
+        err.to_dto(
+            "import_favorites_apply",
+            Some(session.target_path.as_path()),
+        )
+    })?;
+    let after =
+        db::edit::snapshot_tables(&tx, db::edit::FAVORITE_SNAPSHOT_TABLES).map_err(|err| {
+            err.to_dto(
+                "import_favorites_apply",
+                Some(session.target_path.as_path()),
+            )
+        })?;
 
     tx.commit().map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("import_favorites_apply", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "import_favorites_apply",
+            Some(session.target_path.as_path()),
+        )
     })?;
     drop(guard_pragma);
 
@@ -1720,9 +1802,9 @@ fn export_bookmarks(
     let guard = state
         .lock()
         .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("export_bookmarks", None))?;
-    let session = guard
-        .as_ref()
-        .ok_or_else(|| error::ArchiveError::MissingUserDataBackup.to_dto("export_bookmarks", None))?;
+    let session = guard.as_ref().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("export_bookmarks", None)
+    })?;
 
     let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
         error::ArchiveError::from(err)
@@ -1762,8 +1844,10 @@ fn export_bookmarks_incremental(
     })?;
 
     let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("export_bookmarks_incremental", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "export_bookmarks_incremental",
+            Some(session.target_path.as_path()),
+        )
     })?;
 
     let archive_name = session
@@ -1798,9 +1882,9 @@ fn import_bookmarks_dry_run(
     path: String,
     state: tauri::State<SessionState>,
 ) -> Result<DryRunReport, ErrorDto> {
-    let guard = state.lock().map_err(|_| {
-        error::ArchiveError::StatePoisoned.to_dto("import_bookmarks_dry_run", None)
-    })?;
+    let guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("import_bookmarks_dry_run", None))?;
     let session = guard.as_ref().ok_or_else(|| {
         error::ArchiveError::MissingUserDataBackup.to_dto("import_bookmarks_dry_run", None)
     })?;
@@ -1813,12 +1897,17 @@ fn import_bookmarks_dry_run(
         .map_err(|err| err.to_dto("import_bookmarks_dry_run", Some(in_path.as_path())))?;
 
     let mut conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("import_bookmarks_dry_run", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "import_bookmarks_dry_run",
+            Some(session.target_path.as_path()),
+        )
     })?;
 
     dry_run_import_bookmarks(&mut conn, &records).map_err(|err| {
-        err.to_dto("import_bookmarks_dry_run", Some(session.target_path.as_path()))
+        err.to_dto(
+            "import_bookmarks_dry_run",
+            Some(session.target_path.as_path()),
+        )
     })
 }
 
@@ -1844,37 +1933,65 @@ fn import_bookmarks_apply(
         .map_err(|err| err.to_dto("import_bookmarks_apply", Some(in_path.as_path())))?;
 
     let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("import_bookmarks_apply", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "import_bookmarks_apply",
+            Some(session.target_path.as_path()),
+        )
     })?;
 
     let guard_pragma = db::pragma_guard::PragmaGuard::new(&conn).map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("import_bookmarks_apply", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "import_bookmarks_apply",
+            Some(session.target_path.as_path()),
+        )
     })?;
     conn.execute_batch("PRAGMA foreign_keys = 'OFF';")
         .map_err(|err| {
-            error::ArchiveError::from(err)
-                .to_dto("import_bookmarks_apply", Some(session.target_path.as_path()))
+            error::ArchiveError::from(err).to_dto(
+                "import_bookmarks_apply",
+                Some(session.target_path.as_path()),
+            )
         })?;
 
     let tx = conn.unchecked_transaction().map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("import_bookmarks_apply", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "import_bookmarks_apply",
+            Some(session.target_path.as_path()),
+        )
     })?;
 
-    let mut available = compute_available_ids(&tx)
-        .map_err(|err| err.to_dto("import_bookmarks_apply", Some(session.target_path.as_path())))?;
-    let before = db::edit::snapshot_tables(&tx, db::edit::BOOKMARK_SNAPSHOT_TABLES)
-        .map_err(|err| err.to_dto("import_bookmarks_apply", Some(session.target_path.as_path())))?;
-    apply_import_bookmarks(&tx, &records, &mut available)
-        .map_err(|err| err.to_dto("import_bookmarks_apply", Some(session.target_path.as_path())))?;
-    let after = db::edit::snapshot_tables(&tx, db::edit::BOOKMARK_SNAPSHOT_TABLES)
-        .map_err(|err| err.to_dto("import_bookmarks_apply", Some(session.target_path.as_path())))?;
+    let mut available = compute_available_ids(&tx).map_err(|err| {
+        err.to_dto(
+            "import_bookmarks_apply",
+            Some(session.target_path.as_path()),
+        )
+    })?;
+    let before =
+        db::edit::snapshot_tables(&tx, db::edit::BOOKMARK_SNAPSHOT_TABLES).map_err(|err| {
+            err.to_dto(
+                "import_bookmarks_apply",
+                Some(session.target_path.as_path()),
+            )
+        })?;
+    apply_import_bookmarks(&tx, &records, &mut available).map_err(|err| {
+        err.to_dto(
+            "import_bookmarks_apply",
+            Some(session.target_path.as_path()),
+        )
+    })?;
+    let after =
+        db::edit::snapshot_tables(&tx, db::edit::BOOKMARK_SNAPSHOT_TABLES).map_err(|err| {
+            err.to_dto(
+                "import_bookmarks_apply",
+                Some(session.target_path.as_path()),
+            )
+        })?;
 
     tx.commit().map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("import_bookmarks_apply", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "import_bookmarks_apply",
+            Some(session.target_path.as_path()),
+        )
     })?;
     drop(guard_pragma);
 
@@ -1944,8 +2061,10 @@ fn export_annotations_incremental(
     })?;
 
     let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("export_annotations_incremental", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "export_annotations_incremental",
+            Some(session.target_path.as_path()),
+        )
     })?;
 
     let archive_name = session
@@ -1989,19 +2108,23 @@ fn import_annotations_dry_run(
 
     let in_path = PathBuf::from(&path);
     let text = std::fs::read_to_string(&in_path).map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("import_annotations_dry_run", Some(in_path.as_path()))
+        error::ArchiveError::from(err).to_dto("import_annotations_dry_run", Some(in_path.as_path()))
     })?;
     let records = parse_annotations_file(&text)
         .map_err(|err| err.to_dto("import_annotations_dry_run", Some(in_path.as_path())))?;
 
     let mut conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("import_annotations_dry_run", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "import_annotations_dry_run",
+            Some(session.target_path.as_path()),
+        )
     })?;
 
     dry_run_import_annotations(&mut conn, &records).map_err(|err| {
-        err.to_dto("import_annotations_dry_run", Some(session.target_path.as_path()))
+        err.to_dto(
+            "import_annotations_dry_run",
+            Some(session.target_path.as_path()),
+        )
     })
 }
 
@@ -2012,9 +2135,9 @@ fn import_annotations_apply(
     path: String,
     state: tauri::State<SessionState>,
 ) -> Result<DryRunReport, ErrorDto> {
-    let mut guard = state.lock().map_err(|_| {
-        error::ArchiveError::StatePoisoned.to_dto("import_annotations_apply", None)
-    })?;
+    let mut guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("import_annotations_apply", None))?;
     let session = guard.as_mut().ok_or_else(|| {
         error::ArchiveError::MissingUserDataBackup.to_dto("import_annotations_apply", None)
     })?;
@@ -2027,41 +2150,65 @@ fn import_annotations_apply(
         .map_err(|err| err.to_dto("import_annotations_apply", Some(in_path.as_path())))?;
 
     let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("import_annotations_apply", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "import_annotations_apply",
+            Some(session.target_path.as_path()),
+        )
     })?;
 
     let guard_pragma = db::pragma_guard::PragmaGuard::new(&conn).map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("import_annotations_apply", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "import_annotations_apply",
+            Some(session.target_path.as_path()),
+        )
     })?;
     conn.execute_batch("PRAGMA foreign_keys = 'OFF';")
         .map_err(|err| {
-            error::ArchiveError::from(err)
-                .to_dto("import_annotations_apply", Some(session.target_path.as_path()))
+            error::ArchiveError::from(err).to_dto(
+                "import_annotations_apply",
+                Some(session.target_path.as_path()),
+            )
         })?;
 
     let tx = conn.unchecked_transaction().map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("import_annotations_apply", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "import_annotations_apply",
+            Some(session.target_path.as_path()),
+        )
     })?;
 
     let mut available = compute_available_ids(&tx).map_err(|err| {
-        err.to_dto("import_annotations_apply", Some(session.target_path.as_path()))
+        err.to_dto(
+            "import_annotations_apply",
+            Some(session.target_path.as_path()),
+        )
     })?;
-    let before = db::edit::snapshot_tables(&tx, db::edit::ANNOTATION_SNAPSHOT_TABLES).map_err(
-        |err| err.to_dto("import_annotations_apply", Some(session.target_path.as_path())),
-    )?;
+    let before =
+        db::edit::snapshot_tables(&tx, db::edit::ANNOTATION_SNAPSHOT_TABLES).map_err(|err| {
+            err.to_dto(
+                "import_annotations_apply",
+                Some(session.target_path.as_path()),
+            )
+        })?;
     apply_import_annotations(&tx, &records, &mut available).map_err(|err| {
-        err.to_dto("import_annotations_apply", Some(session.target_path.as_path()))
+        err.to_dto(
+            "import_annotations_apply",
+            Some(session.target_path.as_path()),
+        )
     })?;
-    let after = db::edit::snapshot_tables(&tx, db::edit::ANNOTATION_SNAPSHOT_TABLES).map_err(
-        |err| err.to_dto("import_annotations_apply", Some(session.target_path.as_path())),
-    )?;
+    let after =
+        db::edit::snapshot_tables(&tx, db::edit::ANNOTATION_SNAPSHOT_TABLES).map_err(|err| {
+            err.to_dto(
+                "import_annotations_apply",
+                Some(session.target_path.as_path()),
+            )
+        })?;
 
     tx.commit().map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("import_annotations_apply", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "import_annotations_apply",
+            Some(session.target_path.as_path()),
+        )
     })?;
     drop(guard_pragma);
 
@@ -2125,8 +2272,10 @@ fn export_highlights_incremental(
     })?;
 
     let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("export_highlights_incremental", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "export_highlights_incremental",
+            Some(session.target_path.as_path()),
+        )
     })?;
 
     let archive_name = session
@@ -2178,12 +2327,17 @@ fn import_highlights_dry_run(
         .map_err(|err| err.to_dto("import_highlights_dry_run", Some(in_path.as_path())))?;
 
     let mut conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("import_highlights_dry_run", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "import_highlights_dry_run",
+            Some(session.target_path.as_path()),
+        )
     })?;
 
     dry_run_import_highlights(&mut conn, &records, guid_seed_now()).map_err(|err| {
-        err.to_dto("import_highlights_dry_run", Some(session.target_path.as_path()))
+        err.to_dto(
+            "import_highlights_dry_run",
+            Some(session.target_path.as_path()),
+        )
     })
 }
 
@@ -2209,40 +2363,65 @@ fn import_highlights_apply(
         .map_err(|err| err.to_dto("import_highlights_apply", Some(in_path.as_path())))?;
 
     let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("import_highlights_apply", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "import_highlights_apply",
+            Some(session.target_path.as_path()),
+        )
     })?;
 
     let guard_pragma = db::pragma_guard::PragmaGuard::new(&conn).map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("import_highlights_apply", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "import_highlights_apply",
+            Some(session.target_path.as_path()),
+        )
     })?;
     conn.execute_batch("PRAGMA foreign_keys = 'OFF';")
         .map_err(|err| {
-            error::ArchiveError::from(err)
-                .to_dto("import_highlights_apply", Some(session.target_path.as_path()))
+            error::ArchiveError::from(err).to_dto(
+                "import_highlights_apply",
+                Some(session.target_path.as_path()),
+            )
         })?;
 
     let tx = conn.unchecked_transaction().map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("import_highlights_apply", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "import_highlights_apply",
+            Some(session.target_path.as_path()),
+        )
     })?;
 
-    let mut available = compute_available_ids(&tx)
-        .map_err(|err| err.to_dto("import_highlights_apply", Some(session.target_path.as_path())))?;
-    let before = db::edit::snapshot_tables(&tx, db::edit::HIGHLIGHT_SNAPSHOT_TABLES).map_err(
-        |err| err.to_dto("import_highlights_apply", Some(session.target_path.as_path())),
-    )?;
-    apply_import_highlights(&tx, &records, &mut available, guid_seed_now()).map_err(|err| {
-        err.to_dto("import_highlights_apply", Some(session.target_path.as_path()))
+    let mut available = compute_available_ids(&tx).map_err(|err| {
+        err.to_dto(
+            "import_highlights_apply",
+            Some(session.target_path.as_path()),
+        )
     })?;
-    let after = db::edit::snapshot_tables(&tx, db::edit::HIGHLIGHT_SNAPSHOT_TABLES).map_err(
-        |err| err.to_dto("import_highlights_apply", Some(session.target_path.as_path())),
-    )?;
+    let before =
+        db::edit::snapshot_tables(&tx, db::edit::HIGHLIGHT_SNAPSHOT_TABLES).map_err(|err| {
+            err.to_dto(
+                "import_highlights_apply",
+                Some(session.target_path.as_path()),
+            )
+        })?;
+    apply_import_highlights(&tx, &records, &mut available, guid_seed_now()).map_err(|err| {
+        err.to_dto(
+            "import_highlights_apply",
+            Some(session.target_path.as_path()),
+        )
+    })?;
+    let after =
+        db::edit::snapshot_tables(&tx, db::edit::HIGHLIGHT_SNAPSHOT_TABLES).map_err(|err| {
+            err.to_dto(
+                "import_highlights_apply",
+                Some(session.target_path.as_path()),
+            )
+        })?;
 
     tx.commit().map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("import_highlights_apply", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "import_highlights_apply",
+            Some(session.target_path.as_path()),
+        )
     })?;
     drop(guard_pragma);
 
@@ -2319,16 +2498,18 @@ fn export_notes_incremental(
 ) -> Result<IncrementalExportSummary, ErrorDto> {
     let resources_db_path = db::resources::resolve_resources_db_path(&app)
         .map_err(|err| err.to_dto("export_notes_incremental", None))?;
-    let guard = state.lock().map_err(|_| {
-        error::ArchiveError::StatePoisoned.to_dto("export_notes_incremental", None)
-    })?;
+    let guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("export_notes_incremental", None))?;
     let session = guard.as_ref().ok_or_else(|| {
         error::ArchiveError::MissingUserDataBackup.to_dto("export_notes_incremental", None)
     })?;
 
     let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("export_notes_incremental", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "export_notes_incremental",
+            Some(session.target_path.as_path()),
+        )
     })?;
     let catalog = db::resources::ResourceCatalog::load(&resources_db_path, "en")
         .map_err(|err| err.to_dto("export_notes_incremental", None))?;
@@ -2537,12 +2718,13 @@ fn export_playlist(
     let guard = state
         .lock()
         .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("export_playlist", None))?;
-    let session = guard
-        .as_ref()
-        .ok_or_else(|| error::ArchiveError::MissingUserDataBackup.to_dto("export_playlist", None))?;
+    let session = guard.as_ref().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("export_playlist", None)
+    })?;
 
     let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
-        error::ArchiveError::from(err).to_dto("export_playlist", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err)
+            .to_dto("export_playlist", Some(session.target_path.as_path()))
     })?;
 
     let out_path = PathBuf::from(&path);
@@ -2568,9 +2750,9 @@ fn import_playlist_dry_run(
     path: String,
     state: tauri::State<SessionState>,
 ) -> Result<PlaylistImportPreview, ErrorDto> {
-    let guard = state.lock().map_err(|_| {
-        error::ArchiveError::StatePoisoned.to_dto("import_playlist_dry_run", None)
-    })?;
+    let guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("import_playlist_dry_run", None))?;
     let session = guard.as_ref().ok_or_else(|| {
         error::ArchiveError::MissingUserDataBackup.to_dto("import_playlist_dry_run", None)
     })?;
@@ -2584,13 +2766,18 @@ fn import_playlist_dry_run(
         .map_err(|err| err.to_dto("import_playlist_dry_run", Some(in_path.as_path())))?;
 
     let mut conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("import_playlist_dry_run", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "import_playlist_dry_run",
+            Some(session.target_path.as_path()),
+        )
     })?;
 
     let report = db::playlist_io::dry_run_import_playlist(&mut conn, &container, &playlist_name)
         .map_err(|err| {
-            err.to_dto("import_playlist_dry_run", Some(session.target_path.as_path()))
+            err.to_dto(
+                "import_playlist_dry_run",
+                Some(session.target_path.as_path()),
+            )
         })?;
 
     Ok(PlaylistImportPreview {
@@ -2611,9 +2798,9 @@ fn import_playlist_apply(
     path: String,
     state: tauri::State<SessionState>,
 ) -> Result<DryRunReport, ErrorDto> {
-    let mut guard = state.lock().map_err(|_| {
-        error::ArchiveError::StatePoisoned.to_dto("import_playlist_apply", None)
-    })?;
+    let mut guard = state
+        .lock()
+        .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("import_playlist_apply", None))?;
     let session = guard.as_mut().ok_or_else(|| {
         error::ArchiveError::MissingUserDataBackup.to_dto("import_playlist_apply", None)
     })?;
@@ -2644,9 +2831,8 @@ fn import_playlist_apply(
             .to_dto("import_playlist_apply", Some(session.target_path.as_path()))
     })?;
 
-    let mut available = compute_available_ids(&tx).map_err(|err| {
-        err.to_dto("import_playlist_apply", Some(session.target_path.as_path()))
-    })?;
+    let mut available = compute_available_ids(&tx)
+        .map_err(|err| err.to_dto("import_playlist_apply", Some(session.target_path.as_path())))?;
     let before = db::edit::snapshot_tables(&tx, db::edit::PLAYLIST_IMPORT_SNAPSHOT_TABLES)
         .map_err(|err| err.to_dto("import_playlist_apply", Some(session.target_path.as_path())))?;
     let skipped = db::playlist_io::apply_import_playlist(
@@ -2701,7 +2887,10 @@ fn media_add_precheck(
     let prechecks = db::media::media_precheck(&conn, &path_bufs)
         .map_err(|err| err.to_dto("media_add_precheck", Some(session.target_path.as_path())))?;
 
-    Ok(prechecks.iter().map(db::media::MediaPrecheck::to_dto).collect())
+    Ok(prechecks
+        .iter()
+        .map(db::media::MediaPrecheck::to_dto)
+        .collect())
 }
 
 /// The Tauri-facing result of [`media_add_apply`] — how many of the
@@ -2737,14 +2926,15 @@ fn media_add_apply(
     let mut guard = state
         .lock()
         .map_err(|_| error::ArchiveError::StatePoisoned.to_dto("media_add_apply", None))?;
-    let session = guard
-        .as_mut()
-        .ok_or_else(|| error::ArchiveError::MissingUserDataBackup.to_dto("media_add_apply", None))?;
+    let session = guard.as_mut().ok_or_else(|| {
+        error::ArchiveError::MissingUserDataBackup.to_dto("media_add_apply", None)
+    })?;
 
     let path_bufs: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
 
     let conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
-        error::ArchiveError::from(err).to_dto("media_add_apply", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err)
+            .to_dto("media_add_apply", Some(session.target_path.as_path()))
     })?;
 
     let prechecks = db::media::media_precheck(&conn, &path_bufs)
@@ -2759,7 +2949,8 @@ fn media_add_apply(
     }
 
     let guard_pragma = db::pragma_guard::PragmaGuard::new(&conn).map_err(|err| {
-        error::ArchiveError::from(err).to_dto("media_add_apply", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err)
+            .to_dto("media_add_apply", Some(session.target_path.as_path()))
     })?;
     conn.execute_batch("PRAGMA foreign_keys = 'OFF';")
         .map_err(|err| {
@@ -2768,7 +2959,8 @@ fn media_add_apply(
         })?;
 
     let tx = conn.unchecked_transaction().map_err(|err| {
-        error::ArchiveError::from(err).to_dto("media_add_apply", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err)
+            .to_dto("media_add_apply", Some(session.target_path.as_path()))
     })?;
 
     let mut available = compute_available_ids(&tx)
@@ -2792,7 +2984,8 @@ fn media_add_apply(
         .map_err(|err| err.to_dto("media_add_apply", Some(session.target_path.as_path())))?;
 
     tx.commit().map_err(|err| {
-        error::ArchiveError::from(err).to_dto("media_add_apply", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err)
+            .to_dto("media_add_apply", Some(session.target_path.as_path()))
     })?;
     drop(guard_pragma);
 
@@ -2820,12 +3013,17 @@ fn playlist_delete_dry_run(
     })?;
 
     let mut conn = rusqlite::Connection::open(&session.db_path).map_err(|err| {
-        error::ArchiveError::from(err)
-            .to_dto("playlist_delete_dry_run", Some(session.target_path.as_path()))
+        error::ArchiveError::from(err).to_dto(
+            "playlist_delete_dry_run",
+            Some(session.target_path.as_path()),
+        )
     })?;
 
     db::media::dry_run_delete_playlist_items(&mut conn, &ids).map_err(|err| {
-        err.to_dto("playlist_delete_dry_run", Some(session.target_path.as_path()))
+        err.to_dto(
+            "playlist_delete_dry_run",
+            Some(session.target_path.as_path()),
+        )
     })
 }
 

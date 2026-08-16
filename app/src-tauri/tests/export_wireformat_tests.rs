@@ -86,7 +86,10 @@ fn exported_bytes_match_golden_fixture_exactly() {
     let golden_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/wire/favorites_golden.txt");
     let golden = common::read_file_bytes(&golden_path);
-    assert_eq!(actual, golden, "exported bytes must byte-match the golden fixture exactly");
+    assert_eq!(
+        actual, golden,
+        "exported bytes must byte-match the golden fixture exactly"
+    );
 }
 
 #[test]
@@ -117,7 +120,10 @@ fn null_column_renders_as_literal_none() {
     export_favorites(&conn, None, &pinned_header(), &out_path).expect("export");
 
     let text = std::fs::read_to_string(&out_path).expect("read exported file");
-    assert!(text.contains("|None|"), "a NULL column must render as the literal string None");
+    assert!(
+        text.contains("|None|"),
+        "a NULL column must render as the literal string None"
+    );
 }
 
 #[test]
@@ -128,7 +134,9 @@ fn selection_scoped_export_contains_only_the_selected_rows() {
 
     // The second TagMap row (Position=1) — resolve its id directly.
     let tagmap_id: i64 = conn
-        .query_row("SELECT TagMapId FROM TagMap WHERE Position = 1", [], |r| r.get(0))
+        .query_row("SELECT TagMapId FROM TagMap WHERE Position = 1", [], |r| {
+            r.get(0)
+        })
         .expect("read tagmap id");
     let ids = NonEmptyTagMapIds::try_from(vec![tagmap_id]).expect("non-empty selection");
 
@@ -163,7 +171,8 @@ fn pinned_bookmarks_header() -> ExportHeaderCtx<'static> {
 /// contains a literal `|` — both must export with `¦` in place of `|`.
 fn seed_bookmarks_golden_fixture_rows(db_path: &std::path::Path) -> (i64, i64) {
     let conn = Connection::open(db_path).expect("open fixture db");
-    conn.execute_batch("PRAGMA foreign_keys = OFF").expect("fk off");
+    conn.execute_batch("PRAGMA foreign_keys = OFF")
+        .expect("fk off");
 
     conn.execute(
         "INSERT INTO Location (BookNumber, ChapterNumber, DocumentId, Track, IssueTagNumber, KeySymbol, MepsLanguage, Type) \
@@ -230,7 +239,10 @@ fn exported_bookmarks_match_golden_fixture_exactly() {
     let golden_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/wire/bookmarks_golden.txt");
     let golden = common::read_file_bytes(&golden_path);
-    assert_eq!(actual, golden, "exported Bookmarks bytes must byte-match the golden fixture");
+    assert_eq!(
+        actual, golden,
+        "exported Bookmarks bytes must byte-match the golden fixture"
+    );
 }
 
 #[test]
@@ -244,7 +256,10 @@ fn exported_bookmarks_never_contain_end_sentinel() {
     export_bookmarks(&conn, None, &pinned_bookmarks_header(), &out_path).expect("export");
 
     let text = std::fs::read_to_string(&out_path).expect("read exported file");
-    assert!(!text.contains("==={END}==="), "Bookmarks export must never write an {{END}} sentinel");
+    assert!(
+        !text.contains("==={END}==="),
+        "Bookmarks export must never write an {{END}} sentinel"
+    );
 }
 
 #[test]
@@ -258,8 +273,14 @@ fn bookmark_title_pipe_exports_as_broken_bar() {
     export_bookmarks(&conn, None, &pinned_bookmarks_header(), &out_path).expect("export");
 
     let text = std::fs::read_to_string(&out_path).expect("read exported file");
-    assert!(text.contains("Genesis \u{A6} Note"), "a literal | in Title must export as \u{A6}");
-    assert!(!text.contains("Genesis | Note"), "the literal | must not survive export");
+    assert!(
+        text.contains("Genesis \u{A6} Note"),
+        "a literal | in Title must export as \u{A6}"
+    );
+    assert!(
+        !text.contains("Genesis | Note"),
+        "the literal | must not survive export"
+    );
 }
 
 #[test]
@@ -300,7 +321,8 @@ fn pinned_annotations_header() -> ExportHeaderCtx<'static> {
 /// Value on the second, padded on the first to prove `.trim()` at export.
 fn seed_annotations_golden_fixture_rows(db_path: &std::path::Path) -> (i64, i64) {
     let conn = Connection::open(db_path).expect("open fixture db");
-    conn.execute_batch("PRAGMA foreign_keys = OFF").expect("fk off");
+    conn.execute_batch("PRAGMA foreign_keys = OFF")
+        .expect("fk off");
 
     conn.execute(
         "INSERT INTO Location (BookNumber, ChapterNumber, DocumentId, Track, IssueTagNumber, KeySymbol, MepsLanguage, Type) \
@@ -349,7 +371,10 @@ fn exported_annotations_match_golden_fixture_exactly() {
     let golden_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/wire/annotations_golden.txt");
     let golden = common::read_file_bytes(&golden_path);
-    assert_eq!(actual, golden, "exported Annotations bytes must byte-match the golden fixture");
+    assert_eq!(
+        actual, golden,
+        "exported Annotations bytes must byte-match the golden fixture"
+    );
 }
 
 #[test]
@@ -364,8 +389,14 @@ fn exported_annotations_end_with_end_sentinel_and_no_trailing_newline() {
 
     let bytes = common::read_file_bytes(&out_path);
     let text = String::from_utf8(bytes).expect("utf8");
-    assert!(text.ends_with("\n==={END}==="), "Annotations export must end with the {{END}} sentinel");
-    assert!(!text.ends_with('\n'), "no trailing newline after the {{END}} sentinel");
+    assert!(
+        text.ends_with("\n==={END}==="),
+        "Annotations export must end with the {{END}} sentinel"
+    );
+    assert!(
+        !text.ends_with('\n'),
+        "no trailing newline after the {{END}} sentinel"
+    );
 }
 
 #[test]
@@ -429,7 +460,8 @@ fn pinned_highlights_header() -> ExportHeaderCtx<'static> {
 /// `NULL` -> `None`).
 fn seed_highlights_golden_fixture_rows(db_path: &std::path::Path) -> (i64, i64) {
     let conn = Connection::open(db_path).expect("open fixture db");
-    conn.execute_batch("PRAGMA foreign_keys = OFF").expect("fk off");
+    conn.execute_batch("PRAGMA foreign_keys = OFF")
+        .expect("fk off");
 
     conn.execute(
         "INSERT INTO Location (BookNumber, ChapterNumber, DocumentId, Track, IssueTagNumber, KeySymbol, MepsLanguage, Type) \
@@ -498,7 +530,10 @@ fn exported_highlights_match_golden_fixture_exactly() {
     let golden_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/wire/highlights_golden.txt");
     let golden = common::read_file_bytes(&golden_path);
-    assert_eq!(actual, golden, "exported Highlights bytes must byte-match the golden fixture");
+    assert_eq!(
+        actual, golden,
+        "exported Highlights bytes must byte-match the golden fixture"
+    );
 }
 
 #[test]
@@ -512,7 +547,10 @@ fn exported_highlights_never_contain_end_sentinel() {
     export_highlights(&conn, None, &pinned_highlights_header(), &out_path).expect("export");
 
     let text = std::fs::read_to_string(&out_path).expect("read exported file");
-    assert!(!text.contains("==={END}==="), "Highlights export must never write an {{END}} sentinel");
+    assert!(
+        !text.contains("==={END}==="),
+        "Highlights export must never write an {{END}} sentinel"
+    );
 }
 
 #[test]
@@ -548,7 +586,10 @@ fn highlights_null_document_id_renders_as_literal_none() {
     export_highlights(&conn, None, &pinned_highlights_header(), &out_path).expect("export");
 
     let text = std::fs::read_to_string(&out_path).expect("read exported file");
-    assert!(text.contains("|None|0|nwt|"), "a NULL DocumentId must render as the literal string None");
+    assert!(
+        text.contains("|None|0|nwt|"),
+        "a NULL DocumentId must render as the literal string None"
+    );
 }
 
 #[test]
@@ -593,7 +634,8 @@ fn pinned_notes_header() -> ExportHeaderCtx<'static> {
 /// Returns the Note ids in export order.
 fn seed_notes_golden_fixture_rows(db_path: &std::path::Path) -> (i64, i64, i64) {
     let conn = Connection::open(db_path).expect("open fixture db");
-    conn.execute_batch("PRAGMA foreign_keys = OFF").expect("fk off");
+    conn.execute_batch("PRAGMA foreign_keys = OFF")
+        .expect("fk off");
 
     // Independent (untitled, multi-line, no tags).
     conn.execute(
@@ -692,7 +734,10 @@ fn exported_notes_match_golden_fixture_exactly() {
     let golden_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/wire/notes_golden.txt");
     let golden = common::read_file_bytes(&golden_path);
-    assert_eq!(actual, golden, "exported Notes bytes must byte-match the golden fixture exactly");
+    assert_eq!(
+        actual, golden,
+        "exported Notes bytes must byte-match the golden fixture exactly"
+    );
 }
 
 #[test]
@@ -742,7 +787,10 @@ fn notes_empty_heading_bracket_omitted() {
     let text = std::fs::read_to_string(&out_path).expect("read exported file");
     // The publication note's Location.Title is '' — its record must carry
     // no {HEADING substring at all.
-    let pub_record = text.split("Pub Note").next().expect("publication record present");
+    let pub_record = text
+        .split("Pub Note")
+        .next()
+        .expect("publication record present");
     assert!(!pub_record.contains("{HEADING"));
 }
 

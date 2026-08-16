@@ -153,9 +153,8 @@ pub fn apply_color(
             let placeholders: String = std::iter::repeat_n("?", ids.len())
                 .collect::<Vec<_>>()
                 .join(",");
-            let select_sql = format!(
-                "SELECT UserMarkId FROM BlockRange WHERE BlockRangeId IN ({placeholders})"
-            );
+            let select_sql =
+                format!("SELECT UserMarkId FROM BlockRange WHERE BlockRangeId IN ({placeholders})");
             let user_mark_ids: Vec<i64> = {
                 let mut stmt = tx
                     .prepare(&select_sql)
@@ -186,9 +185,9 @@ pub fn apply_color(
                  ORDER BY NoteId"
             );
             let to_synthesize: Vec<(i64, i64)> = {
-                let mut stmt = tx.prepare(&synth_sql).map_err(|e| {
-                    map_sqlite_err(e, "apply_color: find notes needing synthesis")
-                })?;
+                let mut stmt = tx
+                    .prepare(&synth_sql)
+                    .map_err(|e| map_sqlite_err(e, "apply_color: find notes needing synthesis"))?;
                 let rows = stmt
                     .query_map(rusqlite::params_from_iter(ids.iter()), |row| {
                         Ok((row.get(0)?, row.get(1)?))

@@ -92,7 +92,11 @@ fn recolor_highlights_updates_usermark_colorindex_only() {
     apply_color(&tx, &selection, 3, SEED).expect("apply_color must succeed");
 
     let color: i64 = tx
-        .query_row("SELECT ColorIndex FROM UserMark WHERE UserMarkId = 950", [], |r| r.get(0))
+        .query_row(
+            "SELECT ColorIndex FROM UserMark WHERE UserMarkId = 950",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
     assert_eq!(color, 3);
 
@@ -119,9 +123,16 @@ fn recolor_highlights_with_grey_is_a_silent_no_op() {
     apply_color(&tx, &selection, 0, SEED).expect("Highlights + Grey must not error");
 
     let color: i64 = tx
-        .query_row("SELECT ColorIndex FROM UserMark WHERE UserMarkId = 950", [], |r| r.get(0))
+        .query_row(
+            "SELECT ColorIndex FROM UserMark WHERE UserMarkId = 950",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
-    assert_eq!(color, 1, "ColorIndex must be UNCHANGED (still the seeded value 1)");
+    assert_eq!(
+        color, 1,
+        "ColorIndex must be UNCHANGED (still the seeded value 1)"
+    );
 
     tx.rollback().unwrap();
 }
@@ -136,7 +147,9 @@ fn recolor_notes_synthesizes_usermark_for_plain_note() {
     apply_color(&tx, &selection, 5, SEED).expect("apply_color must succeed");
 
     let (user_mark_id,): (Option<i64>,) = tx
-        .query_row("SELECT UserMarkId FROM Note WHERE NoteId = 960", [], |r| Ok((r.get(0)?,)))
+        .query_row("SELECT UserMarkId FROM Note WHERE NoteId = 960", [], |r| {
+            Ok((r.get(0)?,))
+        })
         .unwrap();
     let user_mark_id = user_mark_id.expect("Note 960 must now have a synthesized UserMarkId");
 
@@ -166,9 +179,14 @@ fn recolor_notes_with_grey_is_not_a_no_op_still_synthesizes() {
     apply_color(&tx, &selection, 0, SEED).expect("apply_color must succeed");
 
     let (user_mark_id,): (Option<i64>,) = tx
-        .query_row("SELECT UserMarkId FROM Note WHERE NoteId = 960", [], |r| Ok((r.get(0)?,)))
+        .query_row("SELECT UserMarkId FROM Note WHERE NoteId = 960", [], |r| {
+            Ok((r.get(0)?,))
+        })
         .unwrap();
-    assert!(user_mark_id.is_some(), "Notes + Grey must still synthesize (unlike Highlights + Grey)");
+    assert!(
+        user_mark_id.is_some(),
+        "Notes + Grey must still synthesize (unlike Highlights + Grey)"
+    );
 
     tx.rollback().unwrap();
 }
@@ -177,18 +195,29 @@ fn recolor_notes_with_grey_is_not_a_no_op_still_synthesizes() {
 fn recolor_notes_already_marked_updates_existing_usermark_no_new_synthesis() {
     let (_dir, conn) = open_seeded();
     let tx = conn.unchecked_transaction().expect("open tx");
-    let before_count: i64 = tx.query_row("SELECT COUNT(*) FROM UserMark", [], |r| r.get(0)).unwrap();
+    let before_count: i64 = tx
+        .query_row("SELECT COUNT(*) FROM UserMark", [], |r| r.get(0))
+        .unwrap();
 
     let selection = ColorSelection::Notes {
         ids: NonEmptyNoteIds::try_from(vec![961_i64]).unwrap(),
     };
     apply_color(&tx, &selection, 6, SEED).expect("apply_color must succeed");
 
-    let after_count: i64 = tx.query_row("SELECT COUNT(*) FROM UserMark", [], |r| r.get(0)).unwrap();
-    assert_eq!(before_count, after_count, "no new UserMark must be synthesized");
+    let after_count: i64 = tx
+        .query_row("SELECT COUNT(*) FROM UserMark", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(
+        before_count, after_count,
+        "no new UserMark must be synthesized"
+    );
 
     let color: i64 = tx
-        .query_row("SELECT ColorIndex FROM UserMark WHERE UserMarkId = 950", [], |r| r.get(0))
+        .query_row(
+            "SELECT ColorIndex FROM UserMark WHERE UserMarkId = 950",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
     assert_eq!(color, 6);
 
@@ -205,9 +234,14 @@ fn recolor_notes_independent_note_is_untouched() {
     apply_color(&tx, &selection, 2, SEED).expect("an independent note must not error");
 
     let (user_mark_id,): (Option<i64>,) = tx
-        .query_row("SELECT UserMarkId FROM Note WHERE NoteId = 962", [], |r| Ok((r.get(0)?,)))
+        .query_row("SELECT UserMarkId FROM Note WHERE NoteId = 962", [], |r| {
+            Ok((r.get(0)?,))
+        })
         .unwrap();
-    assert!(user_mark_id.is_none(), "a LocationId-NULL note can never be recolored/synthesized");
+    assert!(
+        user_mark_id.is_none(),
+        "a LocationId-NULL note can never be recolored/synthesized"
+    );
 
     tx.rollback().unwrap();
 }
@@ -244,5 +278,8 @@ fn apply_color_same_seed_produces_identical_synthesized_guid() {
         .unwrap();
     tx2.rollback().unwrap();
 
-    assert_eq!(guid1, guid2, "same seed + same note id must synthesize the identical GUID");
+    assert_eq!(
+        guid1, guid2,
+        "same seed + same note id must synthesize the identical GUID"
+    );
 }

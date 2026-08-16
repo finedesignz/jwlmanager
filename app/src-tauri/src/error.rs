@@ -214,14 +214,16 @@ impl ArchiveError {
             ArchiveError::ImportFailed { .. } => ("import_failed", "error.archive.import_failed"),
             // `reason` is internal-only (module docs) — the DTO exposes only
             // the stable code + message_key; the frontend copy is generic.
-            ArchiveError::PlaylistExportFailed { .. } => {
-                ("playlist_export_failed", "error.archive.playlist_export_failed")
-            }
+            ArchiveError::PlaylistExportFailed { .. } => (
+                "playlist_export_failed",
+                "error.archive.playlist_export_failed",
+            ),
             // `reason` is internal-only (module docs) — the DTO exposes only
             // the stable code + message_key; the frontend copy is generic.
-            ArchiveError::PlaylistImportFailed { .. } => {
-                ("playlist_import_failed", "error.archive.playlist_import_failed")
-            }
+            ArchiveError::PlaylistImportFailed { .. } => (
+                "playlist_import_failed",
+                "error.archive.playlist_import_failed",
+            ),
             // `reason` is internal-only (module docs) — the DTO exposes only
             // the stable code + message_key; the frontend copy is generic
             // ("no files were added and the archive is unchanged").
@@ -233,9 +235,10 @@ impl ArchiveError {
             // which is surfaced per-file in the frontend's row list, never as
             // a whole-dialog DTO error; kept here for completeness of the
             // exhaustive match.
-            ArchiveError::MediaUnsupportedFormat { .. } => {
-                ("media_unsupported_format", "error.archive.media_unsupported_format")
-            }
+            ArchiveError::MediaUnsupportedFormat { .. } => (
+                "media_unsupported_format",
+                "error.archive.media_unsupported_format",
+            ),
             // `reason` is internal-only (module docs) — the DTO exposes only
             // the stable code + message_key; the frontend copy is generic.
             ArchiveError::MediaDeleteFailed { .. } => {

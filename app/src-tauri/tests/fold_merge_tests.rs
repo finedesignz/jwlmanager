@@ -138,7 +138,8 @@ fn fold_merge_carries_all_sources() {
     let source_hashes_before: Vec<String> = sources.iter().map(|p| hash_file(p)).collect();
 
     let (mut session, _notes) = open_session(&dest_archive);
-    fold_merge_commit_with_lib_path(&lib, &mut session, &sources).expect("fold commit must succeed");
+    fold_merge_commit_with_lib_path(&lib, &mut session, &sources)
+        .expect("fold commit must succeed");
 
     // Per-source content presence — NEVER a bare total row count, which a
     // "collapsed to last source wins" bug could still satisfy.
@@ -440,7 +441,10 @@ fn fold_playlist_graph_merge() {
                     |_| Ok(()),
                 )
                 .is_ok();
-            assert!(media_present, "D10-06: IndependentMedia row missing after a fold that reported success");
+            assert!(
+                media_present,
+                "D10-06: IndependentMedia row missing after a fold that reported success"
+            );
             assert!(
                 map_present,
                 "D10-06: PlaylistItemLocationMap row missing (or not remapped to the new \
@@ -493,11 +497,15 @@ fn fold_step_failure_pristine() {
     let _lock = JWLCORE_TEST_LOCK.lock().unwrap();
 
     let (_dest_fx, dest_archive) = common::generate_merge_dest_archive();
-    let (_s1_fx, source_1) =
-        common::generate_fold_standalone_source_archive("merge-fold-pristine-s1-0001", "s1 content");
+    let (_s1_fx, source_1) = common::generate_fold_standalone_source_archive(
+        "merge-fold-pristine-s1-0001",
+        "s1 content",
+    );
     let (_bad_fx, bad_source) = common::generate_merge_failing_source_archive();
-    let (_s3_fx, source_3) =
-        common::generate_fold_standalone_source_archive("merge-fold-pristine-s3-0001", "s3 content");
+    let (_s3_fx, source_3) = common::generate_fold_standalone_source_archive(
+        "merge-fold-pristine-s3-0001",
+        "s3 content",
+    );
     let sources = [source_1, bad_source, source_3];
 
     let (mut session, _n) = open_session(&dest_archive);
@@ -702,7 +710,9 @@ fn fold_dry_run_failure_cleans_up() {
             "unexpected non-userData.db residue after a failed dry-run: {path:?}"
         );
     }
-    eprintln!("fold_dry_run_failure_cleans_up OBSERVED residue after the failed dry-run: {residue:?}");
+    eprintln!(
+        "fold_dry_run_failure_cleans_up OBSERVED residue after the failed dry-run: {residue:?}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -782,4 +792,3 @@ fn fold_media_intermediate_step() {
         );
     }
 }
-

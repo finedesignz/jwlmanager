@@ -1843,7 +1843,11 @@ fn insert_fold_contested_rows(
         "INSERT INTO Note (NoteId, Guid, UserMarkId, LocationId, Title, Content, LastModified, \
          Created, BlockType, BlockIdentifier) VALUES (1, ?1, 1, 1, 'Contested note', \
          ?2, ?3, '2020-01-01T00:00:00Z', 2, 1)",
-        rusqlite::params![MERGE_FOLD_CONTESTED_NOTE_GUID, contested_content, last_modified],
+        rusqlite::params![
+            MERGE_FOLD_CONTESTED_NOTE_GUID,
+            contested_content,
+            last_modified
+        ],
     )
     .expect("fold contested Note");
     // This source's OWN uniquely-identifiable row.
@@ -1959,8 +1963,11 @@ pub fn generate_fold_playlist_graph_source() -> (TempDir, PathBuf) {
         )
         .expect("insert fold playlist-graph PlaylistItemLocationMap");
     }
-    fs::write(work_dir.path().join(FOLD_PLAYLIST_THUMB_NAME), b"fake-thumb-bytes-fold-fixture")
-        .expect("write fold playlist-graph thumbnail file");
+    fs::write(
+        work_dir.path().join(FOLD_PLAYLIST_THUMB_NAME),
+        b"fake-thumb-bytes-fold-fixture",
+    )
+    .expect("write fold playlist-graph thumbnail file");
 
     // Bespoke archive assembly (like generate_media_bearing_merge_source) so
     // the thumbnail file can be included as an extra root-level member beyond
@@ -2256,11 +2263,8 @@ pub fn seed_one_favorite(db_path: &Path) -> (i64, i64) {
     let conn = Connection::open(db_path).expect("open seeded db");
     conn.execute_batch("PRAGMA foreign_keys = OFF")
         .expect("fk off");
-    conn.execute(
-        "INSERT INTO Tag (Type, Name) VALUES (0, 'Favorite')",
-        [],
-    )
-    .expect("insert system Favorite tag");
+    conn.execute("INSERT INTO Tag (Type, Name) VALUES (0, 'Favorite')", [])
+        .expect("insert system Favorite tag");
     let tag_id = conn.last_insert_rowid();
     conn.execute(
         "INSERT INTO Location (DocumentId, Track, IssueTagNumber, KeySymbol, MepsLanguage, Type) \

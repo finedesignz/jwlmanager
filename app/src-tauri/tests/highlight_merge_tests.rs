@@ -94,7 +94,10 @@ fn merge_block_ranges_absorbs_overlapping_ranges_regardless_of_color() {
         .expect("count BlockRange rows at Identifier 5");
     // The two absorbed rows (901, 911) are gone; the new merged row plus the
     // disjoint 921 remain — 2 rows total.
-    assert_eq!(remaining_at_identifier_5, 2, "absorbed rows must be deleted, merged + disjoint must remain");
+    assert_eq!(
+        remaining_at_identifier_5, 2,
+        "absorbed rows must be deleted, merged + disjoint must remain"
+    );
 
     let exists_901: bool = tx
         .query_row(
@@ -128,8 +131,15 @@ fn merge_block_ranges_absorbs_overlapping_ranges_regardless_of_color() {
             |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .expect("read merged row");
-    assert_eq!((start, end), (0, 25), "union must span both absorbed ranges");
-    assert_eq!(block_type, 1, "merged row's BlockType must be carried through, never 0");
+    assert_eq!(
+        (start, end),
+        (0, 25),
+        "union must span both absorbed ranges"
+    );
+    assert_eq!(
+        block_type, 1,
+        "merged row's BlockType must be carried through, never 0"
+    );
 
     tx.rollback().unwrap();
 }
@@ -153,7 +163,11 @@ fn merge_block_ranges_with_no_overlap_inserts_a_new_row_and_absorbs_nothing() {
     let after: i64 = tx
         .query_row("SELECT COUNT(*) FROM BlockRange", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(after, before + 1, "a disjoint new range only inserts, never absorbs");
+    assert_eq!(
+        after,
+        before + 1,
+        "a disjoint new range only inserts, never absorbs"
+    );
 
     let exists_901: bool = tx
         .query_row(

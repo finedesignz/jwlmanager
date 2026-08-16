@@ -7,7 +7,9 @@
 mod common;
 
 use jwlmanager_lib::db::ids::compute_available_ids;
-use jwlmanager_lib::db::media::{apply_media_add, media_precheck, perform_staged_copies, MediaClassification};
+use jwlmanager_lib::db::media::{
+    apply_media_add, media_precheck, perform_staged_copies, MediaClassification,
+};
 use rusqlite::Connection;
 use std::fs;
 use std::path::PathBuf;
@@ -36,7 +38,10 @@ fn sniff_and_precheck_classify_new_and_reject_heic() {
     let results = media_precheck(&conn, &[png_path.clone(), heic_path.clone()]).unwrap();
     assert_eq!(results.len(), 2);
 
-    assert!(matches!(results[0].classification, MediaClassification::New { .. }));
+    assert!(matches!(
+        results[0].classification,
+        MediaClassification::New { .. }
+    ));
     assert_eq!(results[0].path, png_path);
 
     match &results[1].classification {
@@ -78,7 +83,10 @@ fn duplicate_hash_file_adds_zero_rows_and_copies_zero_files() {
 
     let results = media_precheck(&conn, &[png_path]).unwrap();
     assert_eq!(results.len(), 1);
-    assert!(matches!(results[0].classification, MediaClassification::Duplicate { .. }));
+    assert!(matches!(
+        results[0].classification,
+        MediaClassification::Duplicate { .. }
+    ));
 
     // Only the pre-seeded row exists — precheck alone never inserts.
     assert_eq!(table_count(&conn, "IndependentMedia"), 1);
@@ -93,7 +101,15 @@ fn duplicate_hash_file_adds_zero_rows_and_copies_zero_files() {
         .into_iter()
         .filter(|p| matches!(p.classification, MediaClassification::New { .. }))
         .collect();
-    let added = apply_media_add(&tx, "My Playlist", &new_only, &mut staged, &mut available, 1).unwrap();
+    let added = apply_media_add(
+        &tx,
+        "My Playlist",
+        &new_only,
+        &mut staged,
+        &mut available,
+        1,
+    )
+    .unwrap();
     assert_eq!(added, 0);
     assert!(staged.is_empty());
     perform_staged_copies(&staged, media_dir.path()).unwrap();
@@ -120,22 +136,42 @@ fn one_new_file_produces_two_independent_media_rows_and_thumbnail_is_byte_copy()
     let tx = conn.transaction().unwrap();
     let mut available = compute_available_ids(&tx).unwrap();
     let mut staged = Vec::new();
-    let added = apply_media_add(&tx, "My Playlist", &results, &mut staged, &mut available, 42).unwrap();
+    let added = apply_media_add(
+        &tx,
+        "My Playlist",
+        &results,
+        &mut staged,
+        &mut available,
+        42,
+    )
+    .unwrap();
     assert_eq!(added, 1);
     perform_staged_copies(&staged, media_dir.path()).unwrap();
     tx.commit().unwrap();
 
     assert_eq!(table_count(&conn, "IndependentMedia"), 2);
     let paths: Vec<String> = {
-        let mut stmt = conn.prepare("SELECT FilePath FROM IndependentMedia ORDER BY IndependentMediaId").unwrap();
-        stmt.query_map([], |r| r.get(0)).unwrap().collect::<Result<_, _>>().unwrap()
+        let mut stmt = conn
+            .prepare("SELECT FilePath FROM IndependentMedia ORDER BY IndependentMediaId")
+            .unwrap();
+        stmt.query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
     };
     assert_eq!(paths.len(), 2);
-    assert_ne!(paths[0], paths[1], "original and thumbnail must have different FilePath values");
+    assert_ne!(
+        paths[0], paths[1],
+        "original and thumbnail must have different FilePath values"
+    );
 
     // DurationTicks literal.
     let duration: i64 = conn
-        .query_row("SELECT DurationTicks FROM PlaylistItemIndependentMediaMap", [], |r| r.get(0))
+        .query_row(
+            "SELECT DurationTicks FROM PlaylistItemIndependentMediaMap",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
     assert_eq!(duration, 40_000_000);
 
@@ -168,12 +204,15 @@ fn disambiguation_schemes_are_distinct_underscore_vs_parenthetical() {
 
     let results = media_precheck(&conn, &[path_a, path_b]).unwrap();
     assert_eq!(results.len(), 2);
-    assert!(results.iter().all(|p| matches!(p.classification, MediaClassification::New { .. })));
+    assert!(results
+        .iter()
+        .all(|p| matches!(p.classification, MediaClassification::New { .. })));
 
     let tx = conn.transaction().unwrap();
     let mut available = compute_available_ids(&tx).unwrap();
     let mut staged = Vec::new();
-    let added = apply_media_add(&tx, "My Playlist", &results, &mut staged, &mut available, 7).unwrap();
+    let added =
+        apply_media_add(&tx, "My Playlist", &results, &mut staged, &mut available, 7).unwrap();
     assert_eq!(added, 2);
     perform_staged_copies(&staged, media_dir.path()).unwrap();
     tx.commit().unwrap();
@@ -183,23 +222,37 @@ fn disambiguation_schemes_are_distinct_underscore_vs_parenthetical() {
         let mut stmt = conn
             .prepare("SELECT FilePath FROM IndependentMedia WHERE OriginalFilename = 'photo.png' ORDER BY IndependentMediaId")
             .unwrap();
-        stmt.query_map([], |r| r.get(0)).unwrap().collect::<Result<_, _>>().unwrap()
+        stmt.query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
     };
     // 2 files x 2 rows each (original + thumbnail) = 4 IndependentMedia rows,
     // but only the two ORIGINAL FilePaths follow the underscore scheme
     // exactly ("photo.png" then "photo.png_1") — thumbnails use fresh GUID
     // names, so filter to the two whose FilePath does not look like a GUID.
-    let originals: Vec<&String> = file_paths.iter().filter(|p| p.starts_with("photo.png")).collect();
+    let originals: Vec<&String> = file_paths
+        .iter()
+        .filter(|p| p.starts_with("photo.png"))
+        .collect();
     assert_eq!(originals.len(), 2);
     assert!(originals.contains(&&"photo.png".to_string()));
     assert!(originals.contains(&&"photo.png_1".to_string()));
 
     // Parenthetical scheme on PlaylistItem.Label.
     let labels: Vec<String> = {
-        let mut stmt = conn.prepare("SELECT Label FROM PlaylistItem ORDER BY PlaylistItemId").unwrap();
-        stmt.query_map([], |r| r.get(0)).unwrap().collect::<Result<_, _>>().unwrap()
+        let mut stmt = conn
+            .prepare("SELECT Label FROM PlaylistItem ORDER BY PlaylistItemId")
+            .unwrap();
+        stmt.query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
     };
-    assert_eq!(labels, vec!["photo.png".to_string(), "photo.png (1)".to_string()]);
+    assert_eq!(
+        labels,
+        vec!["photo.png".to_string(), "photo.png (1)".to_string()]
+    );
 }
 
 #[test]

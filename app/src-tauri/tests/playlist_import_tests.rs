@@ -88,11 +88,14 @@ fn table_count(conn: &Connection, table: &str) -> i64 {
 
 #[test]
 fn incoming_playlist_item_id_collision_never_overwrites_existing_row() {
-    let (_container_dir, container_path) = build_container(5000, "Container Song", "Collide.jwlplaylist");
+    let (_container_dir, container_path) =
+        build_container(5000, "Container Song", "Collide.jwlplaylist");
 
     let (target_dir, target_db) = common::fresh_v16_db();
     let target_conn = Connection::open(&target_db).expect("open target db");
-    target_conn.execute_batch("PRAGMA foreign_keys = OFF").unwrap();
+    target_conn
+        .execute_batch("PRAGMA foreign_keys = OFF")
+        .unwrap();
     // Pre-seed a colliding row at the SAME id (5000) the container's own
     // PlaylistItemId happens to be — this must never be touched.
     target_conn
@@ -123,7 +126,10 @@ fn incoming_playlist_item_id_collision_never_overwrites_existing_row() {
     )
     .expect("apply should succeed");
     tx.commit().unwrap();
-    assert_eq!(skipped, 0, "no existing row semantically matches — nothing skipped");
+    assert_eq!(
+        skipped, 0,
+        "no existing row semantically matches — nothing skipped"
+    );
 
     let label: String = target_conn
         .query_row(
@@ -132,7 +138,10 @@ fn incoming_playlist_item_id_collision_never_overwrites_existing_row() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(label, "Pre-Existing Unrelated Song", "the existing row must be untouched");
+    assert_eq!(
+        label, "Pre-Existing Unrelated Song",
+        "the existing row must be untouched"
+    );
 
     let imported_id: i64 = target_conn
         .query_row(
@@ -141,21 +150,33 @@ fn incoming_playlist_item_id_collision_never_overwrites_existing_row() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_ne!(imported_id, 5000, "the imported item must receive a DIFFERENT id");
+    assert_ne!(
+        imported_id, 5000,
+        "the imported item must receive a DIFFERENT id"
+    );
 }
 
 #[test]
 fn dependent_rows_reference_the_newly_allocated_id() {
-    let (_container_dir, container_path) = build_container(5000, "Dependent Song", "Dependent.jwlplaylist");
+    let (_container_dir, container_path) =
+        build_container(5000, "Dependent Song", "Dependent.jwlplaylist");
     let (target_dir, target_db) = common::fresh_v16_db();
     let mut target_conn = Connection::open(&target_db).expect("open target db");
-    target_conn.execute_batch("PRAGMA foreign_keys = OFF").unwrap();
+    target_conn
+        .execute_batch("PRAGMA foreign_keys = OFF")
+        .unwrap();
 
     let container = read_playlist_container(&container_path).expect("read container");
     let tx = target_conn.transaction().unwrap();
     let mut available = compute_available_ids(&tx).unwrap();
-    apply_import_playlist(&tx, &container, "Dependent", Some(target_dir.path()), &mut available)
-        .expect("apply should succeed");
+    apply_import_playlist(
+        &tx,
+        &container,
+        "Dependent",
+        Some(target_dir.path()),
+        &mut available,
+    )
+    .expect("apply should succeed");
     tx.commit().unwrap();
 
     let new_pi_id: i64 = target_conn
@@ -190,19 +211,27 @@ fn dependent_rows_reference_the_newly_allocated_id() {
 
 #[test]
 fn semantically_identical_reimport_is_reused_and_reported_as_skipped() {
-    let (_container_dir, container_path) = build_container(5000, "Repeat Song", "Repeat.jwlplaylist");
+    let (_container_dir, container_path) =
+        build_container(5000, "Repeat Song", "Repeat.jwlplaylist");
     let (target_dir, target_db) = common::fresh_v16_db();
     let mut target_conn = Connection::open(&target_db).expect("open target db");
-    target_conn.execute_batch("PRAGMA foreign_keys = OFF").unwrap();
+    target_conn
+        .execute_batch("PRAGMA foreign_keys = OFF")
+        .unwrap();
 
     let container = read_playlist_container(&container_path).expect("read container");
 
     {
         let tx = target_conn.transaction().unwrap();
         let mut available = compute_available_ids(&tx).unwrap();
-        let skipped =
-            apply_import_playlist(&tx, &container, "Repeat", Some(target_dir.path()), &mut available)
-                .unwrap();
+        let skipped = apply_import_playlist(
+            &tx,
+            &container,
+            "Repeat",
+            Some(target_dir.path()),
+            &mut available,
+        )
+        .unwrap();
         tx.commit().unwrap();
         assert_eq!(skipped, 0, "first import: nothing pre-exists");
     }
@@ -276,7 +305,9 @@ fn new_ids_consume_the_seeded_gap_set_before_autoincrement() {
     let (_container_dir, container_path) = build_container(5000, "Gap Song", "Gap.jwlplaylist");
     let (target_dir, target_db) = common::fresh_v16_db();
     let mut target_conn = Connection::open(&target_db).expect("open target db");
-    target_conn.execute_batch("PRAGMA foreign_keys = OFF").unwrap();
+    target_conn
+        .execute_batch("PRAGMA foreign_keys = OFF")
+        .unwrap();
 
     // Seed PlaylistItem ids 1 and 3, leaving a gap at 2 — `compute_available_ids`
     // must surface `2` as recyclable for the `PlaylistItem` table.
@@ -301,7 +332,14 @@ fn new_ids_consume_the_seeded_gap_set_before_autoincrement() {
     let container = read_playlist_container(&container_path).expect("read container");
     let tx = target_conn.transaction().unwrap();
     let mut available = compute_available_ids(&tx).unwrap();
-    apply_import_playlist(&tx, &container, "Gap", Some(target_dir.path()), &mut available).unwrap();
+    apply_import_playlist(
+        &tx,
+        &container,
+        "Gap",
+        Some(target_dir.path()),
+        &mut available,
+    )
+    .unwrap();
     tx.commit().unwrap();
 
     let new_id: i64 = target_conn
@@ -311,7 +349,10 @@ fn new_ids_consume_the_seeded_gap_set_before_autoincrement() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(new_id, 2, "the recycled gap id must be used before autoincrement (4)");
+    assert_eq!(
+        new_id, 2,
+        "the recycled gap id must be used before autoincrement (4)"
+    );
 }
 
 #[test]
@@ -322,14 +363,29 @@ fn dry_run_leaves_every_affected_table_row_count_unchanged() {
 
     let container = read_playlist_container(&container_path).expect("read container");
 
-    const TABLES: [&str; 5] = ["Tag", "TagMap", "PlaylistItem", "Location", "IndependentMedia"];
-    let before: Vec<i64> = TABLES.iter().map(|t| table_count(&target_conn, t)).collect();
+    const TABLES: [&str; 5] = [
+        "Tag",
+        "TagMap",
+        "PlaylistItem",
+        "Location",
+        "IndependentMedia",
+    ];
+    let before: Vec<i64> = TABLES
+        .iter()
+        .map(|t| table_count(&target_conn, t))
+        .collect();
 
     let report = dry_run_import_playlist(&mut target_conn, &container, "Dry").expect("dry run");
 
-    let after: Vec<i64> = TABLES.iter().map(|t| table_count(&target_conn, t)).collect();
+    let after: Vec<i64> = TABLES
+        .iter()
+        .map(|t| table_count(&target_conn, t))
+        .collect();
 
-    assert_eq!(before, after, "dry run must leave every tracked table's row count unchanged");
+    assert_eq!(
+        before, after,
+        "dry run must leave every tracked table's row count unchanged"
+    );
 
     // The report should still show what WOULD have happened (from inside the
     // dry run's own rolled-back transaction).

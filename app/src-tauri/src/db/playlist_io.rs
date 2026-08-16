@@ -352,8 +352,8 @@ pub fn export_playlist_from_seed(
 
         // PlaylistItemAccuracy — unfiltered, whole table (`:1765-1766`).
         {
-            let mut stmt =
-                conn.prepare("SELECT PlaylistItemAccuracyId, Description FROM PlaylistItemAccuracy")?;
+            let mut stmt = conn
+                .prepare("SELECT PlaylistItemAccuracyId, Description FROM PlaylistItemAccuracy")?;
             let mut rows = stmt.query([])?;
             while let Some(row) = rows.next()? {
                 let id: i64 = row.get(0)?;
@@ -569,10 +569,9 @@ pub fn read_playlist_container(path: &Path) -> Result<PlaylistContainer, Archive
 
     // Fail fast on a corrupt/non-SQLite userData.db too, before any
     // transaction opens on the TARGET archive.
-    Connection::open(&db_path)?
-        .query_row("SELECT COUNT(*) FROM sqlite_master", [], |r| {
-            r.get::<_, i64>(0)
-        })?;
+    Connection::open(&db_path)?.query_row("SELECT COUNT(*) FROM sqlite_master", [], |r| {
+        r.get::<_, i64>(0)
+    })?;
 
     Ok(PlaylistContainer { temp_dir, db_path })
 }
@@ -669,7 +668,8 @@ fn load_source_media_maps(
             row.get::<_, i64>(4)?,
         ))
     })?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(ArchiveError::from)
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(ArchiveError::from)
 }
 
 /// Resolves the `IndependentMedia` row backing a `PlaylistItem`'s own
@@ -833,7 +833,12 @@ fn resolve_target_media(
         tx.execute(
             "INSERT INTO IndependentMedia (OriginalFilename, FilePath, MimeType, Hash) \
              VALUES (?1, ?2, ?3, ?4)",
-            params![media.original_filename, candidate, media.mime_type, media.hash],
+            params![
+                media.original_filename,
+                candidate,
+                media.mime_type,
+                media.hash
+            ],
         )?;
         tx.last_insert_rowid()
     };
@@ -988,8 +993,8 @@ pub fn apply_import_playlist(
     let tag_id = ensure_playlist_tag(tx, playlist_name, available)?;
 
     let item_ids: Vec<i64> = {
-        let mut stmt =
-            container_conn.prepare("SELECT PlaylistItemId FROM PlaylistItem ORDER BY PlaylistItemId")?;
+        let mut stmt = container_conn
+            .prepare("SELECT PlaylistItemId FROM PlaylistItem ORDER BY PlaylistItemId")?;
         let rows = stmt.query_map([], |r| r.get(0))?;
         rows.collect::<Result<Vec<_>, _>>()?
     };
@@ -1175,10 +1180,12 @@ pub fn dry_run_import_playlist(
     let tx = conn.unchecked_transaction()?;
 
     let mut available = crate::db::ids::compute_available_ids(&tx)?;
-    let before = crate::db::edit::snapshot_tables(&tx, crate::db::edit::PLAYLIST_IMPORT_SNAPSHOT_TABLES)?;
+    let before =
+        crate::db::edit::snapshot_tables(&tx, crate::db::edit::PLAYLIST_IMPORT_SNAPSHOT_TABLES)?;
     let skipped = apply_import_playlist(&tx, container, playlist_name, None, &mut available)?;
     crate::db::trim::trim_sweep(&tx)?;
-    let after = crate::db::edit::snapshot_tables(&tx, crate::db::edit::PLAYLIST_IMPORT_SNAPSHOT_TABLES)?;
+    let after =
+        crate::db::edit::snapshot_tables(&tx, crate::db::edit::PLAYLIST_IMPORT_SNAPSHOT_TABLES)?;
 
     let mut report = crate::db::edit::diff_snapshots(&before, &after);
     if skipped > 0 {

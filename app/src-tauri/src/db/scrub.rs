@@ -350,10 +350,7 @@ fn obscure_opt(input: &Option<String>, rng: &mut impl SeedRng) -> Option<String>
 /// the SAME masked output for the SAME input across `dry_run_mask` and
 /// `apply_mask`. Runs inside the caller's transaction; a failure here
 /// rolls back with everything else in that transaction.
-pub fn apply_mask(
-    tx: &Transaction,
-    seed: u64,
-) -> Result<BTreeMap<String, usize>, ArchiveError> {
+pub fn apply_mask(tx: &Transaction, seed: u64) -> Result<BTreeMap<String, usize>, ArchiveError> {
     let mut rng = SplitMix64::new(seed);
     let mut counts = BTreeMap::new();
 

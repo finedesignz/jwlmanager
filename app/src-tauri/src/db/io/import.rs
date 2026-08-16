@@ -136,15 +136,16 @@ pub fn parse_favorites_file(text: &str) -> Result<Vec<FavoriteRecord>, ArchiveEr
             return Err(ArchiveError::ImportMalformed {
                 category: "Favorites".to_string(),
                 line: line_no,
-                reason: format!(
-                    "expected 6 pipe-delimited fields, found {}",
-                    fields.len()
-                ),
+                reason: format!("expected 6 pipe-delimited fields, found {}", fields.len()),
             });
         }
-        let mut opts = fields
-            .into_iter()
-            .map(|f| if f == "None" { None } else { Some(f.to_string()) });
+        let mut opts = fields.into_iter().map(|f| {
+            if f == "None" {
+                None
+            } else {
+                Some(f.to_string())
+            }
+        });
         // `unwrap()` is safe here: `opts` always yields exactly 6 items
         // (the length check above already guaranteed it), never fewer.
         records.push(FavoriteRecord {
@@ -189,11 +190,8 @@ fn ensure_favorites_tag(
         .map_err(|e| map_sqlite_err(e, "ensure_favorites_tag: insert recycled id"))?;
         Ok(id)
     } else {
-        tx.execute(
-            "INSERT INTO Tag (Type, Name) VALUES (0, 'Favorite')",
-            [],
-        )
-        .map_err(|e| map_sqlite_err(e, "ensure_favorites_tag: insert autoincrement"))?;
+        tx.execute("INSERT INTO Tag (Type, Name) VALUES (0, 'Favorite')", [])
+            .map_err(|e| map_sqlite_err(e, "ensure_favorites_tag: insert autoincrement"))?;
         Ok(tx.last_insert_rowid())
     }
 }
@@ -242,9 +240,11 @@ fn find_or_insert_publication_location(
         conditions.join(" AND ")
     );
     let existing: Option<i64> = tx
-        .query_row(&select_sql, rusqlite::params_from_iter(params.iter()), |r| {
-            r.get(0)
-        })
+        .query_row(
+            &select_sql,
+            rusqlite::params_from_iter(params.iter()),
+            |r| r.get(0),
+        )
         .optional()
         .map_err(|e| map_sqlite_err(e, "find_or_insert_publication_location: select"))?;
     if let Some(id) = existing {
@@ -258,7 +258,9 @@ fn find_or_insert_publication_location(
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             rusqlite::params![id, fields[0], fields[1], fields[2], fields[3], fields[4], fields[5]],
         )
-        .map_err(|e| map_sqlite_err(e, "find_or_insert_publication_location: insert recycled id"))?;
+        .map_err(|e| {
+            map_sqlite_err(e, "find_or_insert_publication_location: insert recycled id")
+        })?;
         Ok(id)
     } else {
         tx.execute(
@@ -324,7 +326,9 @@ pub fn apply_import_favorites(
                  VALUES (NULL, ?1, NULL, ?2, ?3)",
                 rusqlite::params![location_id, tag_id, position],
             )
-            .map_err(|e| map_sqlite_err(e, "apply_import_favorites: insert tagmap (autoincrement)"))?;
+            .map_err(|e| {
+                map_sqlite_err(e, "apply_import_favorites: insert tagmap (autoincrement)")
+            })?;
         }
         position += 1;
     }
@@ -531,7 +535,12 @@ fn find_or_insert_bookmark_scripture_location(
                 record.kind
             ],
         )
-        .map_err(|e| map_sqlite_err(e, "find_or_insert_bookmark_scripture_location: insert autoincrement"))?;
+        .map_err(|e| {
+            map_sqlite_err(
+                e,
+                "find_or_insert_bookmark_scripture_location: insert autoincrement",
+            )
+        })?;
         Ok(tx.last_insert_rowid())
     }
 }
@@ -591,7 +600,12 @@ fn find_or_insert_bookmark_publication_location(
                 record.kind
             ],
         )
-        .map_err(|e| map_sqlite_err(e, "find_or_insert_bookmark_publication_location: insert autoincrement"))?;
+        .map_err(|e| {
+            map_sqlite_err(
+                e,
+                "find_or_insert_bookmark_publication_location: insert autoincrement",
+            )
+        })?;
         Ok(tx.last_insert_rowid())
     }
 }
@@ -634,7 +648,12 @@ fn find_or_insert_bookmark_container_location(
             "INSERT INTO Location (KeySymbol, MepsLanguage, Type) VALUES (?1, ?2, 1)",
             rusqlite::params![record.key_symbol, record.meps_language],
         )
-        .map_err(|e| map_sqlite_err(e, "find_or_insert_bookmark_container_location: insert autoincrement"))?;
+        .map_err(|e| {
+            map_sqlite_err(
+                e,
+                "find_or_insert_bookmark_container_location: insert autoincrement",
+            )
+        })?;
         Ok(tx.last_insert_rowid())
     }
 }
@@ -991,7 +1010,12 @@ fn find_or_insert_annotation_location(
              VALUES (?1, ?2, ?3, NULL, 0)",
             rusqlite::params![record.doc, issue, record.pub_sym],
         )
-        .map_err(|e| map_sqlite_err(e, "find_or_insert_annotation_location: insert autoincrement"))?;
+        .map_err(|e| {
+            map_sqlite_err(
+                e,
+                "find_or_insert_annotation_location: insert autoincrement",
+            )
+        })?;
         Ok(tx.last_insert_rowid())
     }
 }
@@ -1248,7 +1272,10 @@ fn find_or_insert_highlight_scripture_location(
             ],
         )
         .map_err(|e| {
-            map_sqlite_err(e, "find_or_insert_highlight_scripture_location: insert autoincrement")
+            map_sqlite_err(
+                e,
+                "find_or_insert_highlight_scripture_location: insert autoincrement",
+            )
         })?;
         Ok(tx.last_insert_rowid())
     }
@@ -1495,10 +1522,7 @@ fn extract_notes_bucket(line: &str) -> Option<Option<char>> {
 /// (`JWLManager.py:2307-2313`) into [`NoteSubRange`]s, entirely at parse time
 /// (D8-04). Each segment is either `identifier:start-end` or bare
 /// `start-end`; an unparseable segment is `ImportMalformed`.
-fn parse_note_range(
-    raw: &str,
-    record_no: usize,
-) -> Result<Vec<NoteSubRange>, ArchiveError> {
+fn parse_note_range(raw: &str, record_no: usize) -> Result<Vec<NoteSubRange>, ArchiveError> {
     let malformed = |reason: String| ArchiveError::ImportMalformed {
         category: "Notes".to_string(),
         line: record_no,
@@ -1524,7 +1548,11 @@ fn parse_note_range(
         let end = end_raw
             .parse::<i64>()
             .map_err(|_| malformed(format!("unparseable RANGE end: {end_raw:?}")))?;
-        sub_ranges.push(NoteSubRange { identifier, start, end });
+        sub_ranges.push(NoteSubRange {
+            identifier,
+            start,
+            end,
+        });
     }
     Ok(sub_ranges)
 }
@@ -1816,7 +1844,11 @@ fn find_existing_note(
 ) -> Result<Option<(i64, String, String)>, ArchiveError> {
     let title_trimmed = record.title.trim();
     let use_title = !title_trimmed.is_empty();
-    let match_value = if use_title { title_trimmed } else { record.note.trim() };
+    let match_value = if use_title {
+        title_trimmed
+    } else {
+        record.note.trim()
+    };
     let match_clause = if use_title {
         "TRIM(Title) = ?"
     } else {
@@ -1845,7 +1877,11 @@ fn find_existing_note(
                     row_mapper,
                 )
             } else {
-                tx.query_row(&sql, rusqlite::params![loc_id, match_value, block_type], row_mapper)
+                tx.query_row(
+                    &sql,
+                    rusqlite::params![loc_id, match_value, block_type],
+                    row_mapper,
+                )
             };
             result
                 .optional()
@@ -1873,8 +1909,11 @@ fn process_note_tags(
     tags: Option<&str>,
     available: &mut HashMap<&'static str, Vec<i64>>,
 ) -> Result<(), ArchiveError> {
-    tx.execute("DELETE FROM TagMap WHERE NoteId = ?1", rusqlite::params![note_id])
-        .map_err(|e| map_sqlite_err(e, "process_note_tags: delete existing"))?;
+    tx.execute(
+        "DELETE FROM TagMap WHERE NoteId = ?1",
+        rusqlite::params![note_id],
+    )
+    .map_err(|e| map_sqlite_err(e, "process_note_tags: delete existing"))?;
 
     let Some(tags) = tags else {
         return Ok(());
@@ -1903,8 +1942,11 @@ fn process_note_tags(
             .map_err(|e| map_sqlite_err(e, "process_note_tags: insert tag (recycled id)"))?;
             id
         } else {
-            tx.execute("INSERT INTO Tag (Type, Name) VALUES (1, ?1)", rusqlite::params![tag])
-                .map_err(|e| map_sqlite_err(e, "process_note_tags: insert tag (autoincrement)"))?;
+            tx.execute(
+                "INSERT INTO Tag (Type, Name) VALUES (1, ?1)",
+                rusqlite::params![tag],
+            )
+            .map_err(|e| map_sqlite_err(e, "process_note_tags: insert tag (autoincrement)"))?;
             tx.last_insert_rowid()
         };
 
@@ -2023,8 +2065,11 @@ pub fn apply_import_notes(
     let deleted = match bucket {
         Some(ch) => {
             let pattern = format!("{ch}*");
-            tx.execute("DELETE FROM Note WHERE Title GLOB ?1", rusqlite::params![pattern])
-                .map_err(|e| map_sqlite_err(e, "apply_import_notes: bucket delete"))?
+            tx.execute(
+                "DELETE FROM Note WHERE Title GLOB ?1",
+                rusqlite::params![pattern],
+            )
+            .map_err(|e| map_sqlite_err(e, "apply_import_notes: bucket delete"))?
         }
         None => 0,
     };
@@ -2046,8 +2091,15 @@ pub fn apply_import_notes(
                     (0i64, None)
                 };
                 upsert_note(
-                    tx, record, Some(location_id), block_type, block_identifier, user_mark_id, now,
-                    note_seed, available,
+                    tx,
+                    record,
+                    Some(location_id),
+                    block_type,
+                    block_identifier,
+                    user_mark_id,
+                    now,
+                    note_seed,
+                    available,
                 )?;
             }
             NoteShape::Publication => {
@@ -2056,8 +2108,15 @@ pub fn apply_import_notes(
                     apply_note_usermark(tx, record, location_id, usermark_seed, available)?;
                 let block_type = if record.block.is_some() { 1i64 } else { 0i64 };
                 upsert_note(
-                    tx, record, Some(location_id), block_type, record.block, user_mark_id, now,
-                    note_seed, available,
+                    tx,
+                    record,
+                    Some(location_id),
+                    block_type,
+                    record.block,
+                    user_mark_id,
+                    now,
+                    note_seed,
+                    available,
                 )?;
             }
             NoteShape::Independent => {
@@ -2169,7 +2228,8 @@ mod tests {
 
     #[test]
     fn highlights_parse_skips_header_and_divider_lines_without_offset() {
-        let text = "{HIGHLIGHTS}\n \nExported from x\nby y (1) on z\n****\n1|1|0|5|1|1|1|1|0|0|nwt|0|0";
+        let text =
+            "{HIGHLIGHTS}\n \nExported from x\nby y (1) on z\n****\n1|1|0|5|1|1|1|1|0|0|nwt|0|0";
         let records = parse_highlights_file(text).unwrap();
         assert_eq!(records.len(), 1, "only the one real data line should parse");
         assert_eq!(records[0].identifier, 1);
@@ -2183,7 +2243,10 @@ mod tests {
         match err {
             ArchiveError::ImportMalformed { line, reason, .. } => {
                 assert_eq!(line, 2);
-                assert!(reason.contains("12"), "reason should name the actual field count: {reason}");
+                assert!(
+                    reason.contains("12"),
+                    "reason should name the actual field count: {reason}"
+                );
             }
             other => panic!("expected ImportMalformed, got {other:?}"),
         }
@@ -2289,8 +2352,22 @@ mod tests {
     fn notes_parse_range_sequential_sub_ranges() {
         let ranges = parse_note_range("1:5-9;1:8-12", 1).unwrap();
         assert_eq!(ranges.len(), 2);
-        assert_eq!(ranges[0], NoteSubRange { identifier: Some(1), start: 5, end: 9 });
-        assert_eq!(ranges[1], NoteSubRange { identifier: Some(1), start: 8, end: 12 });
+        assert_eq!(
+            ranges[0],
+            NoteSubRange {
+                identifier: Some(1),
+                start: 5,
+                end: 9
+            }
+        );
+        assert_eq!(
+            ranges[1],
+            NoteSubRange {
+                identifier: Some(1),
+                start: 8,
+                end: 12
+            }
+        );
     }
 
     #[test]
@@ -2315,28 +2392,40 @@ mod tests {
     fn favorites_crlf_file_parses_identically_to_lf() {
         let lf = "{FAVORITES}\n \nExported from x\nby y (1) on z\n****\nNone|Track|0|nwt|0|1";
         let crlf = lf.replace('\n', "\r\n");
-        assert_eq!(parse_favorites_file(lf).unwrap(), parse_favorites_file(&crlf).unwrap());
+        assert_eq!(
+            parse_favorites_file(lf).unwrap(),
+            parse_favorites_file(&crlf).unwrap()
+        );
     }
 
     #[test]
     fn bookmarks_crlf_file_parses_identically_to_lf() {
         let lf = "{BOOKMARKS}\n1|1|None|0|nwt|0|0|0|New Title|None|0|None";
         let crlf = lf.replace('\n', "\r\n");
-        assert_eq!(parse_bookmarks_file(lf).unwrap(), parse_bookmarks_file(&crlf).unwrap());
+        assert_eq!(
+            parse_bookmarks_file(lf).unwrap(),
+            parse_bookmarks_file(&crlf).unwrap()
+        );
     }
 
     #[test]
     fn annotations_crlf_file_parses_identically_to_lf() {
         let lf = "{ANNOTATIONS}\n \nheader\n==={PUB=w}{DOC=1001}{LABEL=tag1}===\nFirst value\n==={END}===";
         let crlf = lf.replace('\n', "\r\n");
-        assert_eq!(parse_annotations_file(lf).unwrap(), parse_annotations_file(&crlf).unwrap());
+        assert_eq!(
+            parse_annotations_file(lf).unwrap(),
+            parse_annotations_file(&crlf).unwrap()
+        );
     }
 
     #[test]
     fn highlights_crlf_file_parses_identically_to_lf() {
         let lf = "{HIGHLIGHTS}\n1|1|0|5|1|1|1|1|None|0|nwt|0|0";
         let crlf = lf.replace('\n', "\r\n");
-        assert_eq!(parse_highlights_file(lf).unwrap(), parse_highlights_file(&crlf).unwrap());
+        assert_eq!(
+            parse_highlights_file(lf).unwrap(),
+            parse_highlights_file(&crlf).unwrap()
+        );
     }
 
     #[test]
@@ -2347,7 +2436,10 @@ mod tests {
         // instead of parsing.
         let lf = "{NOTES=}\nheader\n==={CREATED=2024-01-01T00:00:00}{MODIFIED=2024-01-01T00:00:00}{TAGS=}===\nMy Title\nMy note body\n==={END}===";
         let crlf = lf.replace('\n', "\r\n");
-        assert_eq!(parse_notes_file(lf).unwrap(), parse_notes_file(&crlf).unwrap());
+        assert_eq!(
+            parse_notes_file(lf).unwrap(),
+            parse_notes_file(&crlf).unwrap()
+        );
     }
 
     #[test]
@@ -2360,8 +2452,16 @@ mod tests {
         let crlf = lf.replace('\n', "\r\n");
         let (_bucket, records) = parse_notes_file(&crlf).unwrap();
         assert_eq!(records.len(), 1);
-        assert!(!records[0].title.contains('\r'), "title must not contain a stray CR: {:?}", records[0].title);
-        assert!(!records[0].note.contains('\r'), "note body must not contain a stray CR: {:?}", records[0].note);
+        assert!(
+            !records[0].title.contains('\r'),
+            "title must not contain a stray CR: {:?}",
+            records[0].title
+        );
+        assert!(
+            !records[0].note.contains('\r'),
+            "note body must not contain a stray CR: {:?}",
+            records[0].note
+        );
         assert_eq!(records[0].title, "My Title");
         assert_eq!(records[0].note, "line one\nline two");
     }

@@ -37,9 +37,7 @@ fn pinned_header(tag: &'static str) -> ExportHeaderCtx<'static> {
     }
 }
 
-fn export_bytes_to_temp(
-    write: impl FnOnce(&std::path::Path),
-) -> Vec<u8> {
+fn export_bytes_to_temp(write: impl FnOnce(&std::path::Path)) -> Vec<u8> {
     let out_dir = TempDir::new().expect("tempdir");
     let out_path = out_dir.path().join("out.txt");
     write(&out_path);
@@ -74,13 +72,22 @@ fn favorites_round_trip_is_stable() {
 
     let after = common::normalized_table_rows(&conn, "TagMap");
     let after_location = common::normalized_table_rows(&conn, "Location");
-    assert_eq!(before, after, "re-importing the same Favorites file must not duplicate TagMap rows");
-    assert_eq!(before_location, after_location, "must not duplicate the Location row either");
+    assert_eq!(
+        before, after,
+        "re-importing the same Favorites file must not duplicate TagMap rows"
+    );
+    assert_eq!(
+        before_location, after_location,
+        "must not duplicate the Location row either"
+    );
 
     let bytes2 = export_bytes_to_temp(|p| {
         export_favorites(&conn, None, &pinned_header("{FAVORITES}"), p).expect("export 2");
     });
-    assert_eq!(bytes1, bytes2, "a second export after re-import must be byte-identical");
+    assert_eq!(
+        bytes1, bytes2,
+        "a second export after re-import must be byte-identical"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -89,7 +96,8 @@ fn favorites_round_trip_is_stable() {
 
 fn seed_one_bookmark(db_path: &std::path::Path) {
     let conn = Connection::open(db_path).expect("open db");
-    conn.execute_batch("PRAGMA foreign_keys = OFF").expect("fk off");
+    conn.execute_batch("PRAGMA foreign_keys = OFF")
+        .expect("fk off");
     conn.execute(
         "INSERT INTO Location (BookNumber, ChapterNumber, DocumentId, IssueTagNumber, KeySymbol, MepsLanguage, Type) \
          VALUES (1, 1, NULL, 0, 'nwt', 0, 0)",
@@ -132,12 +140,18 @@ fn bookmarks_round_trip_is_stable() {
     }
 
     let after = common::normalized_table_rows(&conn, "Bookmark");
-    assert_eq!(before, after, "re-importing the same Bookmarks file must UPDATE in place, not duplicate");
+    assert_eq!(
+        before, after,
+        "re-importing the same Bookmarks file must UPDATE in place, not duplicate"
+    );
 
     let bytes2 = export_bytes_to_temp(|p| {
         export_bookmarks(&conn, None, &pinned_header("{BOOKMARKS}"), p).expect("export 2");
     });
-    assert_eq!(bytes1, bytes2, "a second export after re-import must be byte-identical");
+    assert_eq!(
+        bytes1, bytes2,
+        "a second export after re-import must be byte-identical"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -146,7 +160,8 @@ fn bookmarks_round_trip_is_stable() {
 
 fn seed_one_annotation(db_path: &std::path::Path) {
     let conn = Connection::open(db_path).expect("open db");
-    conn.execute_batch("PRAGMA foreign_keys = OFF").expect("fk off");
+    conn.execute_batch("PRAGMA foreign_keys = OFF")
+        .expect("fk off");
     conn.execute(
         "INSERT INTO Location (DocumentId, IssueTagNumber, KeySymbol, MepsLanguage, Type) \
          VALUES (1001, 0, 'w', NULL, 0)",
@@ -182,12 +197,18 @@ fn annotations_round_trip_is_stable() {
     }
 
     let after = common::normalized_table_rows(&conn, "InputField");
-    assert_eq!(before, after, "re-importing the same Annotations file must UPDATE in place, not duplicate");
+    assert_eq!(
+        before, after,
+        "re-importing the same Annotations file must UPDATE in place, not duplicate"
+    );
 
     let bytes2 = export_bytes_to_temp(|p| {
         export_annotations(&conn, None, &pinned_header("{ANNOTATIONS}"), p).expect("export 2");
     });
-    assert_eq!(bytes1, bytes2, "a second export after re-import must be byte-identical");
+    assert_eq!(
+        bytes1, bytes2,
+        "a second export after re-import must be byte-identical"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -196,7 +217,8 @@ fn annotations_round_trip_is_stable() {
 
 fn seed_one_note(db_path: &std::path::Path) {
     let conn = Connection::open(db_path).expect("open db");
-    conn.execute_batch("PRAGMA foreign_keys = OFF").expect("fk off");
+    conn.execute_batch("PRAGMA foreign_keys = OFF")
+        .expect("fk off");
     conn.execute(
         "INSERT INTO Note (Guid, Title, Content, BlockType, LastModified, Created) \
          VALUES ('note-rt', 'RoundTrip Title', 'RoundTrip body', 0, '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z')",
@@ -228,12 +250,18 @@ fn notes_round_trip_is_stable() {
     }
 
     let after = common::normalized_table_rows(&conn, "Note");
-    assert_eq!(before, after, "re-importing the same Notes file must UPDATE in place, not duplicate");
+    assert_eq!(
+        before, after,
+        "re-importing the same Notes file must UPDATE in place, not duplicate"
+    );
 
     let bytes2 = export_bytes_to_temp(|p| {
         export_notes(&conn, None, &catalog, &pinned_header("{NOTES=}"), NOW, p).expect("export 2");
     });
-    assert_eq!(bytes1, bytes2, "a second export after re-import must be byte-identical");
+    assert_eq!(
+        bytes1, bytes2,
+        "a second export after re-import must be byte-identical"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -243,7 +271,8 @@ fn notes_round_trip_is_stable() {
 
 fn seed_one_highlight(db_path: &std::path::Path) {
     let conn = Connection::open(db_path).expect("open db");
-    conn.execute_batch("PRAGMA foreign_keys = OFF").expect("fk off");
+    conn.execute_batch("PRAGMA foreign_keys = OFF")
+        .expect("fk off");
     conn.execute(
         "INSERT INTO Location (BookNumber, ChapterNumber, DocumentId, IssueTagNumber, KeySymbol, MepsLanguage, Type) \
          VALUES (1, 2, NULL, 0, 'nwt', 0, 0)",
@@ -300,7 +329,10 @@ fn highlights_round_trip_converges_geometry_while_usermark_grows() {
     }
 
     let after_geometry = block_range_geometry(&conn);
-    assert_eq!(before_geometry, after_geometry, "BlockRange geometry must converge, not duplicate");
+    assert_eq!(
+        before_geometry, after_geometry,
+        "BlockRange geometry must converge, not duplicate"
+    );
 
     let after_usermark_count: i64 = conn
         .query_row("SELECT COUNT(*) FROM UserMark", [], |r| r.get(0))
@@ -325,7 +357,8 @@ fn recycled_gap_ids_are_consumed_before_autoincrement_across_the_exercise() {
     // then delete 1, leaving a recyclable gap.
     {
         let conn = Connection::open(&db_path).expect("open db");
-        conn.execute_batch("PRAGMA foreign_keys = OFF").expect("fk off");
+        conn.execute_batch("PRAGMA foreign_keys = OFF")
+            .expect("fk off");
         for _ in 0..2 {
             conn.execute(
                 "INSERT INTO Location (KeySymbol, MepsLanguage, Type) VALUES ('placeholder', 0, 1)",
@@ -337,7 +370,8 @@ fn recycled_gap_ids_are_consumed_before_autoincrement_across_the_exercise() {
             .expect("delete to create gap at id 1");
     }
 
-    let text = "{ANNOTATIONS}\n \nheader\n==={PUB=w}{DOC=1001}{LABEL=tag1}===\nA value\n==={END}===";
+    let text =
+        "{ANNOTATIONS}\n \nheader\n==={PUB=w}{DOC=1001}{LABEL=tag1}===\nA value\n==={END}===";
     let records = parse_annotations_file(text).expect("parse");
 
     let mut conn = Connection::open(&db_path).expect("open db");
@@ -349,7 +383,11 @@ fn recycled_gap_ids_are_consumed_before_autoincrement_across_the_exercise() {
 
     let conn = Connection::open(&db_path).expect("reopen");
     let new_location_id: i64 = conn
-        .query_row("SELECT LocationId FROM Location WHERE DocumentId = 1001", [], |r| r.get(0))
+        .query_row(
+            "SELECT LocationId FROM Location WHERE DocumentId = 1001",
+            [],
+            |r| r.get(0),
+        )
         .expect("read new location id");
     assert_eq!(new_location_id, 1, "the new Location must consume the recycled gap id 1, not autoincrement above the prior max");
 }
@@ -371,14 +409,57 @@ fn full_five_category_import_export_suite_passes() {
     let catalog = ResourceCatalog::load(&dev_resources_db_path(), "en").expect("resources.db");
 
     for (label, count) in [
-        ("Favorites", export_favorites(&conn, None, &pinned_header("{FAVORITES}"), &TempDir::new().unwrap().path().join("f.txt")).expect("export favorites")),
-        ("Bookmarks", export_bookmarks(&conn, None, &pinned_header("{BOOKMARKS}"), &TempDir::new().unwrap().path().join("b.txt")).expect("export bookmarks")),
-        ("Annotations", export_annotations(&conn, None, &pinned_header("{ANNOTATIONS}"), &TempDir::new().unwrap().path().join("a.txt")).expect("export annotations")),
-        ("Highlights", export_highlights(&conn, None, &pinned_header("{HIGHLIGHTS}"), &TempDir::new().unwrap().path().join("h.txt")).expect("export highlights")),
+        (
+            "Favorites",
+            export_favorites(
+                &conn,
+                None,
+                &pinned_header("{FAVORITES}"),
+                &TempDir::new().unwrap().path().join("f.txt"),
+            )
+            .expect("export favorites"),
+        ),
+        (
+            "Bookmarks",
+            export_bookmarks(
+                &conn,
+                None,
+                &pinned_header("{BOOKMARKS}"),
+                &TempDir::new().unwrap().path().join("b.txt"),
+            )
+            .expect("export bookmarks"),
+        ),
+        (
+            "Annotations",
+            export_annotations(
+                &conn,
+                None,
+                &pinned_header("{ANNOTATIONS}"),
+                &TempDir::new().unwrap().path().join("a.txt"),
+            )
+            .expect("export annotations"),
+        ),
+        (
+            "Highlights",
+            export_highlights(
+                &conn,
+                None,
+                &pinned_header("{HIGHLIGHTS}"),
+                &TempDir::new().unwrap().path().join("h.txt"),
+            )
+            .expect("export highlights"),
+        ),
         (
             "Notes",
-            export_notes(&conn, None, &catalog, &pinned_header("{NOTES=}"), NOW, &TempDir::new().unwrap().path().join("n.txt"))
-                .expect("export notes"),
+            export_notes(
+                &conn,
+                None,
+                &catalog,
+                &pinned_header("{NOTES=}"),
+                NOW,
+                &TempDir::new().unwrap().path().join("n.txt"),
+            )
+            .expect("export notes"),
         ),
     ] {
         assert_eq!(count, 1, "{label} must export exactly its one seeded row");

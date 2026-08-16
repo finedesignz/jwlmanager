@@ -18,7 +18,9 @@ use jwlmanager_lib::db::favorites::{
     apply_favorite_add, apply_favorite_remove, FavoriteEditionRef, NonEmptyTagMapIds,
 };
 use jwlmanager_lib::db::highlights::merge_block_ranges;
-use jwlmanager_lib::db::record_edit::{apply_record_delete, apply_record_edit, RecordEditPayload, RecordIdentity};
+use jwlmanager_lib::db::record_edit::{
+    apply_record_delete, apply_record_edit, RecordEditPayload, RecordIdentity,
+};
 use jwlmanager_lib::db::reorder::apply_reorder;
 use jwlmanager_lib::db::resources::dev_resources_db_path;
 use jwlmanager_lib::db::scrub::{apply_clean, apply_mask};
@@ -35,7 +37,9 @@ fn open_working_conn(db_path: &Path) -> Connection {
     conn
 }
 
-fn save_and_reopen(session: &jwlmanager_lib::session::ArchiveSession) -> (tempfile::TempDir, Connection) {
+fn save_and_reopen(
+    session: &jwlmanager_lib::session::ArchiveSession,
+) -> (tempfile::TempDir, Connection) {
     save_archive(session, "JWL Manager", "JWL Manager_test", NOW).expect("save must succeed");
     let (dir, reopened) = common::extract_to_tempdir(&session.target_path);
     let conn = Connection::open(reopened.join("userData.db")).expect("open reopened db");
@@ -47,7 +51,8 @@ fn save_and_reopen(session: &jwlmanager_lib::session::ArchiveSession) -> (tempfi
 #[test]
 fn color_recolor_synthesizes_usermark_and_survives_save() {
     let (_dir, archive_path) = common::generate_v16_all_categories_fixture();
-    let (session, _rows) = open_and_validate(&archive_path, &dev_resources_db_path()).expect("must open");
+    let (session, _rows) =
+        open_and_validate(&archive_path, &dev_resources_db_path()).expect("must open");
 
     {
         let conn = open_working_conn(&session.db_path);
@@ -62,9 +67,12 @@ fn color_recolor_synthesizes_usermark_and_survives_save() {
     let (_reopened_dir, conn) = save_and_reopen(&session);
 
     let user_mark_id: Option<i64> = conn
-        .query_row("SELECT UserMarkId FROM Note WHERE NoteId = 700", [], |r| r.get(0))
+        .query_row("SELECT UserMarkId FROM Note WHERE NoteId = 700", [], |r| {
+            r.get(0)
+        })
         .unwrap();
-    let user_mark_id = user_mark_id.expect("Note 700 must have a synthesized UserMarkId after save");
+    let user_mark_id =
+        user_mark_id.expect("Note 700 must have a synthesized UserMarkId after save");
     let color_index: i64 = conn
         .query_row(
             "SELECT ColorIndex FROM UserMark WHERE UserMarkId = ?1",
@@ -82,7 +90,8 @@ fn color_recolor_synthesizes_usermark_and_survives_save() {
 #[test]
 fn highlights_merge_coalesces_overlapping_ranges_leaves_others_untouched() {
     let (_dir, archive_path) = common::generate_v16_all_categories_fixture();
-    let (session, _rows) = open_and_validate(&archive_path, &dev_resources_db_path()).expect("must open");
+    let (session, _rows) =
+        open_and_validate(&archive_path, &dev_resources_db_path()).expect("must open");
 
     {
         let conn = open_working_conn(&session.db_path);
@@ -114,7 +123,10 @@ fn highlights_merge_coalesces_overlapping_ranges_leaves_others_untouched() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(identifier_1_count, 1, "the absorbed original row must be gone, not just superseded");
+    assert_eq!(
+        identifier_1_count, 1,
+        "the absorbed original row must be gone, not just superseded"
+    );
 
     // BlockRange 644 (Identifier 2, Start 6, End 10) is untouched.
     let (other_start, other_end): (i64, i64) = conn
@@ -125,7 +137,11 @@ fn highlights_merge_coalesces_overlapping_ranges_leaves_others_untouched() {
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .unwrap();
-    assert_eq!((other_start, other_end), (6, 10), "an unrelated Identifier's range must survive untouched");
+    assert_eq!(
+        (other_start, other_end),
+        (6, 10),
+        "an unrelated Identifier's range must survive untouched"
+    );
 }
 
 /// Tags: adding an existing tag and a brand-new tag to a Note both land
@@ -133,7 +149,8 @@ fn highlights_merge_coalesces_overlapping_ranges_leaves_others_untouched() {
 #[test]
 fn tags_add_existing_and_new_tag_survive_save() {
     let (_dir, archive_path) = common::generate_v16_all_categories_fixture();
-    let (session, _rows) = open_and_validate(&archive_path, &dev_resources_db_path()).expect("must open");
+    let (session, _rows) =
+        open_and_validate(&archive_path, &dev_resources_db_path()).expect("must open");
 
     {
         let conn = open_working_conn(&session.db_path);
@@ -153,7 +170,10 @@ fn tags_add_existing_and_new_tag_survive_save() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(existing_tag_mapped, 1, "Note 700 must be mapped to the existing Tag 600");
+    assert_eq!(
+        existing_tag_mapped, 1,
+        "Note 700 must be mapped to the existing Tag 600"
+    );
 
     let new_tag_mapped: i64 = conn
         .query_row(
@@ -163,7 +183,10 @@ fn tags_add_existing_and_new_tag_survive_save() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(new_tag_mapped, 1, "Note 700 must be mapped to the newly-created tag");
+    assert_eq!(
+        new_tag_mapped, 1,
+        "Note 700 must be mapped to the newly-created tag"
+    );
 }
 
 /// Reorder: a `Type = 1` tag's gapped `TagMap.Position` values end up
@@ -172,12 +195,16 @@ fn tags_add_existing_and_new_tag_survive_save() {
 #[test]
 fn reorder_densifies_positions_idempotently_across_save() {
     let (_dir, archive_path) = common::generate_v16_all_categories_fixture();
-    let (session, _rows) = open_and_validate(&archive_path, &dev_resources_db_path()).expect("must open");
+    let (session, _rows) =
+        open_and_validate(&archive_path, &dev_resources_db_path()).expect("must open");
 
     {
         let conn = open_working_conn(&session.db_path);
-        conn.execute("INSERT INTO Tag (TagId, Type, Name) VALUES (9000, 1, 'Reorder Fixture Tag')", [])
-            .unwrap();
+        conn.execute(
+            "INSERT INTO Tag (TagId, Type, Name) VALUES (9000, 1, 'Reorder Fixture Tag')",
+            [],
+        )
+        .unwrap();
         for (note_id, position) in [(9001_i64, 9_i64), (9002, 0), (9003, 5)] {
             conn.execute(
                 "INSERT INTO Note (NoteId, Guid, UserMarkId, LocationId, Title, Content, \
@@ -222,7 +249,8 @@ fn reorder_densifies_positions_idempotently_across_save() {
 #[test]
 fn favorites_mark_and_unmark_survive_save() {
     let (_dir, archive_path) = common::generate_v16_all_categories_fixture();
-    let (session, _rows) = open_and_validate(&archive_path, &dev_resources_db_path()).expect("must open");
+    let (session, _rows) =
+        open_and_validate(&archive_path, &dev_resources_db_path()).expect("must open");
 
     {
         let conn = open_working_conn(&session.db_path);
@@ -242,9 +270,16 @@ fn favorites_mark_and_unmark_survive_save() {
     let (_reopened_dir, conn) = save_and_reopen(&session);
 
     let old_favorite_gone: i64 = conn
-        .query_row("SELECT COUNT(*) FROM TagMap WHERE TagMapId = 622", [], |r| r.get(0))
+        .query_row(
+            "SELECT COUNT(*) FROM TagMap WHERE TagMapId = 622",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
-    assert_eq!(old_favorite_gone, 0, "the unmarked favorite must be gone after save");
+    assert_eq!(
+        old_favorite_gone, 0,
+        "the unmarked favorite must be gone after save"
+    );
 
     let new_favorite_count: i64 = conn
         .query_row(
@@ -254,7 +289,10 @@ fn favorites_mark_and_unmark_survive_save() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(new_favorite_count, 1, "the newly-marked favorite must survive save");
+    assert_eq!(
+        new_favorite_count, 1,
+        "the newly-marked favorite must survive save"
+    );
 }
 
 /// Clean: Unicode separator junk in an Annotation's Value is normalized to a
@@ -263,7 +301,8 @@ fn favorites_mark_and_unmark_survive_save() {
 #[test]
 fn clean_normalizes_unicode_separators_and_survives_save() {
     let (_dir, archive_path) = common::generate_v16_all_categories_fixture();
-    let (session, _rows) = open_and_validate(&archive_path, &dev_resources_db_path()).expect("must open");
+    let (session, _rows) =
+        open_and_validate(&archive_path, &dev_resources_db_path()).expect("must open");
 
     {
         let conn = open_working_conn(&session.db_path);
@@ -287,7 +326,10 @@ fn clean_normalizes_unicode_separators_and_survives_save() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(value, "dirty value", "the NBSP must be normalized to an ASCII space and survive save");
+    assert_eq!(
+        value, "dirty value",
+        "the NBSP must be normalized to an ASCII space and survive save"
+    );
 }
 
 /// Mask: every letter in an Annotation's Value is replaced, length and
@@ -296,7 +338,8 @@ fn clean_normalizes_unicode_separators_and_survives_save() {
 #[test]
 fn mask_preserves_shape_and_survives_save() {
     let (_dir, archive_path) = common::generate_v16_all_categories_fixture();
-    let (session, _rows) = open_and_validate(&archive_path, &dev_resources_db_path()).expect("must open");
+    let (session, _rows) =
+        open_and_validate(&archive_path, &dev_resources_db_path()).expect("must open");
 
     let original = "Hello, World!";
     {
@@ -341,7 +384,8 @@ fn mask_preserves_shape_and_survives_save() {
 #[test]
 fn record_edit_save_and_scoped_delete_survive_save() {
     let (_dir, archive_path) = common::generate_v16_all_categories_fixture();
-    let (session, _rows) = open_and_validate(&archive_path, &dev_resources_db_path()).expect("must open");
+    let (session, _rows) =
+        open_and_validate(&archive_path, &dev_resources_db_path()).expect("must open");
 
     {
         let conn = open_working_conn(&session.db_path);
@@ -386,7 +430,9 @@ fn record_edit_save_and_scoped_delete_survive_save() {
     assert_eq!(last_modified, NOW);
 
     let user_mark_id: Option<i64> = conn
-        .query_row("SELECT UserMarkId FROM Note WHERE NoteId = 700", [], |r| r.get(0))
+        .query_row("SELECT UserMarkId FROM Note WHERE NoteId = 700", [], |r| {
+            r.get(0)
+        })
         .unwrap();
     let user_mark_id = user_mark_id.expect("Note 700 must have a synthesized UserMarkId");
     let color_index: i64 = conn
@@ -405,7 +451,10 @@ fn record_edit_save_and_scoped_delete_survive_save() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(deleted_gone, 0, "the deleted Annotation record must be gone");
+    assert_eq!(
+        deleted_gone, 0,
+        "the deleted Annotation record must be gone"
+    );
 
     let sibling_survives: i64 = conn
         .query_row(
