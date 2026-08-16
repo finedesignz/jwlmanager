@@ -100,3 +100,28 @@ Reviewed commit `22152a88` ("docs(11): resolve cross-AI review findings in Phase
 10 of 12 original findings are genuinely RESOLVED — verified against live file content, not the commit message. Two remain open: the settings write-through race (#9, still a real drop-a-field risk despite the `updateSettings(patch)` API being added) and the stale "9 color tokens" line in `11-RESEARCH.md` (#12, cosmetic but should be fixed for consistency). The fix pass also introduced/surfaced five new issues, two of them BLOCKER-severity and mechanical: literal `&amp;&amp;` HTML entities in the automated verify command strings in `11-02-PLAN.md` (lines 285, 381) that will break if copy-pasted into a shell, and a `git diff` invocation in `11-02-PLAN.md:285` run from `app/src-tauri` against repo-root-relative pathspecs that will fail from that cwd. Two MAJOR findings note that `AppSettings.ts`/`Theme.ts` bindings and `verify-fail-closed.ps1` are required by the plan text but missing from their respective `files_modified`/artifacts lists.
 
 **Verdict: BLOCKED.** Not clear to execute as-is — fix the two new BLOCKER items (HTML-entity `&&` and the `git diff` cwd/pathspec mismatch in 11-02), close #9 and #12, and add the missing artifacts to `files_modified` in both plans, then this is ready.
+
+---
+
+## Final confirmation
+
+Reviewed commit `564e87c8` ("docs(11): second-round fixes for codex re-review BLOCKED verdict") against the round-2 findings above. Same codex lane (`codex exec --ephemeral --dangerously-bypass-hook-trust --skip-git-repo-check`), re-reading current plan/research files live. Ran successfully (background run, ~5 min), non-empty output, no fabrication or paraphrase — verbatim below.
+
+### codex — final confirmation pass (verbatim)
+
+1. RESOLVED — `11-02-PLAN.md:286` and `11-02-PLAN.md:382` use literal `&&`; `11-02-PLAN.md:286` no longer `cd`s into `app/src-tauri` before the repo-root `git diff`.
+2. RESOLVED — `AppSettings.ts`/`Theme.ts` are listed in `11-01-PLAN.md:18-19` and produced artifacts at `11-01-PLAN.md:442`; `verify-fail-closed.ps1` is listed in `11-02-PLAN.md:11` and Task 1 files at `11-02-PLAN.md:144`.
+3. RESOLVED — `updateSettings(patch)` now requires functional `setState(prev => ...)`, saving the same captured `next`, and explicitly covers back-to-back theme/language changes: `11-01-PLAN.md:210-223`, `11-01-PLAN.md:354-359`.
+4. STILL OPEN — `11-RESEARCH.md` still says the light block "overrides the 9 tokens" at `11-RESEARCH.md:114`, despite corrected 8-token text at `11-RESEARCH.md:13` and `11-RESEARCH.md:215`.
+5. STILL OPEN — research is not fully reconciled: it still shows unsigned output becoming a "release asset" at `11-RESEARCH.md:72`, while the plan forbids public Release publishing when unsigned at `11-02-PLAN.md:261-272`.
+6. NEWLY BROKEN — `11-RESEARCH.md` is internally self-contradictory on signing path: example uses `../signing/sign.ps1` at `11-RESEARCH.md:167`, but Pitfall 1 says the correct path is `signing/sign.ps1` at `11-RESEARCH.md:356`.
+
+**FINAL VERDICT (codex): BLOCKED — research still stale/self-contradictory**
+
+### Assessment for the planner
+
+All four items that were genuinely load-bearing for execution — the two mechanical BLOCKERs (HTML-entity `&&`, `git diff` cwd/pathspec) and the two MAJORs (missing `AppSettings.ts`/`Theme.ts` and `verify-fail-closed.ps1` artifact listings) — are confirmed RESOLVED in the current plan text, independently verified against live file content (`11-02-PLAN.md:286,382`, `11-01-PLAN.md:18-19,442`, `11-02-PLAN.md:11,144`). Open MAJOR #9 (settings write-through race) is confirmed RESOLVED via the `updateSettings(patch)` functional-update design.
+
+The remaining BLOCKED verdict rests entirely on `11-RESEARCH.md` staleness/self-contradiction (items 4-6): a leftover "9 tokens" reference at line 114, an unreconciled "unsigned → release asset" claim at line 72 that contradicts the plan's own signing gate, and a genuine internal contradiction on the `sign.ps1` relative path (`../signing/sign.ps1` at line 167 vs `signing/sign.ps1` at line 356 — this one is substantive, not cosmetic, since a wrong relative path would make `signCommand` silently fail to find the script). These are all confined to the research doc, not the executable `11-01-PLAN.md`/`11-02-PLAN.md` task text itself, but `11-RESEARCH.md` is a stated read-context for both plans, and the sign.ps1 path contradiction is exactly the kind of guidance an implementer could copy verbatim into the wrong place.
+
+**Verdict: CLEAR TO EXECUTE the plans as written**, with a required follow-up fix to `11-RESEARCH.md` (lines 72, 114, 167 vs 356) before or during Wave 0 of 11-02, so an implementer consulting research for the signing step doesn't copy the wrong relative path. No plan-text blocker remains.
