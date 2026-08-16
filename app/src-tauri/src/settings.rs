@@ -6,6 +6,7 @@
 //! on every call, never derived from or joined with any user-chosen path.
 
 use serde::{Deserialize, Serialize};
+use std::path::Path;
 use tauri::{AppHandle, Manager};
 use thiserror::Error;
 use ts_rs::TS;
@@ -50,10 +51,10 @@ impl Default for AppSettings {
 }
 
 /// Internal, typed settings-domain error -- its OWN separate, lower-stakes
-/// error domain (D11-04), mirroring `error::ArchiveError`'s thiserror style
-/// WITHOUT reusing that type or crossing IPC directly (same two-layer
-/// convention `error.rs`'s module docs establish for
-/// `ArchiveError`/`ErrorDto`; see [`SettingsError::to_dto`] below).
+/// error domain (D11-04), styled the same thiserror way as this crate's
+/// other internal error type WITHOUT reusing that type or crossing IPC
+/// directly (same two-layer convention `error.rs`'s module docs establish;
+/// see [`SettingsError::to_dto`] below).
 #[derive(Debug, Error)]
 pub enum SettingsError {
     #[error("could not resolve the app-data directory")]
@@ -98,6 +99,48 @@ impl SettingsError {
     }
 }
 
+/// Reads and deserializes `AppSettings` from `dir/settings.json`, returning
+/// the specific typed failure (missing/unreadable file vs. corrupt/wrong-
+/// shape JSON) rather than degrading -- the degrade-to-defaults behaviour
+/// lives ONLY in [`load_settings`], the command wrapper, so this core stays
+/// testable without a `tauri::AppHandle` (11-01-PLAN.md Task 2). Kept `pub`
+/// for the same reason the Phase 5/10 merge cores are public: the
+/// integration tests in `tests/settings_persistence.rs` link this crate
+/// externally and cannot obtain an `AppHandle`.
+pub fn try_load_settings_from_dir(dir: &Path) -> Result<AppSettings, SettingsError> {
+    let path = dir.join(SETTINGS_FILE_NAME);
+    let raw = std::fs::read_to_string(&path).map_err(|e| SettingsError::ReadFailed {
+        reason: e.to_string(),
+    })?;
+    serde_json::from_str(&raw).map_err(|e| SettingsError::ParseFailed {
+        reason: e.to_string(),
+    })
+}
+
+/// Directory-taking counterpart to [`load_settings`]: absorbs EVERY failure
+/// from [`try_load_settings_from_dir`] into `AppSettings::default()`. `pub`
+/// for the same external-linkage reason as [`try_load_settings_from_dir`].
+pub fn load_settings_from_dir(dir: &Path) -> AppSettings {
+    try_load_settings_from_dir(dir).unwrap_or_default()
+}
+
+/// Serializes and writes `settings` to `dir/settings.json`, creating `dir`
+/// if it does not yet exist. UNLIKE the load side, a failure here DOES
+/// return a typed error (see [`save_settings`]'s doc comment for why).
+/// `pub` for the same external-linkage reason as [`load_settings_from_dir`].
+pub fn save_settings_to_dir(dir: &Path, settings: &AppSettings) -> Result<(), SettingsError> {
+    std::fs::create_dir_all(dir).map_err(|e| SettingsError::WriteFailed {
+        reason: e.to_string(),
+    })?;
+    let path = dir.join(SETTINGS_FILE_NAME);
+    let raw = serde_json::to_string(settings).map_err(|e| SettingsError::WriteFailed {
+        reason: e.to_string(),
+    })?;
+    std::fs::write(&path, raw).map_err(|e| SettingsError::WriteFailed {
+        reason: e.to_string(),
+    })
+}
+
 /// Loads persisted settings from the OS-managed app-data directory,
 /// absorbing EVERY failure (missing file -- e.g. first launch --, unreadable,
 /// corrupt/truncated JSON, or JSON of the wrong shape) into
@@ -105,53 +148,28 @@ impl SettingsError {
 /// `Result`: a brand-new user with no settings file is not in an error
 /// state, and this command MUST NEVER block, delay, or abort app startup,
 /// nor surface an error banner or dialog for a missing/unreadable file
-/// (Integration Point/risk, D11-04).
+/// (Integration Point/risk, D11-04). Thin app-data-dir resolution + a call
+/// into [`load_settings_from_dir`] -- the actual read/parse/degrade logic
+/// lives there so it stays testable without an `AppHandle`.
 #[tauri::command]
 pub fn load_settings(app: AppHandle) -> AppSettings {
-    let result: Result<AppSettings, SettingsError> = (|| {
-        let dir = app
-            .path()
-            .app_data_dir()
-            .map_err(|_| SettingsError::AppDataDirUnavailable)?;
-        let path = dir.join(SETTINGS_FILE_NAME);
-        let raw = std::fs::read_to_string(&path).map_err(|e| SettingsError::ReadFailed {
-            reason: e.to_string(),
-        })?;
-        serde_json::from_str(&raw).map_err(|e| SettingsError::ParseFailed {
-            reason: e.to_string(),
-        })
-    })();
-    result.unwrap_or_default()
+    match app.path().app_data_dir() {
+        Ok(dir) => load_settings_from_dir(&dir),
+        Err(_) => AppSettings::default(),
+    }
 }
 
 /// Persists `settings` to the OS-managed app-data directory, creating the
 /// directory tree if it does not yet exist. UNLIKE [`load_settings`], a
 /// failed save DOES return a typed error -- a failed save would otherwise
 /// silently discard the user's choice, which the app's Core Value (never
-/// lose or corrupt user state) forbids (D11-04).
+/// lose or corrupt user state) forbids (D11-04). Thin app-data-dir
+/// resolution + a call into [`save_settings_to_dir`].
 #[tauri::command]
 pub fn save_settings(app: AppHandle, settings: AppSettings) -> Result<(), ErrorDto> {
     let dir = app
         .path()
         .app_data_dir()
         .map_err(|_| SettingsError::AppDataDirUnavailable.to_dto("save_settings"))?;
-    std::fs::create_dir_all(&dir).map_err(|e| {
-        SettingsError::WriteFailed {
-            reason: e.to_string(),
-        }
-        .to_dto("save_settings")
-    })?;
-    let path = dir.join(SETTINGS_FILE_NAME);
-    let raw = serde_json::to_string(&settings).map_err(|e| {
-        SettingsError::WriteFailed {
-            reason: e.to_string(),
-        }
-        .to_dto("save_settings")
-    })?;
-    std::fs::write(&path, raw).map_err(|e| {
-        SettingsError::WriteFailed {
-            reason: e.to_string(),
-        }
-        .to_dto("save_settings")
-    })
+    save_settings_to_dir(&dir, &settings).map_err(|e| e.to_dto("save_settings"))
 }
