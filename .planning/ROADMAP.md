@@ -17,11 +17,11 @@
  (completed 2026-07-22)
 
 - [x] **Phase 5: Two-Archive Merge** - User can merge two archives via jwlCore with a dry-run preview and matching results to the Python app.
-- [ ] **Phase 6: Full Data Browsing** - User can view, browse, and select (single + bulk) across all 6 categories, with valid operations surfaced per selection.
-- [ ] **Phase 7: Full Editing** - User can edit colors, tags, order, favorites, cleaning/masking, and raw records across all categories.
-- [ ] **Phase 8: Import / Export Parity** - User can export/import any category in the Python app's exact wire format, with ID-gap recycling.
-- [ ] **Phase 9: Incremental Export** - User can export only what changed since a chosen point, using content-hash identity.
-- [ ] **Phase 10: N-Way Merge Fold** - User can merge more than two archives in a single ordered operation.
+- [x] **Phase 6: Full Data Browsing** - User can view, browse, and select (single + bulk) across all 6 categories, with valid operations surfaced per selection.
+- [x] **Phase 7: Full Editing** - User can edit colors, tags, order, favorites, cleaning/masking, and raw records across all categories.
+- [x] **Phase 8: Import / Export Parity** - User can export/import any category in the Python app's exact wire format, with ID-gap recycling.
+- [x] **Phase 9: Incremental Export** - User can export only what changed since a chosen point, using content-hash identity.
+- [x] **Phase 10: N-Way Merge Fold** - User can merge more than two archives in a single ordered operation.
 - [ ] **Phase 11: Platform Polish (Signing, Localization, Theme)** - Windows binaries are signed; user can switch language and theme.
 
 ## Phase Details
