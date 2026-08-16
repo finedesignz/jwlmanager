@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 11
 current_phase_name: Platform Polish (Signing, Localization, Theme)
-status: planned
-stopped_at: Completed 11-01-PLAN.md (settings/theme tracer) -- PLAT-04 satisfied; 11-02-PLAN.md (Windows signing) still to execute
-last_updated: "2026-08-16T16:11:08.091Z"
+status: in_progress
+stopped_at: Completed 11-02-PLAN.md (Windows signing wiring)
+last_updated: "2026-08-16T16:31:25.116Z"
 progress:
   total_phases: 11
-  completed_phases: 6
+  completed_phases: 7
   total_plans: 47
-  completed_plans: 42
+  completed_plans: 43
 ---
 
 # Project State — JWL Manager (Tauri)
@@ -24,16 +24,16 @@ progress:
 ## Current Position
 
 Phase: 11 (Platform Polish) — IN PROGRESS
-Plans: 11-01-PLAN.md (settings/theme tracer) EXECUTED — PLAT-04 satisfied. 11-02-PLAN.md (Windows signing wiring) drafted and cross-AI reviewed, execution not started.
+Plans: 11-01-PLAN.md (settings/theme tracer) EXECUTED — PLAT-04 satisfied. 11-02-PLAN.md (Windows signing wiring) EXECUTED — PLAT-02 wired, fail-closed, and gated (real signature verification remains a documented manual step, blocked on Azure credentials this environment cannot provision). PLAT-03 (i18n/localization) still needs a plan drafted (no 11-03-PLAN.md exists yet).
 **Phase:** 11 of 11 — Platform Polish (Signing, Localization, Theme)
-**Plan:** 1 of TBD executed (11-01 done; 11-02 + i18n plans remaining, per ROADMAP)
-**Status:** 11-01 executed and verified; 11-02 ready for execution
-**Progress:** [█████████░] 89%
+**Plan:** 2 of 2 drafted plans executed (11-01, 11-02 done; an i18n plan for PLAT-03 still needs to be drafted, per ROADMAP requirements not yet covered by any plan file)
+**Status:** 11-01 and 11-02 executed and verified; PLAT-03 (i18n) planning not yet started
+**Progress:** [█████████░] 91%
 
 ## Performance Metrics
 
 - Phases complete: 10/11
-- Requirements delivered: 44/47 (PLAT-02, PLAT-03, PLAT-04 remain, all in Phase 11)
+- Requirements delivered: 45/47 (PLAT-03 remains, in Phase 11)
 
 **Per-Plan Metrics:**
 
@@ -51,6 +51,7 @@ Plans: 11-01-PLAN.md (settings/theme tracer) EXECUTED — PLAT-04 satisfied. 11-
 | Phase 08 P03 | 1 session | 2 tasks | 18 files |
 | Phase 10 P01 | 55min | 3 tasks | 4 files |
 | Phase 11 P01 | 40min | 3 tasks | 18 files |
+| Phase 11 P02 | 50min | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -96,14 +97,15 @@ Plans: 11-01-PLAN.md (settings/theme tracer) EXECUTED — PLAT-04 satisfied. 11-
 - [Phase ?]: Fold order is real (D10-01): fold(A,B,C) != fold(A,C,B) by design, proven with a contested-identity fixture
 - [Phase ?]: run_fold_chain shared by dry-run and commit; single atomic promote after last step, media folded back every step (D10-04)
 - [Phase ?]: 11-01: SettingsProvider lifted above App in main.tsx (own ErrorBanner for save failures); updateSettings fires save_settings from inside the setState functional updater to prove concurrent theme+language writes never drop a field; settings.rs errors get their own SettingsError->ErrorDto mapping, never reusing ArchiveError
+- [Phase ?]: 11-02: Windows signing wired via bundle.windows.signCommand, gated on ENABLE_MSI_SIGNING == 'true' in a new release-app.yml (app-v*.*.* tag prefix, distinct from the Python app's bare v*); public GitHub Release publish gated on the identical condition so an unsigned build can never be published; sign.ps1 fails closed (proven by verify-fail-closed.ps1); guard test signing_wiring.rs proven red/green against a live demonstration; actual signature verification remains manual, blocked on Azure credentials not provisioned in this repo
 
 ### Todos
 
 - [DONE] Execute 11-01-PLAN.md (settings/theme tracer: `load_settings`/`save_settings`/`app_version` commands, SettingsProvider, ThemeContext, light theme, SettingsDialog). See 11-01-SUMMARY.md.
 - Manually verify the live Tauri app (open settings, flip to light, confirm instant repaint with no reload; restart, confirm persistence; corrupt the settings file, confirm silent degradation) — not exercised in this headless execution environment; automated tests cover the same behaviors at the Rust/React layers.
-- Execute 11-02-PLAN.md (Windows Authenticode signing wiring via Azure Trusted Signing — inert/fail-closed until credentials are provisioned).
-- Provision Azure Trusted Signing service-principal credentials (three secrets + one enable variable) for this repo as an operational step before the signed-release path can go live (blocks 11-02's signed/published path only, not the plan's execution or CI greenness).
-- Plan and execute remaining Phase 11 plans for PLAT-03 (i18n/localization — English complete, other locales deferred per 11-CONTEXT.md).
+- [DONE] Execute 11-02-PLAN.md (Windows Authenticode signing wiring via Azure Trusted Signing — inert/fail-closed until credentials are provisioned). See 11-02-SUMMARY.md.
+- Provision Azure Trusted Signing service-principal credentials (three secrets + one enable variable) for this repo as an operational step before the signed-release path can go live (blocks the signed/published path only, not CI greenness, which already stays green today with the gate off). Then run the deliberate fail-closed check in docs/signing.md once before trusting any signed build.
+- Plan and execute a Phase 11 plan for PLAT-03 (i18n/localization — English complete, other locales deferred per 11-CONTEXT.md). No 11-03-PLAN.md exists yet; this is the one remaining Phase 11 requirement with no plan file.
 
 ### Blockers
 
@@ -113,6 +115,6 @@ Plans: 11-01-PLAN.md (settings/theme tracer) EXECUTED — PLAT-04 satisfied. 11-
 
 **Resume file:** None
 
-**Last session:** 2026-08-16T16:11:08.064Z
-**Stopped at:** Completed 11-01-PLAN.md (settings/theme tracer) -- PLAT-04 satisfied; 11-02-PLAN.md (Windows signing) still to execute
-**Next action:** Execute 11-01-PLAN.md, then 11-02-PLAN.md (both wave 1, independent), then proceed to remaining Phase 11 i18n plans.
+**Last session:** 2026-08-16T16:31:25.092Z
+**Stopped at:** Completed 11-02-PLAN.md (Windows signing wiring)
+**Next action:** Draft and execute a Phase 11 plan for PLAT-03 (i18n/localization); separately, provision Azure Trusted Signing credentials and run the deliberate fail-closed check per docs/signing.md when ready to publish signed releases.

@@ -241,10 +241,10 @@ Plans:
   2. User can switch UI language and all user-facing strings render translated
   3. User can switch theme (light/dark) and the change applies immediately across the app
 
-**Plans**: 1/2 plans executed
+**Plans**: 2/2 plans executed
 
 - [x] 11-01-PLAN.md
-- [ ] 11-02-PLAN.md
+- [x] 11-02-PLAN.md
 
 **UI hint**: yes
 
@@ -262,7 +262,7 @@ Plans:
 | 8. Import / Export Parity | 6/6 | In Progress|  |
 | 9. Incremental Export | 1/4 | In Progress|  |
 | 10. N-Way Merge Fold | 1/3 | In Progress|  |
-| 11. Platform Polish | 1/2 | In Progress|  |
+| 11. Platform Polish | 2/2 | In Progress|  |
 
 ## Coverage
 
