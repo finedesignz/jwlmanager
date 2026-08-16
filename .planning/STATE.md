@@ -2,16 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 11
-current_phase_name: Platform Polish (Signing, Localization, Theme)
-status: in_progress
-stopped_at: Completed 11-02-PLAN.md (Windows signing wiring)
-last_updated: "2026-08-16T16:31:25.116Z"
+status: verifying
+last_updated: "2026-08-16T17:06:22.844Z"
 progress:
   total_phases: 11
-  completed_phases: 7
-  total_plans: 47
-  completed_plans: 43
+  completed_phases: 6
+  total_plans: 49
+  completed_plans: 44
+  percent: 55
 ---
 
 # Project State — JWL Manager (Tauri)
@@ -24,16 +22,16 @@ progress:
 ## Current Position
 
 Phase: 11 (Platform Polish) — IN PROGRESS
-Plans: 11-01-PLAN.md (settings/theme tracer) EXECUTED — PLAT-04 satisfied. 11-02-PLAN.md (Windows signing wiring) EXECUTED — PLAT-02 wired, fail-closed, and gated (real signature verification remains a documented manual step, blocked on Azure credentials this environment cannot provision). PLAT-03 (i18n/localization) still needs a plan drafted (no 11-03-PLAN.md exists yet).
+Plans: 11-01-PLAN.md (settings/theme tracer) EXECUTED — PLAT-04 satisfied. 11-02-PLAN.md (Windows signing wiring) EXECUTED — PLAT-02 wired, fail-closed, and gated (real signature verification remains a documented manual step, blocked on Azure credentials this environment cannot provision). 11-03-PLAN.md (i18n architecture: dependency-free catalog + I18nContext, App.tsx + SettingsDialog.tsx retrofit) EXECUTED — PLAT-03's architecture half satisfied. 11-04-PLAN.md (i18n retrofit of the remaining 13 components + lib/errors.ts) drafted, still in review/blocked per its own re-review note as of this update.
 **Phase:** 11 of 11 — Platform Polish (Signing, Localization, Theme)
-**Plan:** 2 of 2 drafted plans executed (11-01, 11-02 done; an i18n plan for PLAT-03 still needs to be drafted, per ROADMAP requirements not yet covered by any plan file)
-**Status:** 11-01 and 11-02 executed and verified; PLAT-03 (i18n) planning not yet started
-**Progress:** [█████████░] 91%
+**Plan:** 3 of 4 drafted plans executed (11-01, 11-02, 11-03 done; 11-04 drafted, in review)
+**Status:** Phase in progress — 11-04 remaining
+**Progress:** [██████████] 98%
 
 ## Performance Metrics
 
 - Phases complete: 10/11
-- Requirements delivered: 45/47 (PLAT-03 remains, in Phase 11)
+- Requirements delivered: 46/47 (PLAT-03 delivered this plan; Phase 11 verification pending overall phase close)
 
 **Per-Plan Metrics:**
 
@@ -52,6 +50,7 @@ Plans: 11-01-PLAN.md (settings/theme tracer) EXECUTED — PLAT-04 satisfied. 11-
 | Phase 10 P01 | 55min | 3 tasks | 4 files |
 | Phase 11 P01 | 40min | 3 tasks | 18 files |
 | Phase 11 P02 | 50min | 3 tasks | 7 files |
+| Phase 11 P03 | ~25min | 2 tasks | 18 files |
 
 ## Accumulated Context
 
@@ -98,6 +97,7 @@ Plans: 11-01-PLAN.md (settings/theme tracer) EXECUTED — PLAT-04 satisfied. 11-
 - [Phase ?]: run_fold_chain shared by dry-run and commit; single atomic promote after last step, media folded back every step (D10-04)
 - [Phase ?]: 11-01: SettingsProvider lifted above App in main.tsx (own ErrorBanner for save failures); updateSettings fires save_settings from inside the setState functional updater to prove concurrent theme+language writes never drop a field; settings.rs errors get their own SettingsError->ErrorDto mapping, never reusing ArchiveError
 - [Phase ?]: 11-02: Windows signing wired via bundle.windows.signCommand, gated on ENABLE_MSI_SIGNING == 'true' in a new release-app.yml (app-v*.*.* tag prefix, distinct from the Python app's bare v*); public GitHub Release publish gated on the identical condition so an unsigned build can never be published; sign.ps1 fails closed (proven by verify-fail-closed.ps1); guard test signing_wiring.rs proven red/green against a live demonstration; actual signature verification remains manual, blocked on Azure credentials not provisioned in this repo
+- [Phase ?]: PLAT-03: dependency-free TypeScript catalog + React context (I18nProvider/useI18n), catalogs[locale]?.[key] ?? en[key] fallback; I18nProvider nests inside ThemeProvider, controlled by SettingsProvider's existing language/setLanguage
 
 ### Todos
 
@@ -115,6 +115,6 @@ Plans: 11-01-PLAN.md (settings/theme tracer) EXECUTED — PLAT-04 satisfied. 11-
 
 **Resume file:** None
 
-**Last session:** 2026-08-16T16:31:25.092Z
-**Stopped at:** Completed 11-02-PLAN.md (Windows signing wiring)
+**Last session:** 2026-08-16T17:06:22.834Z
+**Stopped at:** Completed 11-03-PLAN.md
 **Next action:** Draft and execute a Phase 11 plan for PLAT-03 (i18n/localization); separately, provision Azure Trusted Signing credentials and run the deliberate fail-closed check per docs/signing.md when ready to publish signed releases.

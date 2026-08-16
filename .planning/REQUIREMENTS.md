@@ -81,7 +81,7 @@
 
 - [x] **PLAT-01**: App builds and runs on Windows (x64 + arm64), macOS, and Linux
 - [x] **PLAT-02**: Windows binaries are Authenticode-signed via Azure Trusted Signing during bundling
-- [ ] **PLAT-03**: User can switch UI language; all user-facing strings are localized
+- [x] **PLAT-03**: User can switch UI language; all user-facing strings are localized
 - [x] **PLAT-04**: User can switch theme
 
 ---
