@@ -120,24 +120,60 @@ pub fn try_load_settings_from_dir(dir: &Path) -> Result<AppSettings, SettingsErr
 /// Directory-taking counterpart to [`load_settings`]: absorbs EVERY failure
 /// from [`try_load_settings_from_dir`] into `AppSettings::default()`. `pub`
 /// for the same external-linkage reason as [`try_load_settings_from_dir`].
+///
+/// A parse failure (corrupt/truncated `settings.json`) is not silently
+/// discarded (F2 Part B): the unreadable file is renamed aside to
+/// `settings.json.corrupt` before defaults are returned, preserving the
+/// user's data for diagnosis while still letting the app start normally.
+/// A missing file (first launch) or any other read failure is NOT renamed --
+/// there is nothing to preserve. The rename itself is best-effort: if it
+/// fails (e.g. a stale `.corrupt` file already occupies that name), the
+/// original corrupt file is left in place rather than losing it.
 pub fn load_settings_from_dir(dir: &Path) -> AppSettings {
-    try_load_settings_from_dir(dir).unwrap_or_default()
+    match try_load_settings_from_dir(dir) {
+        Ok(settings) => settings,
+        Err(SettingsError::ParseFailed { .. }) => {
+            let path = dir.join(SETTINGS_FILE_NAME);
+            let corrupt_path = dir.join(format!("{SETTINGS_FILE_NAME}.corrupt"));
+            let _ = std::fs::rename(&path, &corrupt_path);
+            AppSettings::default()
+        }
+        Err(_) => AppSettings::default(),
+    }
 }
 
 /// Serializes and writes `settings` to `dir/settings.json`, creating `dir`
 /// if it does not yet exist. UNLIKE the load side, a failure here DOES
 /// return a typed error (see [`save_settings`]'s doc comment for why).
 /// `pub` for the same external-linkage reason as [`load_settings_from_dir`].
+///
+/// Writes via the standard write-temp-then-rename pattern (F2 Part A): the
+/// serialized settings land in a `.tmp` file in the SAME directory first
+/// (so the rename is same-filesystem and therefore atomic), then that temp
+/// file is renamed over `settings.json`. This means a crash or power-loss
+/// mid-write can never leave a truncated/corrupt `settings.json` -- the
+/// rename either lands the whole new file or the old file is untouched. On
+/// any failure the temp file is removed rather than left behind.
 pub fn save_settings_to_dir(dir: &Path, settings: &AppSettings) -> Result<(), SettingsError> {
     std::fs::create_dir_all(dir).map_err(|e| SettingsError::WriteFailed {
         reason: e.to_string(),
     })?;
     let path = dir.join(SETTINGS_FILE_NAME);
+    let tmp_path = dir.join(format!("{SETTINGS_FILE_NAME}.tmp"));
     let raw = serde_json::to_string(settings).map_err(|e| SettingsError::WriteFailed {
         reason: e.to_string(),
     })?;
-    std::fs::write(&path, raw).map_err(|e| SettingsError::WriteFailed {
-        reason: e.to_string(),
+    if let Err(e) = std::fs::write(&tmp_path, raw) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(SettingsError::WriteFailed {
+            reason: e.to_string(),
+        });
+    }
+    std::fs::rename(&tmp_path, &path).map_err(|e| {
+        let _ = std::fs::remove_file(&tmp_path);
+        SettingsError::WriteFailed {
+            reason: e.to_string(),
+        }
     })
 }
 

@@ -124,6 +124,51 @@ fn settings_unwritable_target_returns_typed_error() {
     );
 }
 
+/// A corrupt/truncated settings file is preserved aside (renamed to
+/// `settings.json.corrupt`) rather than destroyed, and defaults are still
+/// returned so the app can still start (F2 Part B).
+#[test]
+fn settings_corrupt_file_is_preserved_aside() {
+    let dir = TempDir::new().expect("tempdir");
+    let settings_path = dir.path().join(SETTINGS_FILE_NAME);
+    fs::write(&settings_path, "{ not valid json !!!").expect("write invalid json");
+
+    let loaded = load_settings_from_dir(dir.path());
+
+    assert_eq!(loaded, AppSettings::default());
+    assert!(
+        !settings_path.exists(),
+        "corrupt settings.json must be moved aside, not left in place"
+    );
+    let corrupt_path = dir.path().join(format!("{SETTINGS_FILE_NAME}.corrupt"));
+    assert!(
+        corrupt_path.exists(),
+        "corrupt settings file must be preserved aside for diagnosis"
+    );
+    let preserved = fs::read_to_string(&corrupt_path).expect("read preserved corrupt file");
+    assert_eq!(preserved, "{ not valid json !!!");
+}
+
+/// After a successful save, the directory contains only the settings file --
+/// no stray temp file left behind by the write-temp-then-rename pattern
+/// (F2 Part A).
+#[test]
+fn settings_save_leaves_no_stray_temp_file() {
+    let dir = TempDir::new().expect("tempdir");
+
+    save_settings_to_dir(dir.path(), &AppSettings::default()).expect("save must succeed");
+
+    let entries: Vec<_> = fs::read_dir(dir.path())
+        .expect("read dir")
+        .map(|e| e.expect("dir entry").file_name())
+        .collect();
+    assert_eq!(
+        entries,
+        vec![std::ffi::OsString::from(SETTINGS_FILE_NAME)],
+        "directory must contain only settings.json after a successful save, got {entries:?}"
+    );
+}
+
 /// Structural proof of T-11-02 (settings domain -> archive domain boundary):
 /// the settings module must name no archive/session type or field.
 /// Forbidden identifiers are listed ONLY here, never in settings.rs itself,
